@@ -6,22 +6,67 @@ import { success, isJSONMode, printJSON, isTTY } from "../lib/format.js";
 export function registerDestroy(program) {
     program
         .command("destroy")
-        .argument("<id>", "Service ID to destroy")
+        .argument("[id]", "Service ID to destroy")
         .description("Destroy a service (irreversible)")
         .action(async (id) => {
         const projectId = resolveProjectId(program.opts().project);
         const yes = program.opts().yes;
-        // Confirm
-        if (!yes) {
-            if (!isTTY()) {
-                throw new Error("Use -y to confirm destruction in non-interactive mode");
+        if (!id) {
+            if (!isTTY())
+                throw new Error("Provide a service ID or run interactively");
+            const data = await api.get(`/api/projects/${projectId}/services`);
+            const options = [
+                ...(data.apps || []).map((a) => ({
+                    value: `app:${a.id}`,
+                    label: a.name || a.id,
+                    hint: `app · ${a.status}`,
+                })),
+                ...(data.addons || []).map((a) => ({
+                    value: `addon:${a.id}`,
+                    label: a.name || a.type,
+                    hint: `${a.type} · ${a.status}`,
+                })),
+            ];
+            if (options.length === 0)
+                throw new Error("No services in project");
+            const selected = await p.select({
+                message: "Select service to destroy",
+                options,
+            });
+            if (p.isCancel(selected))
+                process.exit(5);
+            const [type, selectedId] = selected.split(":");
+            id = selectedId;
+            if (!yes) {
+                const name = options.find((o) => o.value === selected)?.label || id;
+                const confirm = await p.confirm({
+                    message: `Destroy ${chalk.bold(name)}? This is irreversible.`,
+                });
+                if (p.isCancel(confirm) || !confirm)
+                    process.exit(5);
             }
+            if (type === "addon") {
+                await api.delete(`/api/projects/${projectId}/addons/${id}`);
+            }
+            else {
+                await api.delete(`/api/apps/${id}`);
+            }
+            if (isJSONMode()) {
+                printJSON({ id, status: "destroyed" });
+            }
+            else {
+                success(`Service destroyed`);
+            }
+            return;
+        }
+        if (!yes) {
+            if (!isTTY())
+                throw new Error("Use -y to confirm destruction in non-interactive mode");
             const confirm = await p.confirm({
                 message: `Destroy service ${chalk.bold(id)}? This is irreversible.`,
             });
-            if (p.isCancel(confirm) || !confirm) {
+            if (p.isCancel(confirm) || !confirm)
                 process.exit(5);
-            }
         }
         // Try as app first, then as addon
         try {
@@ -30,7 +75,7 @@ export function registerDestroy(program) {
                 printJSON({ id, status: "destroyed", type: "app" });
             }
             else {
-                success(`Service ${id} destroyed`);
+                success(`Service destroyed`);
             }
             return;
         }
@@ -38,13 +83,12 @@ export function registerDestroy(program) {
             if (err.status !== 404)
                 throw err;
         }
-        // Try as addon
         await api.delete(`/api/projects/${projectId}/addons/${id}`);
         if (isJSONMode()) {
             printJSON({ id, status: "destroyed", type: "addon" });
         }
         else {
-            success(`Service ${id} destroyed`);
+            success(`Service destroyed`);
         }
     });
 }

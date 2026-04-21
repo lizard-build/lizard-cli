@@ -1,8 +1,9 @@
 import chalk from "chalk";
+import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { streamSSE, api } from "../lib/api.js";
 import { resolveProjectId } from "../lib/config.js";
-import { info, error } from "../lib/format.js";
+import { info, error, isTTY } from "../lib/format.js";
 
 export function registerLogs(program: Command) {
   program
@@ -19,10 +20,32 @@ export function registerLogs(program: Command) {
         return;
       }
 
-      if (opts.service) {
+      let serviceId = opts.service;
+
+      if (!serviceId && isTTY()) {
+        // Offer to pick a specific service or stream all
+        const data = await api.get<{ apps: any[] }>(`/api/projects/${projectId}/services`);
+        const apps = data.apps || [];
+
+        if (apps.length > 1) {
+          const choices = [
+            { value: "all", label: "All services", hint: "stream combined logs" },
+            ...apps.map((a: any) => ({
+              value: a.id,
+              label: a.name || a.id,
+              hint: a.status,
+            })),
+          ];
+          const selected = await p.select({ message: "Show logs for", options: choices });
+          if (p.isCancel(selected)) process.exit(5);
+          if (selected !== "all") serviceId = selected as string;
+        }
+      }
+
+      if (serviceId) {
         // Stream logs for a specific app
         info(chalk.dim("Streaming logs... (Ctrl+C to stop)\n"));
-        await streamSSE(`/api/apps/${opts.service}/logs`, (event, data) => {
+        await streamSSE(`/api/apps/${serviceId}/logs`, (event, data) => {
           if (event === "error") {
             error(data);
             return false;

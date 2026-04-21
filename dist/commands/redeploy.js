@@ -1,14 +1,41 @@
 import chalk from "chalk";
 import ora from "ora";
+import * as p from "@clack/prompts";
 import { api, streamSSE } from "../lib/api.js";
-import { success, info, error, isJSONMode, printJSON } from "../lib/format.js";
+import { resolveProjectId } from "../lib/config.js";
+import { success, info, error, isJSONMode, printJSON, isTTY } from "../lib/format.js";
 export function registerRedeploy(program) {
     program
         .command("redeploy")
-        .argument("<id>", "Service ID to redeploy")
-        .description("Redeploy a service from latest build with current secrets")
+        .argument("[id]", "App ID to redeploy")
+        .description("Redeploy an app from latest build with current secrets")
         .option("--detach", "Run in background")
         .action(async (id, opts) => {
+        if (!id) {
+            if (!isTTY())
+                throw new Error("Provide an app ID or run interactively");
+            const projectId = resolveProjectId(program.opts().project);
+            const data = await api.get(`/api/projects/${projectId}/services`);
+            const apps = data.apps || [];
+            if (apps.length === 0)
+                throw new Error("No apps in project");
+            if (apps.length === 1) {
+                id = apps[0].id;
+            }
+            else {
+                const selected = await p.select({
+                    message: "Select app to redeploy",
+                    options: apps.map((a) => ({
+                        value: a.id,
+                        label: a.name || a.id,
+                        hint: a.status,
+                    })),
+                });
+                if (p.isCancel(selected))
+                    process.exit(5);
+                id = selected;
+            }
+        }
         const spinner = ora("Starting redeploy...").start();
         await api.post(`/api/apps/${id}/redeploy`);
         spinner.stop();
@@ -22,7 +49,6 @@ export function registerRedeploy(program) {
             }
             return;
         }
-        // Stream build logs if not detached
         info("Redeploying...");
         // Poll for build
         let buildId = null;
