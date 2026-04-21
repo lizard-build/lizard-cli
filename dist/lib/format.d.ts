@@ -1,0 +1,11 @@
+export declare function isTTY(): boolean;
+export declare function setJSONMode(on: boolean): void;
+export declare function isJSONMode(): boolean;
+export declare function printJSON(data: unknown): void;
+export declare function success(msg: string): void;
+export declare function error(msg: string): void;
+export declare function warn(msg: string): void;
+export declare function info(msg: string): void;
+export declare function table(headers: string[], rows: string[][]): void;
+export declare function statusColor(status: string): string;
+export declare function timeAgo(ts: number | string): string;

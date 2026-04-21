@@ -1,0 +1,51 @@
+import chalk from "chalk";
+import * as p from "@clack/prompts";
+import { api } from "../lib/api.js";
+import { resolveProjectId } from "../lib/config.js";
+import { success, isJSONMode, printJSON, isTTY } from "../lib/format.js";
+export function registerDestroy(program) {
+    program
+        .command("destroy")
+        .argument("<id>", "Service ID to destroy")
+        .description("Destroy a service (irreversible)")
+        .action(async (id) => {
+        const projectId = resolveProjectId(program.opts().project);
+        const yes = program.opts().yes;
+        // Confirm
+        if (!yes) {
+            if (!isTTY()) {
+                throw new Error("Use -y to confirm destruction in non-interactive mode");
+            }
+            const confirm = await p.confirm({
+                message: `Destroy service ${chalk.bold(id)}? This is irreversible.`,
+            });
+            if (p.isCancel(confirm) || !confirm) {
+                process.exit(5);
+            }
+        }
+        // Try as app first, then as addon
+        try {
+            await api.delete(`/api/apps/${id}`);
+            if (isJSONMode()) {
+                printJSON({ id, status: "destroyed", type: "app" });
+            }
+            else {
+                success(`Service ${id} destroyed`);
+            }
+            return;
+        }
+        catch (err) {
+            if (err.status !== 404)
+                throw err;
+        }
+        // Try as addon
+        await api.delete(`/api/projects/${projectId}/addons/${id}`);
+        if (isJSONMode()) {
+            printJSON({ id, status: "destroyed", type: "addon" });
+        }
+        else {
+            success(`Service ${id} destroyed`);
+        }
+    });
+}
+//# sourceMappingURL=destroy.js.map
