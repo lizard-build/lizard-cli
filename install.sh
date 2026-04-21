@@ -37,8 +37,8 @@ if ! command -v npm >/dev/null 2>&1; then
   exit 1
 fi
 
-echo -e "${DIM}Installing @lizard/cli...${RESET}"
-npm install -g @lizard/cli --quiet
+echo -e "${DIM}Installing @lizard-build/cli...${RESET}"
+npm install -g @lizard-build/cli --quiet
 
 # ── Verify ───────────────────────────────────────────────────────────────────
 
