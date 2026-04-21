@@ -24,13 +24,15 @@ interface App {
 }
 
 export function registerDeploy(program: Command) {
-  program
+  const deploy = program
     .command("deploy")
     .description("Deploy the current project")
     .option("--detach", "Run in background without streaming logs")
     .option("--region <region>", "Region for deployment")
     .action(async (opts) => {
-      const projectId = resolveProjectId(program.opts().project);
+      // Deploy sends cwd's code, so ignore the global default project —
+      // require an explicit link or --project to avoid accidental cross-project deploys.
+      const projectId = resolveProjectId(program.opts().project, { localOnly: true });
 
       // Check if there's already an app, if so redeploy
       const services = await api.get<{ apps: App[] }>(
@@ -66,32 +68,18 @@ export function registerDeploy(program: Command) {
       );
     });
 
-  // `deploy status <id>` subcommand — must run after the deploy command is registered
-  const deployCmd = program.commands.find((c) => c.name() === "deploy")!;
-
-  deployCmd
+  deploy
     .command("status")
     .argument("<id>", "App or deploy ID")
     .description("Show deployment status")
     .action(async (id) => {
       const app = await api.get<App>(`/api/apps/${id}`);
-      if (isJSONMode()) { printJSON(app); return; }
-      console.log(`${chalk.bold(app.name)}  ${statusColor(app.status)}`);
-      if (app.domain) console.log(`  URL: ${chalk.cyan(`https://${app.domain}`)}`);
-      if (app.builds?.length) {
-        const latest = app.builds[0];
-        console.log(`  Latest build: ${statusColor(latest.status)}`);
-      }
-    });
 
-  // Hidden backward-compat alias
-  program
-    .command("deploy-status", { hidden: true })
-    .argument("<id>", "App or deploy ID")
-    .description("[deprecated] Use `deploy status`")
-    .action(async (id) => {
-      const app = await api.get<App>(`/api/apps/${id}`);
-      if (isJSONMode()) { printJSON(app); return; }
+      if (isJSONMode()) {
+        printJSON(app);
+        return;
+      }
+
       console.log(`${chalk.bold(app.name)}  ${statusColor(app.status)}`);
       if (app.domain) console.log(`  URL: ${chalk.cyan(`https://${app.domain}`)}`);
       if (app.builds?.length) {

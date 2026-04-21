@@ -15,6 +15,8 @@ export interface ProjectConfig {
 
 export interface GlobalSettings {
   defaultWorkspace?: string;
+  defaultProject?: string;
+  defaultProjectName?: string;
 }
 
 /** Find project config by walking up from cwd */
@@ -72,14 +74,33 @@ export function saveGlobalSettings(settings: GlobalSettings) {
 }
 
 /**
- * Resolve projectId from: --project flag → .lizard/config.json → error
+ * Resolve projectId. Priority:
+ *   1. --project flag
+ *   2. .lizard/config.json (directory link)
+ *   3. ~/.lizard/settings.json → defaultProject (unless localOnly)
+ *   4. error
+ *
+ * `localOnly: true` forbids the global fallback — used by destructive commands
+ * like `deploy` that act on cwd and must not silently target a different project.
  */
-export function resolveProjectId(flagValue?: string): string {
+export function resolveProjectId(
+  flagValue?: string,
+  opts?: { localOnly?: boolean },
+): string {
   if (flagValue) return flagValue;
   const config = findProjectConfig();
   if (config?.projectId) return config.projectId;
+  if (!opts?.localOnly) {
+    const global = loadGlobalSettings();
+    if (global.defaultProject) return global.defaultProject;
+  }
+  if (opts?.localOnly) {
+    throw new Error(
+      "This command requires a project linked to the current directory. Run `lizard init` or `lizard link`, or pass --project <id>.",
+    );
+  }
   throw new Error(
-    "No project linked. Run `lizard init` or `lizard link` first, or use --project <id>.",
+    "No project linked. Run `lizard init`, `lizard link`, or `lizard project use <name>`, or pass --project <id>.",
   );
 }
 

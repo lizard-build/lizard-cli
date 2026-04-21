@@ -47,7 +47,7 @@ export function registerRedeploy(program: Command) {
           printJSON({ id, status: "deploying" });
         } else {
           success("Redeploy started");
-          info(chalk.dim(`  Check status: lizard deploy-status ${id}`));
+          info(chalk.dim(`  Check status: lizard deploy status ${id}`));
         }
         return;
       }
