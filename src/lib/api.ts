@@ -1,4 +1,6 @@
 import { getToken } from "./auth.js";
+import * as https from "node:https";
+import * as http from "node:http";
 
 const DEFAULT_BASE_URL = "https://lizard.build";
 const USER_AGENT = "lizard-cli/0.1";
@@ -80,55 +82,68 @@ export const api = {
 };
 
 /** Stream SSE and call handler for each data line. Return false to stop. */
-export async function streamSSE(
+export function streamSSE(
   path: string,
   handler: (event: string, data: string) => boolean | void,
 ): Promise<void> {
-  const url = baseURL + path;
-  const token = _accessToken || getToken();
-  const headers: Record<string, string> = {
-    "User-Agent": USER_AGENT,
-    Accept: "text/event-stream",
-  };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return new Promise((resolve, reject) => {
+    const url = new URL(baseURL + path);
+    const token = _accessToken || getToken();
+    const reqHeaders: Record<string, string> = {
+      "User-Agent": USER_AGENT,
+      Accept: "text/event-stream",
+    };
+    if (token) reqHeaders["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(url, { headers });
-  if (!res.ok) {
-    throw new APIError(res.status, `SSE failed: ${res.statusText}`);
-  }
-  if (!res.body) return;
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let currentEvent = "";
-  let currentData = "";
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      const trimmed = line.replace(/\r$/, "");
-      if (trimmed === "") {
-        if (currentData) {
-          const cont = handler(currentEvent, currentData);
-          if (cont === false) {
-            reader.cancel();
-            return;
-          }
+    const transport = url.protocol === "https:" ? https : http;
+    const req = transport.request(
+      { hostname: url.hostname, port: url.port || (url.protocol === "https:" ? 443 : 80),
+        path: url.pathname + url.search, method: "GET", headers: reqHeaders },
+      (res) => {
+        if (res.statusCode && res.statusCode >= 400) {
+          let body = "";
+          res.on("data", (c: Buffer) => body += c.toString());
+          res.on("end", () => reject(new APIError(res.statusCode!, `SSE failed: ${body}`)));
+          return;
         }
-        currentEvent = "";
-        currentData = "";
-      } else if (trimmed.startsWith("event:")) {
-        currentEvent = trimmed.slice(6).trim();
-      } else if (trimmed.startsWith("data:")) {
-        currentData = trimmed.slice(5).trimStart();
-      }
-    }
-  }
+
+        let buffer = "";
+        let currentEvent = "";
+        let currentData = "";
+
+        res.setEncoding("utf8");
+        res.on("data", (chunk: string) => {
+          buffer += chunk;
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            const trimmed = line.replace(/\r$/, "");
+            if (trimmed === "") {
+              if (currentData) {
+                const cont = handler(currentEvent, currentData);
+                if (cont === false) {
+                  req.destroy();
+                  resolve();
+                  return;
+                }
+              }
+              currentEvent = "";
+              currentData = "";
+            } else if (trimmed.startsWith("event:")) {
+              currentEvent = trimmed.slice(6).trim();
+            } else if (trimmed.startsWith("data:")) {
+              currentData = trimmed.slice(5).trimStart();
+            }
+          }
+        });
+
+        res.on("end", resolve);
+        res.on("error", reject);
+      },
+    );
+
+    req.on("error", reject);
+    req.end();
+  });
 }
