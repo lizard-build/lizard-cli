@@ -1,0 +1,43 @@
+import { execSync } from "node:child_process";
+import { Command } from "commander";
+import { api } from "../lib/api.js";
+import { resolveProjectId } from "../lib/config.js";
+
+interface Secret {
+  key: string;
+  value: string;
+}
+
+export function registerRun(program: Command) {
+  program
+    .command("run")
+    .argument("<command...>", "Command to run with project env vars")
+    .description("Run a command with project secrets as env vars")
+    .allowUnknownOption()
+    .action(async (args: string[]) => {
+      const projectId = resolveProjectId(program.opts().project);
+
+      // Fetch secrets
+      const secrets = await api.get<Secret[]>(
+        `/api/projects/${projectId}/secrets`,
+      );
+
+      // Build env
+      const env: Record<string, string> = { ...process.env as Record<string, string> };
+      for (const s of secrets) {
+        env[s.key] = s.value;
+      }
+
+      // Run command
+      const cmd = args.join(" ");
+      try {
+        execSync(cmd, {
+          env,
+          stdio: "inherit",
+          shell: process.env.SHELL || "/bin/sh",
+        });
+      } catch (err: any) {
+        process.exit(err.status || 1);
+      }
+    });
+}

@@ -1,0 +1,35 @@
+{
+  "name": "@lizard/cli",
+  "version": "0.1.0",
+  "description": "Lizard CLI — deploy and manage apps on Lizard",
+  "type": "module",
+  "bin": {
+    "lizard": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "cli",
+    "deploy",
+    "paas",
+    "lizard"
+  ],
+  "author": "Lizard Build",
+  "license": "MIT",
+  "dependencies": {
+    "@clack/prompts": "^1.2.0",
+    "chalk": "^5.6.2",
+    "commander": "^14.0.3",
+    "conf": "^15.1.0",
+    "open": "^10.2.0",
+    "ora": "^9.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}
