@@ -2,8 +2,8 @@
 
 import { Command } from "commander";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
-import { setTokenOverride } from "./lib/auth.js";
-import { setBaseURL } from "./lib/api.js";
+import { setTokenOverride, requireAuth, isLoggedIn } from "./lib/auth.js";
+import { setBaseURL, setAccessToken } from "./lib/api.js";
 
 // Commands
 import { registerLogin } from "./commands/login.js";
@@ -45,7 +45,7 @@ program
   .option("--token <token>", "API token")
   .option("--no-color", "Disable colors")
   .option("--verbose", "Verbose output")
-  .hook("preAction", (thisCommand) => {
+  .hook("preAction", async (thisCommand, actionCommand) => {
     const opts = thisCommand.opts();
 
     // JSON mode: explicit flag or non-TTY stdout
@@ -62,6 +62,14 @@ program
     if (process.env.LIZARD_API_URL) {
       setBaseURL(process.env.LIZARD_API_URL);
     }
+
+    // Commands that don't need auth
+    const noAuth = new Set(["login", "logout", "version", "completion", "update", "help"]);
+    if (noAuth.has(actionCommand.name())) return;
+
+    // Require auth — auto-triggers login flow if not logged in
+    const creds = await requireAuth();
+    setAccessToken(creds.accessToken);
   });
 
 // Register all commands

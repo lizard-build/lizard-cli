@@ -4,13 +4,11 @@ const DEFAULT_BASE_URL = "https://lizard.build";
 const USER_AGENT = "lizard-cli/0.1";
 
 let baseURL = process.env.LIZARD_API_URL || DEFAULT_BASE_URL;
+let _accessToken: string | null = null;
 
-export function setBaseURL(url: string) {
-  baseURL = url;
-}
-export function getBaseURL() {
-  return baseURL;
-}
+export function setBaseURL(url: string) { baseURL = url; }
+export function getBaseURL() { return baseURL; }
+export function setAccessToken(token: string) { _accessToken = token; }
 
 export class APIError extends Error {
   status: number;
@@ -36,7 +34,7 @@ async function request<T = any>(
   body?: unknown,
 ): Promise<T> {
   const url = baseURL + path;
-  const token = getToken();
+  const token = _accessToken || getToken();
 
   const headers: Record<string, string> = {
     "User-Agent": USER_AGENT,
@@ -87,7 +85,7 @@ export async function streamSSE(
   handler: (event: string, data: string) => boolean | void,
 ): Promise<void> {
   const url = baseURL + path;
-  const token = getToken();
+  const token = _accessToken || getToken();
   const headers: Record<string, string> = {
     "User-Agent": USER_AGENT,
     Accept: "text/event-stream",
