@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
 import { setTokenOverride, requireAuth } from "./lib/auth.js";
 import { setBaseURL, setAccessToken } from "./lib/api.js";
+import { checkForUpdateInBackground } from "./lib/updater.js";
 // Commands
 import { registerLogin } from "./commands/login.js";
 import { registerLogout } from "./commands/logout.js";
@@ -43,6 +44,10 @@ program
     .option("--verbose", "Verbose output")
     .hook("preAction", async (thisCommand, actionCommand) => {
     const opts = thisCommand.opts();
+    // Check for updates silently in background (shows notice after command)
+    if (actionCommand.name() !== "update") {
+        checkForUpdateInBackground();
+    }
     // JSON mode: explicit flag or non-TTY stdout
     if (opts.json || !process.stdout.isTTY) {
         setJSONMode(true);
