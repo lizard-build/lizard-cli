@@ -24,9 +24,11 @@ jobs:
       - name: Build binaries
         run: |
           mkdir -p bin
-          bun build --compile --target=bun-darwin-arm64 src/index.ts --outfile bin/lizard-darwin-arm64
-          bun build --compile --target=bun-darwin-x64   src/index.ts --outfile bin/lizard-darwin-x64
-          bun build --compile --target=bun-linux-x64    src/index.ts --outfile bin/lizard-linux-x64
+          bun build --compile --target=bun-darwin-arm64  src/index.ts --outfile bin/lizard-darwin-arm64
+          bun build --compile --target=bun-darwin-x64    src/index.ts --outfile bin/lizard-darwin-x64
+          bun build --compile --target=bun-linux-x64     src/index.ts --outfile bin/lizard-linux-x64
+          bun build --compile --target=bun-linux-arm64   src/index.ts --outfile bin/lizard-linux-arm64
+          bun build --compile --target=bun-windows-x64   src/index.ts --outfile bin/lizard-windows-x64.exe
 
       - name: Create release
         uses: softprops/action-gh-release@v2
@@ -35,4 +37,6 @@ jobs:
             bin/lizard-darwin-arm64
             bin/lizard-darwin-x64
             bin/lizard-linux-x64
+            bin/lizard-linux-arm64
+            bin/lizard-windows-x64.exe
           generate_release_notes: true
