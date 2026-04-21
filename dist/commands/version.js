@@ -1,25 +1,11 @@
 import { isJSONMode, printJSON } from "../lib/format.js";
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-function getVersion() {
-    try {
-        // Try to read from package.json
-        const __dirname = dirname(fileURLToPath(import.meta.url));
-        const pkgPath = join(__dirname, "..", "..", "package.json");
-        const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-        return pkg.version || "0.1.0";
-    }
-    catch {
-        return "0.1.0";
-    }
-}
+import { CURRENT_VERSION } from "../lib/updater.js";
 export function registerVersion(program) {
     program
         .command("version")
         .description("Show CLI version")
         .action(() => {
-        const version = getVersion();
+        const version = CURRENT_VERSION;
         if (isJSONMode()) {
             printJSON({
                 version,
