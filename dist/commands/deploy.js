@@ -36,10 +36,31 @@ export function registerDeploy(program) {
         // TODO: detect repo from git remote, create app from repo
         throw new Error("First deploy requires an existing app. Create one from the dashboard or use `lizard init` + push via git.");
     });
-    program
-        .command("deploy-status")
+    // `deploy status <id>` subcommand — must run after the deploy command is registered
+    const deployCmd = program.commands.find((c) => c.name() === "deploy");
+    deployCmd
+        .command("status")
         .argument("<id>", "App or deploy ID")
         .description("Show deployment status")
+        .action(async (id) => {
+        const app = await api.get(`/api/apps/${id}`);
+        if (isJSONMode()) {
+            printJSON(app);
+            return;
+        }
+        console.log(`${chalk.bold(app.name)}  ${statusColor(app.status)}`);
+        if (app.domain)
+            console.log(`  URL: ${chalk.cyan(`https://${app.domain}`)}`);
+        if (app.builds?.length) {
+            const latest = app.builds[0];
+            console.log(`  Latest build: ${statusColor(latest.status)}`);
+        }
+    });
+    // Hidden backward-compat alias
+    program
+        .command("deploy-status", { hidden: true })
+        .argument("<id>", "App or deploy ID")
+        .description("[deprecated] Use `deploy status`")
         .action(async (id) => {
         const app = await api.get(`/api/apps/${id}`);
         if (isJSONMode()) {
