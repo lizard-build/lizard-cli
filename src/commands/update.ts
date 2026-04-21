@@ -29,16 +29,16 @@ export function registerUpdate(program: Command) {
       }
 
       if (opts.check) {
-        info(`Update available: v${CURRENT_VERSION} → v${chalk.green("v" + latest)}`);
+        info(`Update available: v${CURRENT_VERSION} → ${chalk.green("v" + latest)}`);
         info(chalk.dim(`Run \`lizard update\` to install`));
         return;
       }
 
-      info(`Updating v${CURRENT_VERSION} → v${chalk.green("v" + latest)}...`);
+      info(`Updating v${CURRENT_VERSION} → ${chalk.green("v" + latest)}...`);
 
       try {
         await selfUpdate((msg) => info(chalk.dim(msg)));
-        success(`Updated to v${latest} — restart your terminal to use the new version`);
+        success(`Updated to v${latest}`);
       } catch (e: any) {
         throw new Error(`Update failed: ${e.message}`);
       }
