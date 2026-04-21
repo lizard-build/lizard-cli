@@ -76,7 +76,7 @@ export function registerAdd(program: Command) {
         connectionString?: string;
         envVars?: Record<string, string>;
       }>(`/api/projects/${projectId}/addons`, {
-        addonType: name,
+        type: name,
         region,
       });
 

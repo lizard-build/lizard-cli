@@ -50,7 +50,7 @@ export function registerAdd(program) {
         const region = opts.region || program.opts().region;
         info(`Adding ${chalk.cyan(catalogEntry.label)}...`);
         const addon = await api.post(`/api/projects/${projectId}/addons`, {
-            addonType: name,
+            type: name,
             region,
         });
         if (isJSONMode()) {
