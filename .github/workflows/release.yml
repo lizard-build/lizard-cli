@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build binaries
+        run: |
+          mkdir -p bin
+          bun build --compile --target=bun-darwin-arm64 src/index.ts --outfile bin/lizard-darwin-arm64
+          bun build --compile --target=bun-darwin-x64   src/index.ts --outfile bin/lizard-darwin-x64
+          bun build --compile --target=bun-linux-x64    src/index.ts --outfile bin/lizard-linux-x64
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            bin/lizard-darwin-arm64
+            bin/lizard-darwin-x64
+            bin/lizard-linux-x64
+          generate_release_notes: true
