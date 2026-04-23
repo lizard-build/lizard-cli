@@ -2,8 +2,8 @@ name: Release
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 jobs:
   release:
@@ -13,6 +13,35 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          CURRENT=$(node -p "require('./package.json').version")
+          IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
+          NEW="$MAJ.$MIN.$((PAT + 1))"
+          echo "version=$NEW" >> $GITHUB_OUTPUT
+
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = '$NEW';
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          sed -i "s/export const CURRENT_VERSION = \".*\"/export const CURRENT_VERSION = \"$NEW\"/" src/lib/updater.ts
+
+          git add package.json src/lib/updater.ts
+          git commit -m "chore: bump version to v$NEW [skip ci]"
+          git tag "v$NEW"
+          git push origin main --tags
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -30,9 +59,11 @@ jobs:
           bun build --compile --target=bun-linux-arm64   src/index.ts --outfile bin/lizard-linux-arm64
           bun build --compile --target=bun-windows-x64   src/index.ts --outfile bin/lizard-windows-x64.exe
 
-      - name: Create release
+      - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.bump.outputs.version }}
+          name: v${{ steps.bump.outputs.version }}
           files: |
             bin/lizard-darwin-arm64
             bin/lizard-darwin-x64
