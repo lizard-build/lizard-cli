@@ -63,7 +63,10 @@ export function registerSecrets(program) {
                 merged.push({ key, value });
             }
         }
-        await api.put(`/api/projects/${projectId}/secrets`, merged);
+        await api.put(`/api/projects/${projectId}/secrets`, {
+            secrets: merged,
+            noRedeploy: opts.redeploy === false,
+        });
         if (isJSONMode()) {
             printJSON({ updated: Object.keys(newSecrets) });
         }
@@ -75,7 +78,8 @@ export function registerSecrets(program) {
         .command("delete")
         .argument("<keys...>", "Secret keys to delete")
         .description("Delete one or more secrets")
-        .action(async (keys) => {
+        .option("--no-redeploy", "Don't trigger redeploy")
+        .action(async (keys, opts) => {
         const projectId = resolveProjectId(program.opts().project);
         const existing = await api.get(`/api/projects/${projectId}/secrets`);
         const keysSet = new Set(keys);
@@ -83,7 +87,10 @@ export function registerSecrets(program) {
         if (filtered.length === existing.length) {
             throw new Error(`Secret(s) not found: ${keys.join(", ")}`);
         }
-        await api.put(`/api/projects/${projectId}/secrets`, filtered);
+        await api.put(`/api/projects/${projectId}/secrets`, {
+            secrets: filtered,
+            noRedeploy: opts.redeploy === false,
+        });
         if (isJSONMode()) {
             printJSON({ deleted: keys });
         }
@@ -95,7 +102,7 @@ export function registerSecrets(program) {
         .command("import")
         .description("Import secrets from stdin (KEY=value format, one per line)")
         .option("--no-redeploy", "Don't trigger redeploy")
-        .action(async () => {
+        .action(async (opts) => {
         const projectId = resolveProjectId(program.opts().project);
         // Read stdin
         const chunks = [];
@@ -126,7 +133,10 @@ export function registerSecrets(program) {
             key,
             value,
         }));
-        await api.put(`/api/projects/${projectId}/secrets`, merged);
+        await api.put(`/api/projects/${projectId}/secrets`, {
+            secrets: merged,
+            noRedeploy: opts.redeploy === false,
+        });
         if (isJSONMode()) {
             printJSON({ imported: Object.keys(newSecrets) });
         }
