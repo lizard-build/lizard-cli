@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import ora from "ora";
 import { Command } from "commander";
-import { execSync } from "child_process";
+import { execSync, spawn } from "child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
@@ -246,7 +246,6 @@ function collectFilesManually(root: string, dir: string): string[] {
 
 function createTarball(files: string[]): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
-    const { spawn } = require("child_process");
     const chunks: Uint8Array[] = [];
     // Write file list to stdin so tar handles paths with spaces/special chars
     const tar = spawn("tar", ["-czf", "-", "-T", "-"], { cwd: process.cwd() });
