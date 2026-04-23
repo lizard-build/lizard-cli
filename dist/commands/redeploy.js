@@ -45,7 +45,7 @@ export function registerRedeploy(program) {
             }
             else {
                 success("Redeploy started");
-                info(chalk.dim(`  Check status: lizard deploy-status ${id}`));
+                info(chalk.dim(`  Check status: lizard deploy status ${id}`));
             }
             return;
         }
