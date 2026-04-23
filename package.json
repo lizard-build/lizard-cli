@@ -1,6 +1,6 @@
 {
   "name": "@lizard-build/cli",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Lizard CLI — deploy and manage apps on Lizard",
   "type": "module",
   "bin": {
