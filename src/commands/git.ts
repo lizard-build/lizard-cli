@@ -1,39 +1,63 @@
 import chalk from "chalk";
+import ora from "ora";
+import * as readline from "node:readline";
 import { Command } from "commander";
-import { api } from "../lib/api.js";
+import { api, getBaseURL } from "../lib/api.js";
+import { openURL } from "../lib/auth.js";
 import { resolveProjectId } from "../lib/config.js";
-import { success, info, isJSONMode, printJSON } from "../lib/format.js";
+import { success, error, info, isJSONMode, printJSON } from "../lib/format.js";
+
+interface GitHubStatus {
+  installed: boolean;
+  installationId: number | null;
+}
 
 export function registerGit(program: Command) {
   const git = program
     .command("git")
-    .description("Git integration");
+    .description("Git and GitHub integration");
 
+  // lizard git connect — install GitHub App for private repo access
   git
     .command("connect")
-    .argument("<repo>", "GitHub repository (user/repo)")
-    .description("Connect Git repository for auto-deploy")
-    .option("--branch <name>", "Branch for auto-deploy", "main")
-    .action(async (repo: string, opts) => {
-      const projectId = resolveProjectId(program.opts().project);
+    .description("Connect GitHub App to access private repositories")
+    .action(async () => {
+      // Check current status
+      const status = await api.get<GitHubStatus>("/api/github/status");
 
-      // This requires a server endpoint for programmatic webhook setup
-      // For now, guide the user to use the dashboard
-      if (isJSONMode()) {
-        printJSON({
-          error: "not_implemented",
-          message: "Git connect via CLI requires server endpoint. Use the dashboard.",
-        });
+      if (status.installed) {
+        success("GitHub App is already connected.");
+        info(chalk.dim("  Use `lizard git status` to see connected repositories."));
+        return;
+      }
+
+      const installUrl = `${getBaseURL()}/api/auth/github/install`;
+      const opened = await openURL(installUrl);
+
+      if (opened) {
+        info("Opening GitHub to install the Lizard GitHub App...");
       } else {
-        info(`To connect ${chalk.cyan(repo)} for auto-deploy:`);
-        info(`  1. Open your project on lizard.build`);
-        info(`  2. Go to Settings → Git Integration`);
-        info(`  3. Connect ${repo} (branch: ${opts.branch})`);
-        info("");
-        info(chalk.dim("CLI git connect will be available in a future update."));
+        info(`Open this URL to connect GitHub:\n  ${chalk.cyan(installUrl)}`);
+      }
+
+      // Wait for user to complete installation in browser
+      await pressEnter(chalk.dim("\nPress Enter after completing GitHub installation..."));
+
+      // Verify
+      const spinner = ora("Verifying GitHub connection...").start();
+      const newStatus = await api.get<GitHubStatus>("/api/github/status");
+      spinner.stop();
+
+      if (newStatus.installed) {
+        success("GitHub connected! You can now deploy private repositories.");
+        info(chalk.dim("  Run `lizard deploy` to deploy your project."));
+      } else {
+        error("GitHub App not detected. Please try again or connect via the dashboard.");
+        process.exit(1);
       }
     });
 
+  // lizard git disconnect
   git
     .command("disconnect")
     .description("Disconnect Git auto-deploy")
@@ -41,40 +65,63 @@ export function registerGit(program: Command) {
       info(chalk.dim("Git disconnect via CLI will be available in a future update."));
     });
 
+  // lizard git status
   git
     .command("status")
-    .description("Show Git integration status")
+    .description("Show GitHub connection and repository status")
     .action(async () => {
       const projectId = resolveProjectId(program.opts().project);
 
-      // Get apps to check for repo info
-      const services = await api.get<{ apps: any[] }>(
-        `/api/projects/${projectId}/services`,
-      );
+      const [githubStatus, services] = await Promise.all([
+        api.get<GitHubStatus>("/api/github/status"),
+        api.get<{ apps: any[] }>(`/api/projects/${projectId}/services`),
+      ]);
 
-      const appsWithRepo = (services.apps || []).filter((a: any) => a.repo);
+      const appsWithRepo = (services.apps || []).filter((a: any) => a.repo || a.repoUrl);
 
       if (isJSONMode()) {
         printJSON({
-          connected: appsWithRepo.length > 0,
+          github: {
+            installed: githubStatus.installed,
+            installationId: githubStatus.installationId,
+          },
           apps: appsWithRepo.map((a: any) => ({
             name: a.name,
-            repo: a.repo,
+            repo: a.repo || a.repoUrl,
             branch: a.branch,
           })),
         });
         return;
       }
 
+      // GitHub App status
+      if (githubStatus.installed) {
+        info(`GitHub App: ${chalk.green("connected")}`);
+      } else {
+        info(`GitHub App: ${chalk.yellow("not connected")}  ${chalk.dim("→ run `lizard git connect`")}`);
+      }
+
+      // Connected repos
       if (appsWithRepo.length === 0) {
-        console.log("No Git repositories connected.");
+        info(chalk.dim("\nNo repositories connected to this project."));
         return;
       }
 
+      info("");
       for (const app of appsWithRepo) {
-        console.log(
-          `${chalk.bold(app.name)}: ${chalk.cyan(app.repo)} (${app.branch || "main"})`,
+        info(
+          `${chalk.bold(app.name)}: ${chalk.cyan(app.repo || app.repoUrl)} ${chalk.dim(`(${app.branch || "main"})`)}`,
         );
       }
     });
+}
+
+function pressEnter(question: string): Promise<void> {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    rl.question(question, () => {
+      rl.close();
+      resolve();
+    });
+  });
 }
