@@ -11,6 +11,8 @@ export interface ProjectConfig {
   projectId: string;
   projectName?: string;
   environment?: string;
+  appId?: string;
+  appName?: string;
 }
 
 export interface GlobalSettings {
