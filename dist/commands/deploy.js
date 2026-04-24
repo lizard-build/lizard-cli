@@ -281,31 +281,48 @@ async function streamBuildLogs(appId) {
         return;
     }
     info(chalk.dim("Streaming build logs...\n"));
-    await streamSSE(`/api/builds/${buildId}/logs`, (event, data) => {
-        if (event === "done" || event === "error") {
-            if (event === "error")
-                error(`Build failed: ${data}`);
-            else
-                success("Build complete");
-            return false;
-        }
+    // Stream with auto-reconnect — connection can drop mid-build (Cloudflare timeout etc.)
+    const deadline = Date.now() + 15 * 60 * 1000; // 15 min max
+    while (Date.now() < deadline) {
+        let dropped = false;
         try {
-            const parsed = JSON.parse(data);
-            if (parsed.line)
-                process.stdout.write(parsed.line + "\n");
-            else if (typeof parsed === "string")
-                process.stdout.write(parsed + "\n");
+            await streamSSE(`/api/builds/${buildId}/logs`, (event, data) => {
+                if (event === "done" || event === "error")
+                    return false;
+                try {
+                    const parsed = JSON.parse(data);
+                    if (parsed.line)
+                        process.stdout.write(parsed.line + "\n");
+                    else if (typeof parsed === "string")
+                        process.stdout.write(parsed + "\n");
+                }
+                catch {
+                    process.stdout.write(data + "\n");
+                }
+                return true;
+            });
         }
         catch {
-            process.stdout.write(data + "\n");
+            dropped = true;
         }
-        return true;
-    });
+        // Check if build finished (either cleanly or after reconnect)
+        try {
+            const build = await api.get(`/api/builds/${buildId}`);
+            if (build.status === "done" || build.status === "failed")
+                break;
+        }
+        catch { }
+        if (!dropped)
+            break; // clean SSE end — don't reconnect
+        await sleep(2000); // brief pause before reconnect
+    }
     const app = await api.get(`/api/apps/${appId}`);
     if (app.status === "running")
         success(`Deployed! ${app.domain ? chalk.cyan(`https://${app.domain}`) : ""}`);
     else if (app.status === "failed")
         error("Deploy failed. Check logs with `lizard logs --build`");
+    else if (app.status === "deploying")
+        info(chalk.dim("Still deploying... check status with `lizard status`"));
 }
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 //# sourceMappingURL=deploy.js.map
