@@ -147,30 +147,51 @@ describe("project secrets", () => {
 
 // ── Deploy + service secrets ──────────────────────────────────────────────────
 
+// Temp dir for deploy — must be OUTSIDE the git repo so no remote is detected
+let DEPLOY_DIR: string;
+
 describe("deploy", () => {
   const appName = `cli-test-${Date.now()}`;
   let appId: string;
 
+  beforeAll(async () => {
+    // Clean up any leftover apps in the project so the CLI creates a fresh one
+    // instead of reusing an existing upload-based app (which would fail on redeploy).
+    const services = await cliJSON("--project", projectId, "ps").catch(() => ({ apps: [] }));
+    const existing: Array<{ id: string }> = services?.apps ?? [];
+    for (const app of existing) {
+      await cli("--project", projectId, "destroy", app.id, "-y").catch(() => {});
+    }
+  }, 30_000);
+
   test(
     "deploy local fixture app (detached)",
     async () => {
-      // Clear any stale link for the fixture dir so we always create fresh
-      const cfgBefore = loadConfig();
-      delete cfgBefore.projects?.[FIXTURE];
-      saveConfig(cfgBefore);
+      // Copy fixture to a temp dir outside the git repo (no git remote = tarball upload)
+      DEPLOY_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lizard-test-"));
+      for (const entry of fs.readdirSync(FIXTURE, { withFileTypes: true })) {
+        if (!entry.isFile()) continue; // skip .lizard dir and symlinks
+        fs.copyFileSync(path.join(FIXTURE, entry.name), path.join(DEPLOY_DIR, entry.name));
+      }
+
+      // Pre-link DEPLOY_DIR to existing project so ensureLinked() doesn't create a new one
+      const cfgPreDeploy = loadConfig();
+      cfgPreDeploy.projects ??= {};
+      cfgPreDeploy.projects[DEPLOY_DIR] = { projectId };
+      saveConfig(cfgPreDeploy);
 
       // Pipe app name to stdin to answer the interactive name prompt
       const result = await execa(
         LIZARD,
-        ["--json", "--project", projectId, "deploy", "--detach"],
-        { cwd: FIXTURE, input: appName + "\n" },
+        ["--json", "deploy", "--detach"],
+        { cwd: DEPLOY_DIR, input: appName + "\n" },
       );
       const data = extractJSON(result.stdout);
       expect(data).toHaveProperty("appId");
       appId = data.appId;
       createdApps.push(appId);
 
-      // Ensure the fixture dir is linked so service-secret tests can find appId
+      // Mirror link to fixture dir so service-secret tests (run from FIXTURE) find it
       const cfgAfter = loadConfig();
       cfgAfter.projects ??= {};
       cfgAfter.projects[FIXTURE] = { projectId, appId };
@@ -197,18 +218,21 @@ describe("deploy", () => {
 
   test("app URL responds with 200", async () => {
     const data = await cliJSON("deploy", "status", appId);
-    if (!data.domain) return;
-    // Retry a few times — reverse proxy may take a moment to register the new VM
+    if (!data.domain) { console.log("  ⚠ no domain yet, skipping URL check"); return; }
+    // Retry up to 90s — Caddy + TLS can take a moment after status=running
     let ok = false;
-    for (let i = 0; i < 6; i++) {
+    let lastStatus = 0;
+    for (let i = 0; i < 18; i++) {
       try {
         const res = await fetch(`https://${data.domain}`, { signal: AbortSignal.timeout(8_000) });
+        lastStatus = res.status;
         if (res.ok) { ok = true; break; }
       } catch {}
       await sleep(5000);
     }
+    if (!ok) console.log(`  ⚠ URL not ready after 90s (last status: ${lastStatus}) — proxy may still be warming up`);
     expect(ok).toBe(true);
-  });
+  }, 120_000);
 
   // Service-scoped secrets — fixture dir gets linked by the deploy above
   describe("service secrets", () => {
@@ -261,9 +285,10 @@ describe("error handling", () => {
 
 afterAll(async () => {
   for (const id of createdApps) {
-    await execa(LIZARD, ["destroy", id, "-y"]).catch(() => {});
+    await execa(LIZARD, ["--project", projectId, "destroy", id, "-y"]).catch(() => {});
   }
-  // Remove fixture dir link so it doesn't pollute future runs
+  // Clean up temp deploy dir and fixture link
+  if (DEPLOY_DIR) fs.rmSync(DEPLOY_DIR, { recursive: true, force: true });
   const cfg = loadConfig();
   if (cfg.projects?.[FIXTURE]) {
     delete cfg.projects[FIXTURE];
