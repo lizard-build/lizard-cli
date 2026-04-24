@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
+import { getProjectLink } from "../lib/config.js";
 import { success, info, isJSONMode, printJSON, isTTY, table, } from "../lib/format.js";
 const CATALOG = [
     { name: "postgres", label: "PostgreSQL", description: "Relational database" },
@@ -9,15 +9,36 @@ const CATALOG = [
     { name: "mysql", label: "MySQL", description: "Relational database" },
     { name: "mongodb", label: "MongoDB", description: "Document database" },
 ];
+/**
+ * Resolve a project by name/slug/id. Name-based lookup hits /api/projects and
+ * matches against the list. Falls back to the cwd-linked project when no
+ * -p/--project is supplied.
+ */
+async function resolveProject(flagValue) {
+    if (flagValue) {
+        const projects = await api.get("/api/projects");
+        const match = projects.find((pr) => pr.id === flagValue ||
+            pr.slug === flagValue ||
+            pr.name === flagValue);
+        if (!match) {
+            throw new Error(`Project "${flagValue}" not found. Available: ${projects.map((p) => p.name).join(", ") || "(none)"}`);
+        }
+        return match.id;
+    }
+    const link = getProjectLink();
+    if (link?.projectId)
+        return link.projectId;
+    throw new Error("No project linked to this directory. Pass -p <project-name> or run `lizard init`.");
+}
 export function registerAdd(program) {
     program
         .command("add")
         .argument("[name]", "Service name from catalog (postgres, redis, mysql, mongodb)")
         .description("Add a service to the project")
+        .option("-p, --project <name>", "Project name or ID")
         .option("--list", "Show available services")
         .option("--region <region>", "Region for the service")
         .action(async (name, opts) => {
-        // Show catalog
         if (opts.list || (!name && !isTTY())) {
             if (isJSONMode()) {
                 printJSON(CATALOG);
@@ -27,7 +48,6 @@ export function registerAdd(program) {
             }
             return;
         }
-        // Interactive selection
         if (!name) {
             const selected = await p.select({
                 message: "Select service to add",
@@ -41,12 +61,11 @@ export function registerAdd(program) {
                 process.exit(5);
             name = selected;
         }
-        // Validate name is in catalog
         const catalogEntry = CATALOG.find((c) => c.name === name);
         if (!catalogEntry) {
             throw new Error(`Unknown service "${name}". Available: ${CATALOG.map((c) => c.name).join(", ")}`);
         }
-        const projectId = resolveProjectId(program.opts().project);
+        const projectId = await resolveProject(opts.project || program.opts().project);
         const region = opts.region || program.opts().region;
         info(`Adding ${chalk.cyan(catalogEntry.label)}...`);
         const addon = await api.post(`/api/projects/${projectId}/addons`, {

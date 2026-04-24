@@ -6,7 +6,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import { api, streamSSE, getBaseURL } from "../lib/api.js";
-import { resolveProjectId, findProjectConfig, saveProjectConfig } from "../lib/config.js";
+import { getProjectLink, updateProjectLink } from "../lib/config.js";
+import { ensureLinked } from "./init.js";
 import {
   success,
   info,
@@ -34,12 +35,13 @@ export function registerDeploy(program: Command) {
     .option("--detach", "Run in background without streaming logs")
     .option("--region <region>", "Region for deployment")
     .action(async (opts) => {
-      const projectId = resolveProjectId(program.opts().project, { localOnly: true });
-      const localConfig = findProjectConfig();
+      // Run init flow if this directory isn't linked yet
+      const link = await ensureLinked();
+      const projectId = link.projectId;
 
       // ── Redeploy: use saved appId directly (fast path) ───────────────────
-      if (localConfig?.appId) {
-        const app = await api.get<App>(`/api/apps/${localConfig.appId}`).catch(() => null);
+      if (link.appId) {
+        const app = await api.get<App>(`/api/apps/${link.appId}`).catch(() => null);
         if (app) {
           const version = (app.builds?.length ?? 0) + 1;
           info(`Deploying ${chalk.bold(app.name)} ${chalk.dim(`v${version}`)}...`);
@@ -173,10 +175,9 @@ export function registerDeploy(program: Command) {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-function saveServiceToConfig(projectId: string, appId: string, appName: string) {
+function saveServiceToConfig(_projectId: string, appId: string, appName: string) {
   try {
-    const existing = findProjectConfig();
-    saveProjectConfig({ ...existing, projectId, appId, appName });
+    updateProjectLink({ appId, appName });
   } catch {}
 }
 

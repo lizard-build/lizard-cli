@@ -9,13 +9,11 @@ import { registerLogin } from "./commands/login.js";
 import { registerLogout } from "./commands/logout.js";
 import { registerWhoami } from "./commands/whoami.js";
 import { registerInit } from "./commands/init.js";
-import { registerLink } from "./commands/link.js";
 import { registerProjects } from "./commands/projects.js";
 import { registerDeploy } from "./commands/deploy.js";
 import { registerPs } from "./commands/ps.js";
 import { registerAdd } from "./commands/add.js";
 import { registerSnapshot } from "./commands/snapshot.js";
-import { registerEnv } from "./commands/env.js";
 import { registerDestroy } from "./commands/destroy.js";
 import { registerRestart } from "./commands/restart.js";
 import { registerRedeploy } from "./commands/redeploy.js";
@@ -39,7 +37,6 @@ program
     .option("-y, --yes", "Skip confirmation prompts")
     .option("--workspace <id>", "Workspace name or ID")
     .option("--project <id>", "Project ID")
-    .option("--environment <name>", "Environment name")
     .option("--region <region>", "Region for creating services")
     .option("--token <token>", "API token")
     .option("--no-color", "Disable colors")
@@ -75,13 +72,11 @@ registerLogin(program);
 registerLogout(program);
 registerWhoami(program);
 registerInit(program);
-registerLink(program);
 registerProjects(program);
 registerDeploy(program);
 registerPs(program);
 registerAdd(program);
 registerSnapshot(program);
-registerEnv(program);
 registerDestroy(program);
 registerRestart(program);
 registerRedeploy(program);

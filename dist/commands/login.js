@@ -93,17 +93,19 @@ export function registerLogin(program) {
         .command("login")
         .description("Log in to Lizard")
         .option("--token <token>", "Authenticate with an API token")
-        .action(async (opts) => {
-        if (opts.token) {
+        .action(async (opts, cmd) => {
+        // --token may be consumed by the parent program's global option
+        const token = opts.token ?? cmd.parent?.opts().token;
+        if (token) {
             // Direct token auth — validate it
             const res = await fetch(`${getBaseURL()}/api/auth/me`, {
-                headers: { Authorization: `Bearer ${opts.token}` },
+                headers: { Authorization: `Bearer ${token}` },
             });
             if (!res.ok)
                 throw new Error("Invalid token");
             const user = (await res.json());
             saveCredentials({
-                accessToken: opts.token,
+                accessToken: token,
                 userId: user.id,
                 username: user.username,
                 email: user.email,

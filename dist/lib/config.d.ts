@@ -1,34 +1,29 @@
-export interface ProjectConfig {
-    workspaceId?: string;
+export interface Credentials {
+    accessToken: string;
+    refreshToken?: string;
+    expiresAt?: string;
+    userId: string;
+    username: string;
+    email?: string;
+    avatarUrl?: string;
+}
+export interface ProjectLink {
     projectId: string;
     projectName?: string;
-    environment?: string;
+    appId?: string;
+    appName?: string;
 }
-export interface GlobalSettings {
-    defaultWorkspace?: string;
-    defaultProject?: string;
-    defaultProjectName?: string;
+export interface Config {
+    credentials?: Credentials;
+    projects?: Record<string, ProjectLink>;
 }
-/** Find project config by walking up from cwd */
-export declare function findProjectConfig(): ProjectConfig | null;
-/** Save project config in cwd */
-export declare function saveProjectConfig(config: ProjectConfig): void;
-export declare function loadGlobalSettings(): GlobalSettings;
-export declare function saveGlobalSettings(settings: GlobalSettings): void;
+export declare function loadConfig(): Config;
+export declare function saveConfig(config: Config): void;
+export declare function getProjectLink(cwd?: string): ProjectLink | null;
+export declare function setProjectLink(link: ProjectLink, cwd?: string): void;
+export declare function updateProjectLink(patch: Partial<ProjectLink>, cwd?: string): void;
 /**
- * Resolve projectId. Priority:
- *   1. --project flag
- *   2. .lizard/config.json (directory link)
- *   3. ~/.lizard/settings.json → defaultProject (unless localOnly)
- *   4. error
- *
- * `localOnly: true` forbids the global fallback — used by destructive commands
- * like `deploy` that act on cwd and must not silently target a different project.
+ * Resolve projectId from: --project flag (ID only) → linked cwd → error.
+ * For name-based resolution, callers should look up the project list first.
  */
-export declare function resolveProjectId(flagValue?: string, opts?: {
-    localOnly?: boolean;
-}): string;
-/**
- * Resolve environment from: --environment flag → .lizard/config.json → "production"
- */
-export declare function resolveEnvironment(flagValue?: string): string;
+export declare function resolveProjectId(flagValue?: string): string;

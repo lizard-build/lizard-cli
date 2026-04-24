@@ -1,9 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import open from "open";
-const LIZARD_DIR = path.join(os.homedir(), ".lizard");
-const CREDENTIALS_FILE = path.join(LIZARD_DIR, "credentials.json");
+import { loadConfig, saveConfig, } from "./config.js";
 let tokenOverride = null;
 export function setTokenOverride(token) {
     tokenOverride = token;
@@ -14,29 +10,20 @@ export function getToken() {
         return tokenOverride;
     if (process.env.LIZARD_TOKEN)
         return process.env.LIZARD_TOKEN;
-    const creds = loadCredentials();
-    return creds?.accessToken ?? null;
+    return loadCredentials()?.accessToken ?? null;
 }
 export function loadCredentials() {
-    try {
-        const data = fs.readFileSync(CREDENTIALS_FILE, "utf-8");
-        return JSON.parse(data);
-    }
-    catch {
-        return null;
-    }
+    return loadConfig().credentials ?? null;
 }
 export function saveCredentials(creds) {
-    fs.mkdirSync(LIZARD_DIR, { recursive: true });
-    fs.writeFileSync(CREDENTIALS_FILE, JSON.stringify(creds, null, 2), {
-        mode: 0o600,
-    });
+    const config = loadConfig();
+    config.credentials = creds;
+    saveConfig(config);
 }
 export function clearCredentials() {
-    try {
-        fs.unlinkSync(CREDENTIALS_FILE);
-    }
-    catch { }
+    const config = loadConfig();
+    delete config.credentials;
+    saveConfig(config);
 }
 export function isLoggedIn() {
     return getToken() !== null;
@@ -49,7 +36,6 @@ function isTTY() {
  * Returns credentials or throws.
  */
 export async function requireAuth() {
-    // Token override or env var — we don't have full Credentials, fake it
     if (tokenOverride || process.env.LIZARD_TOKEN) {
         return {
             accessToken: (tokenOverride || process.env.LIZARD_TOKEN),
@@ -60,11 +46,9 @@ export async function requireAuth() {
     const creds = loadCredentials();
     if (creds)
         return creds;
-    // Not logged in
     if (!isTTY()) {
         throw new Error("Not authenticated. Set LIZARD_TOKEN or run `lizard login` first.");
     }
-    // Auto-login
     const { performLogin } = await import("../commands/login.js");
     return performLogin();
 }
@@ -76,7 +60,7 @@ export async function openURL(url) {
         !process.env.DISPLAY &&
         !process.env.WAYLAND_DISPLAY;
     if (isSSH || isCI || noDisplay) {
-        return false; // caller should show URL manually
+        return false;
     }
     try {
         await open(url);

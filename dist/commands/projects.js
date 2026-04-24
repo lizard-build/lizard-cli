@@ -1,12 +1,6 @@
 import chalk from "chalk";
 import { api } from "../lib/api.js";
-import { findProjectConfig, loadGlobalSettings, saveGlobalSettings, } from "../lib/config.js";
-import { success, isJSONMode, printJSON, table, } from "../lib/format.js";
-function findProject(projects, nameOrId) {
-    return (projects.find((p) => p.id === nameOrId) ||
-        projects.find((p) => p.slug === nameOrId) ||
-        projects.find((p) => p.name === nameOrId));
-}
+import { success, isJSONMode, printJSON, table } from "../lib/format.js";
 export function registerProjects(program) {
     const proj = program
         .command("project")
@@ -32,87 +26,16 @@ export function registerProjects(program) {
         ]));
     });
     proj
-        .command("use")
-        .argument("<name_or_id>", "Project name, slug or ID")
-        .description("Set default project used when cwd has no .lizard/config.json")
-        .action(async (nameOrId) => {
-        const projects = await api.get("/api/projects");
-        const match = findProject(projects, nameOrId);
-        if (!match) {
-            throw new Error(`Project "${nameOrId}" not found. Available: ${projects.map((p) => p.name).join(", ")}`);
-        }
-        const settings = loadGlobalSettings();
-        saveGlobalSettings({
-            ...settings,
-            defaultProject: match.id,
-            defaultProjectName: match.name,
-        });
+        .command("create")
+        .argument("<name>", "Project name")
+        .description("Create a new project without linking it to this directory")
+        .action(async (name) => {
+        const project = await api.post("/api/projects", { name });
         if (isJSONMode()) {
-            printJSON({ defaultProject: match.id, name: match.name });
+            printJSON(project);
         }
         else {
-            success(`Default project set to ${chalk.bold(match.name)}`);
-        }
-    });
-    proj
-        .command("current")
-        .description("Show which project will be used in the current directory")
-        .action(() => {
-        const local = findProjectConfig();
-        const global = loadGlobalSettings();
-        const resolved = local?.projectId
-            ? {
-                source: "link",
-                projectId: local.projectId,
-                name: local.projectName,
-            }
-            : global.defaultProject
-                ? {
-                    source: "default",
-                    projectId: global.defaultProject,
-                    name: global.defaultProjectName,
-                }
-                : null;
-        if (isJSONMode()) {
-            printJSON(resolved);
-            return;
-        }
-        if (!resolved) {
-            console.log("No project for this directory. Run `lizard link` or `lizard project use <name>`.");
-            return;
-        }
-        const label = resolved.name || resolved.projectId;
-        if (resolved.source === "link") {
-            console.log(`${chalk.bold(label)} ${chalk.dim(`(${resolved.projectId})`)}`);
-            console.log(chalk.dim("  source: .lizard/config.json in this directory"));
-        }
-        else {
-            console.log(`${chalk.bold(label)} ${chalk.dim(`(${resolved.projectId})`)}`);
-            console.log(chalk.dim("  source: default from ~/.lizard/settings.json"));
-        }
-    });
-    proj
-        .command("unuse")
-        .description("Clear the global default project")
-        .action(() => {
-        const settings = loadGlobalSettings();
-        if (!settings.defaultProject) {
-            if (isJSONMode()) {
-                printJSON({ cleared: false });
-            }
-            else {
-                console.log("No default project was set.");
-            }
-            return;
-        }
-        delete settings.defaultProject;
-        delete settings.defaultProjectName;
-        saveGlobalSettings(settings);
-        if (isJSONMode()) {
-            printJSON({ cleared: true });
-        }
-        else {
-            success("Default project cleared");
+            success(`Project ${chalk.bold(project.name)} created`);
         }
     });
 }

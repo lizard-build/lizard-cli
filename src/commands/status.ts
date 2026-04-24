@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import { Command } from "commander";
 import { api } from "../lib/api.js";
-import { resolveProjectId, findProjectConfig } from "../lib/config.js";
+import { resolveProjectId } from "../lib/config.js";
 import { isJSONMode, printJSON, statusColor, table } from "../lib/format.js";
 
 export function registerStatus(program: Command) {
@@ -10,7 +10,6 @@ export function registerStatus(program: Command) {
     .description("Show project status")
     .action(async () => {
       const projectId = resolveProjectId(program.opts().project);
-      const config = findProjectConfig();
 
       const [project, services] = await Promise.all([
         api.get<{ id: string; name: string; slug: string }>(
@@ -22,14 +21,11 @@ export function registerStatus(program: Command) {
       ]);
 
       if (isJSONMode()) {
-        printJSON({ project, services, environment: config?.environment || "production" });
+        printJSON({ project, services });
         return;
       }
 
       console.log(chalk.bold(project.name) + chalk.dim(` (${project.id})`));
-      if (config?.environment) {
-        console.log(chalk.dim(`Environment: ${config.environment}`));
-      }
       console.log();
 
       const allServices = [

@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import { api } from "../lib/api.js";
-import { resolveProjectId, findProjectConfig } from "../lib/config.js";
+import { resolveProjectId } from "../lib/config.js";
 import { isJSONMode, printJSON, statusColor, table } from "../lib/format.js";
 export function registerContext(program) {
     program
@@ -8,7 +8,6 @@ export function registerContext(program) {
         .description("Show full project context (optimized for AI agents)")
         .action(async () => {
         const projectId = resolveProjectId(program.opts().project);
-        const config = findProjectConfig();
         const [project, services, secrets] = await Promise.all([
             api.get(`/api/projects/${projectId}`),
             api.get(`/api/projects/${projectId}/services`),
@@ -20,7 +19,6 @@ export function registerContext(program) {
                 name: project.name,
                 slug: project.slug,
             },
-            environment: config?.environment || "production",
             apps: (services.apps || []).map((a) => ({
                 id: a.id,
                 name: a.name,
@@ -38,16 +36,13 @@ export function registerContext(program) {
                 status: a.status,
                 hostname: a.hostname,
             })),
-            secrets: secrets.map((s) => s.key), // names only, not values
+            secrets: secrets.map((s) => s.key),
         };
-        // Always JSON for pipe, since this is designed for AI agents
         if (isJSONMode() || !process.stdout.isTTY) {
             printJSON(context);
             return;
         }
-        // Human-readable
         console.log(chalk.bold(context.project.name) + chalk.dim(` (${context.project.id})`));
-        console.log(chalk.dim(`Environment: ${context.environment}`));
         console.log();
         if (context.apps.length > 0) {
             console.log(chalk.bold("Apps:"));

@@ -1,12 +1,5 @@
-export interface Credentials {
-    accessToken: string;
-    refreshToken?: string;
-    expiresAt?: string;
-    userId: string;
-    username: string;
-    email?: string;
-    avatarUrl?: string;
-}
+import { type Credentials } from "./config.js";
+export type { Credentials } from "./config.js";
 export declare function setTokenOverride(token: string): void;
 /** Get the active token in priority order: override → env → file */
 export declare function getToken(): string | null;
