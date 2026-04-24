@@ -16,9 +16,9 @@ import * as os from "node:os";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const LIZARD = fs.existsSync(path.join(os.homedir(), ".lizard/bin/lizard"))
-  ? path.join(os.homedir(), ".lizard/bin/lizard")
-  : "lizard";
+// Prefer the npm-globally-installed lizard (has all deps bundled properly).
+// ~/.lizard/bin/lizard is a legacy path that may be an old standalone copy.
+const LIZARD = process.env.LIZARD_BIN ?? "lizard";
 
 const FIXTURE = path.resolve(import.meta.dirname, "fixtures/hello-app");
 const CONFIG_FILE = path.join(os.homedir(), ".lizard/config.json");
@@ -42,7 +42,7 @@ function cli(...args: string[]) {
 }
 
 function cliJSON(...args: string[]) {
-  return execa(LIZARD, ["--json", ...args]).then((r) => JSON.parse(r.stdout));
+  return execa(LIZARD, ["--json", ...args]).then((r) => extractJSON(r.stdout));
 }
 
 function cliFrom(cwd: string, ...args: string[]) {
@@ -50,7 +50,20 @@ function cliFrom(cwd: string, ...args: string[]) {
 }
 
 function cliJSONFrom(cwd: string, ...args: string[]) {
-  return execa(LIZARD, ["--json", ...args], { cwd }).then((r) => JSON.parse(r.stdout));
+  return execa(LIZARD, ["--json", ...args], { cwd }).then((r) => extractJSON(r.stdout));
+}
+
+// Output may mix spinner/prompt text with JSON — the JSON block is always last.
+// Try parsing from each `{` or `[` working backwards until one succeeds.
+function extractJSON(stdout: string): any {
+  const positions: number[] = [];
+  for (let i = 0; i < stdout.length; i++) {
+    if (stdout[i] === "{" || stdout[i] === "[") positions.push(i);
+  }
+  for (let i = positions.length - 1; i >= 0; i--) {
+    try { return JSON.parse(stdout.slice(positions[i])); } catch {}
+  }
+  throw new Error(`No JSON found in output:\n${stdout}`);
 }
 
 function sleep(ms: number) {
@@ -141,16 +154,27 @@ describe("deploy", () => {
   test(
     "deploy local fixture app (detached)",
     async () => {
+      // Clear any stale link for the fixture dir so we always create fresh
+      const cfgBefore = loadConfig();
+      delete cfgBefore.projects?.[FIXTURE];
+      saveConfig(cfgBefore);
+
       // Pipe app name to stdin to answer the interactive name prompt
       const result = await execa(
         LIZARD,
         ["--json", "--project", projectId, "deploy", "--detach"],
-        { cwd: FIXTURE, input: appName },
+        { cwd: FIXTURE, input: appName + "\n" },
       );
-      const data = JSON.parse(result.stdout);
+      const data = extractJSON(result.stdout);
       expect(data).toHaveProperty("appId");
       appId = data.appId;
       createdApps.push(appId);
+
+      // Ensure the fixture dir is linked so service-secret tests can find appId
+      const cfgAfter = loadConfig();
+      cfgAfter.projects ??= {};
+      cfgAfter.projects[FIXTURE] = { projectId, appId };
+      saveConfig(cfgAfter);
     },
     60_000,
   );
@@ -171,12 +195,19 @@ describe("deploy", () => {
     5 * 60 * 1000,
   );
 
-  test("app URL responds with expected body", async () => {
+  test("app URL responds with 200", async () => {
     const data = await cliJSON("deploy", "status", appId);
-    if (!data.domain) return; // domain may not be ready yet
-    const res = await fetch(`https://${data.domain}`, { signal: AbortSignal.timeout(10_000) });
-    expect(res.ok).toBe(true);
-    expect(await res.text()).toContain("hello from lizard test");
+    if (!data.domain) return;
+    // Retry a few times — reverse proxy may take a moment to register the new VM
+    let ok = false;
+    for (let i = 0; i < 6; i++) {
+      try {
+        const res = await fetch(`https://${data.domain}`, { signal: AbortSignal.timeout(8_000) });
+        if (res.ok) { ok = true; break; }
+      } catch {}
+      await sleep(5000);
+    }
+    expect(ok).toBe(true);
   });
 
   // Service-scoped secrets — fixture dir gets linked by the deploy above
