@@ -290,22 +290,22 @@ describe("environments", () => {
     expect(data.some((e: any) => e.id === envId)).toBe(true);
   });
 
-  test("service set -e applies vars to environment", async () => {
-    const data = await cliJSON(
-      "--project", projectId,
-      "service", "set", `CLI_TEST_KEY=hello`, "-e", envId,
-    );
+  test("env vars set applies vars to environment", async () => {
+    const data = await cliJSON("env", "vars", "set", envId, "CLI_TEST_KEY=hello");
     expect(data.ok).toBe(true);
     expect(data.staged).toBe(false);
   });
 
-  test("service set -e --stage stages vars without applying", async () => {
-    const data = await cliJSON(
-      "--project", projectId,
-      "service", "set", `CLI_STAGED_KEY=staged`, "-e", envId, "--stage",
-    );
+  test("env vars set --stage stages vars without applying", async () => {
+    const data = await cliJSON("env", "vars", "set", envId, "CLI_STAGED_KEY=staged", "--stage");
     expect(data.ok).toBe(true);
     expect(data.staged).toBe(true);
+  });
+
+  test("env vars list shows applied and staged vars", async () => {
+    const data = await cliJSON("env", "vars", "list", envId);
+    expect(data.envVars["CLI_TEST_KEY"]).toBe("hello");
+    expect(data.stagedEnvVars?.["CLI_STAGED_KEY"]).toBe("staged");
   });
 
   test("env delete removes the environment", async () => {
@@ -316,30 +316,6 @@ describe("environments", () => {
   test("env list no longer contains deleted environment", async () => {
     const data = await cliJSON("--project", projectId, "env", "list");
     expect(data.some((e: any) => e.id === envId)).toBe(false);
-  });
-});
-
-// ── Service config (project-level) ───────────────────────────────────────────
-
-describe("service config", () => {
-  const VAR_KEY = `CLI_CFG_${Date.now()}`;
-
-  test("service set applies vars to project", async () => {
-    const data = await cliJSON("--project", projectId, "service", "set", `${VAR_KEY}=testval`);
-    expect(data.ok).toBe(true);
-    expect(data.staged).toBe(false);
-  });
-
-  test("service set --stage stages without applying", async () => {
-    const data = await cliJSON("--project", projectId, "service", "set", `${VAR_KEY}=staged`, "--stage");
-    expect(data.ok).toBe(true);
-    expect(data.staged).toBe(true);
-  });
-
-  test("service set with bad format exits non-zero", async () => {
-    await expect(
-      cli("--project", projectId, "service", "set", "BADFORMAT"),
-    ).rejects.toThrow();
   });
 });
 

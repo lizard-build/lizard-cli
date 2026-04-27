@@ -38,6 +38,7 @@ import { registerService } from "./commands/service.js";
 import { registerDomain } from "./commands/domain.js";
 import { registerVolume } from "./commands/volume.js";
 import { registerScale } from "./commands/scale.js";
+import { registerEnv } from "./commands/env.js";
 const program = new Command();
 program
     .name("lizard")
@@ -116,7 +117,6 @@ registerGit(program);
 registerVersion(program);
 registerUpdate(program);
 registerEnv(program);
-registerService(program);
 // Shell completion
 program
     .command("completion")
