@@ -122,11 +122,13 @@ export function registerInit(program: Command) {
     .description(
       "Create or select a project and link it to the current directory",
     )
-    .option("--project <name>", "Project name (use existing or create if missing)")
+    .option("-n, --name <name>", "Project name (use existing or create if missing)")
+    .option("--project <name>", "Alias for --name (kept for backwards compat)")
     .option("--force", "Relink even if this directory is already linked")
     .action(async (opts) => {
+      const projectName = opts.name || opts.project;
       const link = await ensureLinked({
-        projectName: opts.project,
+        projectName,
         force: opts.force,
         relinkPrompt: true,
       });

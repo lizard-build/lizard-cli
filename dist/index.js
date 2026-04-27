@@ -10,15 +10,19 @@ import { registerLogout } from "./commands/logout.js";
 import { registerWhoami } from "./commands/whoami.js";
 import { registerInit } from "./commands/init.js";
 import { registerProjects } from "./commands/projects.js";
+import { registerList } from "./commands/list.js";
+import { registerUp } from "./commands/up.js";
 import { registerDeploy } from "./commands/deploy.js";
 import { registerPs } from "./commands/ps.js";
 import { registerAdd } from "./commands/add.js";
 import { registerSnapshot } from "./commands/snapshot.js";
 import { registerDestroy } from "./commands/destroy.js";
+import { registerDown } from "./commands/down.js";
 import { registerRestart } from "./commands/restart.js";
 import { registerRedeploy } from "./commands/redeploy.js";
 import { registerLogs } from "./commands/logs.js";
 import { registerSecrets } from "./commands/secrets.js";
+import { registerVariables } from "./commands/variables.js";
 import { registerRegions } from "./commands/regions.js";
 import { registerStatus } from "./commands/status.js";
 import { registerOpen } from "./commands/open.js";
@@ -28,6 +32,12 @@ import { registerContext } from "./commands/context.js";
 import { registerGit } from "./commands/git.js";
 import { registerVersion } from "./commands/version.js";
 import { registerUpdate } from "./commands/update.js";
+import { registerLink } from "./commands/link.js";
+import { registerUnlink } from "./commands/unlink.js";
+import { registerService } from "./commands/service.js";
+import { registerDomain } from "./commands/domain.js";
+import { registerVolume } from "./commands/volume.js";
+import { registerScale } from "./commands/scale.js";
 const program = new Command();
 program
     .name("lizard")
@@ -36,7 +46,11 @@ program
     .option("--json", "Output in JSON format")
     .option("-y, --yes", "Skip confirmation prompts")
     .option("--workspace <id>", "Workspace name or ID")
-    .option("--project <id>", "Project ID")
+    // Note: --service is intentionally NOT a global — it conflicts with
+    // `environment edit -s, --service-config`. Commands that need it
+    // declare it locally.
+    .option("-p, --project <id>", "Project name or ID")
+    .option("-e, --environment <name>", "Environment name or ID")
     .option("--region <region>", "Region for creating services")
     .option("--token <token>", "API token")
     .option("--no-color", "Disable colors")
@@ -72,16 +86,26 @@ registerLogin(program);
 registerLogout(program);
 registerWhoami(program);
 registerInit(program);
+registerLink(program);
+registerUnlink(program);
 registerProjects(program);
+registerList(program);
+registerUp(program);
 registerDeploy(program);
 registerPs(program);
 registerAdd(program);
+registerService(program);
+registerDomain(program);
+registerVolume(program);
+registerScale(program);
 registerSnapshot(program);
 registerDestroy(program);
+registerDown(program);
 registerRestart(program);
 registerRedeploy(program);
 registerLogs(program);
 registerSecrets(program);
+registerVariables(program);
 registerRegions(program);
 registerStatus(program);
 registerOpen(program);
