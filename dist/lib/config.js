@@ -17,13 +17,32 @@ export function saveConfig(config) {
         mode: 0o600,
     });
 }
+/**
+ * Read the link for a directory. Normalises legacy `appId/appName` into
+ * `serviceId/serviceName` so callers only have to look at one pair.
+ */
 export function getProjectLink(cwd = process.cwd()) {
-    return loadConfig().projects?.[cwd] ?? null;
+    const raw = loadConfig().projects?.[cwd];
+    if (!raw)
+        return null;
+    return {
+        ...raw,
+        serviceId: raw.serviceId ?? raw.appId,
+        serviceName: raw.serviceName ?? raw.appName,
+    };
 }
 export function setProjectLink(link, cwd = process.cwd()) {
     const config = loadConfig();
     config.projects ??= {};
-    config.projects[cwd] = link;
+    // Mirror service↔app for older readers.
+    const normalised = {
+        ...link,
+        appId: link.serviceId ?? link.appId,
+        appName: link.serviceName ?? link.appName,
+        serviceId: link.serviceId ?? link.appId,
+        serviceName: link.serviceName ?? link.appName,
+    };
+    config.projects[cwd] = normalised;
     saveConfig(config);
 }
 export function updateProjectLink(patch, cwd = process.cwd()) {
@@ -31,6 +50,13 @@ export function updateProjectLink(patch, cwd = process.cwd()) {
     if (!existing)
         return;
     setProjectLink({ ...existing, ...patch }, cwd);
+}
+export function clearProjectLink(cwd = process.cwd()) {
+    const config = loadConfig();
+    if (config.projects) {
+        delete config.projects[cwd];
+        saveConfig(config);
+    }
 }
 /**
  * Resolve projectId from: --project flag (ID only) → linked cwd → error.

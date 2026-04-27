@@ -18,7 +18,15 @@ export interface Credentials {
 export interface ProjectLink {
   projectId: string;
   projectName?: string;
+  /** Active environment for this cwd */
+  environmentId?: string;
+  environmentName?: string;
+  /** Active service for this cwd. `appId/appName` are kept as aliases for backwards compat. */
+  serviceId?: string;
+  serviceName?: string;
+  /** @deprecated use serviceId */
   appId?: string;
+  /** @deprecated use serviceName */
   appName?: string;
 }
 
@@ -42,14 +50,32 @@ export function saveConfig(config: Config) {
   });
 }
 
+/**
+ * Read the link for a directory. Normalises legacy `appId/appName` into
+ * `serviceId/serviceName` so callers only have to look at one pair.
+ */
 export function getProjectLink(cwd: string = process.cwd()): ProjectLink | null {
-  return loadConfig().projects?.[cwd] ?? null;
+  const raw = loadConfig().projects?.[cwd];
+  if (!raw) return null;
+  return {
+    ...raw,
+    serviceId: raw.serviceId ?? raw.appId,
+    serviceName: raw.serviceName ?? raw.appName,
+  };
 }
 
 export function setProjectLink(link: ProjectLink, cwd: string = process.cwd()) {
   const config = loadConfig();
   config.projects ??= {};
-  config.projects[cwd] = link;
+  // Mirror service↔app for older readers.
+  const normalised: ProjectLink = {
+    ...link,
+    appId: link.serviceId ?? link.appId,
+    appName: link.serviceName ?? link.appName,
+    serviceId: link.serviceId ?? link.appId,
+    serviceName: link.serviceName ?? link.appName,
+  };
+  config.projects[cwd] = normalised;
   saveConfig(config);
 }
 
@@ -60,6 +86,14 @@ export function updateProjectLink(
   const existing = getProjectLink(cwd);
   if (!existing) return;
   setProjectLink({ ...existing, ...patch }, cwd);
+}
+
+export function clearProjectLink(cwd: string = process.cwd()) {
+  const config = loadConfig();
+  if (config.projects) {
+    delete config.projects[cwd];
+    saveConfig(config);
+  }
 }
 
 /**
