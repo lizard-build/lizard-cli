@@ -28,6 +28,8 @@ import { registerContext } from "./commands/context.js";
 import { registerGit } from "./commands/git.js";
 import { registerVersion } from "./commands/version.js";
 import { registerUpdate } from "./commands/update.js";
+import { registerEnv } from "./commands/env.js";
+import { registerService } from "./commands/service.js";
 const program = new Command();
 program
     .name("lizard")
@@ -91,6 +93,8 @@ registerContext(program);
 registerGit(program);
 registerVersion(program);
 registerUpdate(program);
+registerEnv(program);
+registerService(program);
 // Shell completion
 program
     .command("completion")
