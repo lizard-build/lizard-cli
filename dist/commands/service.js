@@ -37,7 +37,7 @@ export function registerService(program) {
         .description("List services in the project")
         .action(async (opts, sub) => {
         const inherited = sub.parent?.opts() || {};
-        const projectId = resolveProjectId(opts.project ?? inherited.project);
+        const projectId = resolveProjectId(opts.project ?? inherited.project ?? program.opts().project);
         const data = await api.get(`/api/projects/${projectId}/services`);
         const apps = data.apps || [];
         const addons = data.addons || [];

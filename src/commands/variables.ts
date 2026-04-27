@@ -70,7 +70,7 @@ export function registerVariables(program: Command) {
     .option("-p, --project <id>", "Project to scope to")
     .option("-e, --environment <name>", "Environment to scope to")
     .action(async (opts) => {
-      const scope = await resolveScope(opts.project, opts.service, opts.global);
+      const scope = await resolveScope(opts.project ?? program.opts().project, opts.service, opts.global);
 
       // --set <kv...>
       if (opts.set?.length) {
@@ -132,9 +132,9 @@ export function registerVariables(program: Command) {
     .action(async (opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
-        opts.project ?? inherited.project,
+        opts.project ?? inherited.project ?? program.opts().project,
         opts.service ?? inherited.service,
-        opts.global,
+        opts.global || inherited.global,
       );
       const variables = await api.get<Variable[]>(scope.path);
 
@@ -172,9 +172,9 @@ export function registerVariables(program: Command) {
     .action(async (pairs: string[], opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
-        opts.project ?? inherited.project,
+        opts.project ?? inherited.project ?? program.opts().project,
         opts.service ?? inherited.service,
-        opts.global,
+        opts.global || inherited.global,
       );
       const newVars = parsePairs(pairs);
       const existing = await api.get<Variable[]>(scope.path);
@@ -204,9 +204,9 @@ export function registerVariables(program: Command) {
     .action(async (keys: string[], opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
-        opts.project ?? inherited.project,
+        opts.project ?? inherited.project ?? program.opts().project,
         opts.service ?? inherited.service,
-        opts.global,
+        opts.global || inherited.global,
       );
       const existing = await api.get<Variable[]>(scope.path);
 
@@ -237,9 +237,9 @@ export function registerVariables(program: Command) {
     .action(async (opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
-        opts.project ?? inherited.project,
+        opts.project ?? inherited.project ?? program.opts().project,
         opts.service ?? inherited.service,
-        opts.global,
+        opts.global || inherited.global,
       );
 
       const chunks: Buffer[] = [];

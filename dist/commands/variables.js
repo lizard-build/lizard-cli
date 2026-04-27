@@ -51,7 +51,7 @@ export function registerVariables(program) {
         .option("-p, --project <id>", "Project to scope to")
         .option("-e, --environment <name>", "Environment to scope to")
         .action(async (opts) => {
-        const scope = await resolveScope(opts.project, opts.service, opts.global);
+        const scope = await resolveScope(opts.project ?? program.opts().project, opts.service, opts.global);
         // --set <kv...>
         if (opts.set?.length) {
             const newVars = parsePairs(opts.set);
@@ -99,7 +99,7 @@ export function registerVariables(program) {
         .option("--show", "Reveal values")
         .action(async (opts, sub) => {
         const inherited = sub.parent?.opts() || {};
-        const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global);
+        const scope = await resolveScope(opts.project ?? inherited.project ?? program.opts().project, opts.service ?? inherited.service, opts.global || inherited.global);
         const variables = await api.get(scope.path);
         if (isJSONMode()) {
             printJSON(opts.show
@@ -126,7 +126,7 @@ export function registerVariables(program) {
         .option("--no-redeploy", "Don't trigger redeploy")
         .action(async (pairs, opts, sub) => {
         const inherited = sub.parent?.opts() || {};
-        const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global);
+        const scope = await resolveScope(opts.project ?? inherited.project ?? program.opts().project, opts.service ?? inherited.service, opts.global || inherited.global);
         const newVars = parsePairs(pairs);
         const existing = await api.get(scope.path);
         const map = new Map(existing.map((s) => [s.key, s.value]));
@@ -153,7 +153,7 @@ export function registerVariables(program) {
         .option("--no-redeploy", "Don't trigger redeploy")
         .action(async (keys, opts, sub) => {
         const inherited = sub.parent?.opts() || {};
-        const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global);
+        const scope = await resolveScope(opts.project ?? inherited.project ?? program.opts().project, opts.service ?? inherited.service, opts.global || inherited.global);
         const existing = await api.get(scope.path);
         const set = new Set(keys);
         const filtered = existing.filter((s) => !set.has(s.key));
@@ -178,7 +178,7 @@ export function registerVariables(program) {
         .option("--no-redeploy", "Don't trigger redeploy")
         .action(async (opts, sub) => {
         const inherited = sub.parent?.opts() || {};
-        const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global);
+        const scope = await resolveScope(opts.project ?? inherited.project ?? program.opts().project, opts.service ?? inherited.service, opts.global || inherited.global);
         const chunks = [];
         for await (const chunk of process.stdin)
             chunks.push(chunk);
