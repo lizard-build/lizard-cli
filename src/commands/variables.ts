@@ -19,20 +19,32 @@ interface Variable {
  *
  * `--set KEY=value [...]` is the inline-set form.
  */
+interface Scope {
+  path: string;
+  label: "project" | "service";
+  projectId: string;
+  serviceId?: string;
+}
+
 async function resolveScope(
   projectFlag: string | undefined,
   serviceFlag: string | undefined,
   global: boolean,
-): Promise<{ path: string; label: string }> {
+): Promise<Scope> {
+  const projectId = resolveProjectId(projectFlag);
+
   if (global) {
-    const projectId = resolveProjectId(projectFlag);
-    return { path: `/api/projects/${projectId}/secrets`, label: "project" };
+    return { path: `/api/projects/${projectId}/secrets`, label: "project", projectId };
   }
 
-  const projectId = resolveProjectId(projectFlag);
   if (serviceFlag) {
     const svc = await getActiveService(serviceFlag, projectId);
-    return { path: `/api/apps/${svc.id}/secrets`, label: "service" };
+    return {
+      path: `/api/apps/${svc.id}/secrets`,
+      label: "service",
+      projectId,
+      serviceId: svc.id,
+    };
   }
 
   const link = getProjectLink();
@@ -41,7 +53,83 @@ async function resolveScope(
       "No service linked. Pass --service <name>, run `lizard service link <name>`, or use --global.",
     );
   }
-  return { path: `/api/apps/${link.serviceId}/secrets`, label: "service" };
+  return {
+    path: `/api/apps/${link.serviceId}/secrets`,
+    label: "service",
+    projectId,
+    serviceId: link.serviceId,
+  };
+}
+
+const REF_PATTERN = /\$\{\{[^}]+\}\}/;
+
+function hasReference(vars: Record<string, string>): boolean {
+  return Object.values(vars).some((v) => REF_PATTERN.test(v));
+}
+
+/**
+ * Apply variables. When any value contains a `${{...}}` reference we route
+ * through `config:apply` — that's the only endpoint that resolves references
+ * (see service-set.ts). Plain values keep using the simple secrets PUT.
+ *
+ * On 404 from config:apply we fall back to PUT with a warning so the user
+ * knows the reference will end up stored as a literal string until the
+ * backend lands the resolver.
+ */
+async function applyVariables(
+  scope: Scope,
+  newVars: Record<string, string>,
+  noRedeploy: boolean,
+): Promise<void> {
+  const needsResolver = hasReference(newVars);
+
+  if (needsResolver && scope.label === "service" && scope.serviceId) {
+    const variables: Record<string, { value: string }> = {};
+    for (const [k, v] of Object.entries(newVars)) variables[k] = { value: v };
+
+    try {
+      await api.post(`/api/projects/${scope.projectId}/config:apply`, {
+        patch: { services: { [scope.serviceId]: { variables } } },
+      });
+      return;
+    } catch (err: any) {
+      if (err?.status !== 404) throw err;
+      console.warn(
+        chalk.yellow(
+          "warning: config:apply not available — storing as literal string. " +
+            "${{...}} references will NOT be resolved until the backend lands the resolver.",
+        ),
+      );
+      // fall through to PUT
+    }
+  }
+
+  if (needsResolver && scope.label === "project") {
+    // Project-level shared variables also flow through config:apply.
+    try {
+      await api.post(`/api/projects/${scope.projectId}/config:apply`, {
+        patch: {
+          sharedVariables: Object.fromEntries(
+            Object.entries(newVars).map(([k, v]) => [k, { value: v }]),
+          ),
+        },
+      });
+      return;
+    } catch (err: any) {
+      if (err?.status !== 404) throw err;
+      console.warn(
+        chalk.yellow(
+          "warning: config:apply not available — storing as literal string.",
+        ),
+      );
+    }
+  }
+
+  const existing = await api.get<Variable[]>(scope.path);
+  const map = new Map(existing.map((s) => [s.key, s.value]));
+  for (const [k, v] of Object.entries(newVars)) map.set(k, v);
+  const merged = Array.from(map.entries()).map(([key, value]) => ({ key, value }));
+  await api.put(scope.path, { secrets: merged, noRedeploy });
 }
 
 function parsePairs(pairs: string[]): Record<string, string> {
@@ -65,6 +153,7 @@ export function registerVariables(program: Command) {
       "--set <kv...>",
       "KEY=value pairs to set (mutually exclusive with subcommands)",
     )
+    .option("--refs", "List reference templates available in this scope")
     .option("--no-redeploy", "Don't trigger redeploy on set/delete")
     .option("-s, --service <name>", "Service to scope to (overrides linked)")
     .option("-p, --project <id>", "Project to scope to")
@@ -72,18 +161,16 @@ export function registerVariables(program: Command) {
     .action(async (opts) => {
       const scope = await resolveScope(opts.project ?? program.opts().project, opts.service, opts.global);
 
+      // --refs → list reference templates exposed by the platform
+      if (opts.refs) {
+        await printRefs(scope);
+        return;
+      }
+
       // --set <kv...>
       if (opts.set?.length) {
         const newVars = parsePairs(opts.set);
-        const existing = await api.get<Variable[]>(scope.path);
-        const map = new Map(existing.map((s) => [s.key, s.value]));
-        for (const [k, v] of Object.entries(newVars)) map.set(k, v);
-        const merged = Array.from(map.entries()).map(([key, value]) => ({ key, value }));
-
-        await api.put(scope.path, {
-          secrets: merged,
-          noRedeploy: opts.redeploy === false,
-        });
+        await applyVariables(scope, newVars, opts.redeploy === false);
 
         if (isJSONMode()) {
           printJSON({ updated: Object.keys(newVars), scope: scope.label });
@@ -177,15 +264,7 @@ export function registerVariables(program: Command) {
         opts.global || inherited.global,
       );
       const newVars = parsePairs(pairs);
-      const existing = await api.get<Variable[]>(scope.path);
-      const map = new Map(existing.map((s) => [s.key, s.value]));
-      for (const [k, v] of Object.entries(newVars)) map.set(k, v);
-      const merged = Array.from(map.entries()).map(([key, value]) => ({ key, value }));
-
-      await api.put(scope.path, {
-        secrets: merged,
-        noRedeploy: opts.redeploy === false,
-      });
+      await applyVariables(scope, newVars, opts.redeploy === false);
 
       if (isJSONMode()) {
         printJSON({ updated: Object.keys(newVars), scope: scope.label });
@@ -275,4 +354,67 @@ export function registerVariables(program: Command) {
         success(`${Object.keys(newVars).length} ${scope.label} variable(s) imported`);
       }
     });
+}
+
+interface VarRef {
+  template: string;
+  description?: string;
+  source?: string;
+}
+
+/**
+ * Fetch the reference manifest from the backend so users know which
+ * `${{...}}` templates are valid (e.g. `${{Postgres.DATABASE_URL}}`,
+ * `${{api.LIZARD_PUBLIC_DOMAIN}}`). Backend endpoint:
+ *   GET /api/projects/<id>/variables:refs
+ *   GET /api/apps/<id>/variables:refs       (for service-scope)
+ *
+ * Returns a flat list of templates ready to copy-paste.
+ */
+async function printRefs(scope: Scope): Promise<void> {
+  const endpoint =
+    scope.label === "service" && scope.serviceId
+      ? `/api/apps/${scope.serviceId}/variables:refs`
+      : `/api/projects/${scope.projectId}/variables:refs`;
+
+  let refs: VarRef[];
+  try {
+    refs = await api.get<VarRef[]>(endpoint);
+  } catch (err: any) {
+    if (err?.status === 404) {
+      console.log(
+        chalk.yellow(
+          "Variable-refs endpoint not yet implemented. The API needs " +
+            `\`GET ${endpoint}\` returning [{ template, description?, source? }].`,
+        ),
+      );
+      console.log(
+        chalk.dim(
+          "\nReserved templates (subject to change once backend lands):\n" +
+            "  ${{<service>.LIZARD_PUBLIC_DOMAIN}}    public hostname (after `domain generate`)\n" +
+            "  ${{<service>.LIZARD_PRIVATE_DOMAIN}}   internal cluster hostname\n" +
+            "  ${{<service>.PORT}}                    port the service listens on\n" +
+            "  ${{<addon>.DATABASE_URL}}              addon-issued connection string\n" +
+            "  ${{<addon>.DATABASE_PUBLIC_URL}}       publicly reachable variant",
+        ),
+      );
+      return;
+    }
+    throw err;
+  }
+
+  if (isJSONMode()) {
+    printJSON(refs);
+    return;
+  }
+
+  if (!refs.length) {
+    console.log("No reference variables exposed in this scope.");
+    return;
+  }
+
+  table(
+    ["Template", "Source", "Description"],
+    refs.map((r) => [chalk.cyan(r.template), r.source || "—", r.description || ""]),
+  );
 }

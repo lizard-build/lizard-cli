@@ -9,6 +9,10 @@ interface Domain {
   domain: string;
   type: "service" | "custom";
   port?: number;
+  /** Backend should return the env-var name this domain is exposed as
+   *  (e.g. "LIZARD_PUBLIC_DOMAIN"), so the CLI can print a copy-paste
+   *  reference template like `${{<svc>.LIZARD_PUBLIC_DOMAIN}}`. */
+  envVar?: string;
 }
 
 /**
@@ -105,6 +109,12 @@ export function registerDomain(program: Command) {
         printJSON(result);
       } else {
         success(`Domain generated: ${chalk.cyan(`https://${result.domain}`)}`);
+        const envVar = result.envVar || "LIZARD_PUBLIC_DOMAIN";
+        console.log(
+          chalk.dim(
+            `  Reference from other services: ${chalk.cyan(`\${{${service.name}.${envVar}}}`)}`,
+          ),
+        );
       }
     });
 
