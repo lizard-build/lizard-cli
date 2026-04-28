@@ -212,7 +212,7 @@ export function registerService(program) {
         if (Object.keys(body).length === 0) {
             throw new Error("Pass --replicas <n> or --region <code> (or both).");
         }
-        await api.patch(`/api/apps/${svcInfo.id}/scale`, body).catch((err) => {
+        await api.post(`/api/apps/${svcInfo.id}/scale`, body).catch((err) => {
             if (err?.status === 404) {
                 throw new Error("Scaling endpoint not yet implemented on the platform.");
             }

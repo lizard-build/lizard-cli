@@ -288,19 +288,16 @@ describe("service commands", () => {
 // ── Scale ─────────────────────────────────────────────────────────────────────
 
 describe("scale", () => {
-  // The backend exposes POST /api/apps/:id/scale; the CLI sends PATCH.
-  // This mismatch means `lizard scale --replicas` currently fails with 405.
-  // Test documents the known state so we catch when it's fixed.
+  // CLI sends POST /api/apps/:id/scale (matches the backend route).
 
-  test("scale --replicas fails gracefully (PATCH vs POST mismatch)", async () => {
-    // We need a running app — grab first from project if any
+  test("scale --replicas succeeds against an existing app", async () => {
     const services = await cliJSON("--project", projectId, "ps").catch(() => ({ apps: [] }));
     const apps: Array<{ id: string; name: string }> = services?.apps ?? [];
     if (apps.length === 0) { console.log("  ⚠ no apps in project, skipping scale test"); return; }
     const app = apps[0];
-    await expect(
-      cli("--project", projectId, "scale", "--service", app.name, "--replicas", "1"),
-    ).rejects.toThrow();
+    const out = await cliJSON("--project", projectId, "scale", "--service", app.name, "--replicas", "1");
+    expect(out).toBeTruthy();
+    expect(out.id ?? out.replicas ?? out.desiredReplicas).toBeDefined();
   });
 });
 
