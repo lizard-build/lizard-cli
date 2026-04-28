@@ -70,32 +70,8 @@ export function registerUp(program: Command) {
       const targetPath = pathArg ? path.resolve(pathArg) : process.cwd();
       const archiveRoot = opts.pathAsRoot ? targetPath : process.cwd();
 
-      // ── Already-known service (fast path: trigger redeploy) ─────────────
-      if (ctx.service && !pathArg) {
-        const app = await api
-          .get<App>(`/api/apps/${ctx.service.id}`)
-          .catch(() => null);
-        if (app) {
-          const version = (app.builds?.length ?? 0) + 1;
-          info(`Deploying ${chalk.bold(app.name)} ${chalk.dim(`v${version}`)}...`);
-          await api.post(`/api/apps/${app.id}/redeploy`, {
-            message: opts.message,
-            environmentId: ctx.environment?.id,
-          });
-          if (opts.detach) {
-            isJSONMode()
-              ? printJSON({ appId: app.id, version, status: "deploying" })
-              : success(
-                  `Deploy v${version} started  ${chalk.dim(`lizard up status ${app.id}`)}`,
-                );
-            return;
-          }
-          await streamBuildLogs(app.id, opts.ci);
-          return;
-        }
-      }
-
-      // ── First deploy or new code upload ─────────────────────────────────
+      // `up` always uploads code (railway-style). For redeploy of an existing
+      // build without re-uploading, use `lizard redeploy`.
       const gitRemote = !pathArg ? getGitRemote() : null;
 
       if (gitRemote && !ctx.service) {

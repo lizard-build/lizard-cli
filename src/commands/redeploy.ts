@@ -38,6 +38,16 @@ export function registerRedeploy(program: Command) {
         }
       }
 
+      const target = await api.get<{
+        name: string;
+        builds?: Array<{ id: string; status: string }>;
+      }>(`/api/apps/${id}`);
+      if (!target.builds?.length) {
+        throw new Error(
+          `Service "${target.name}" has no prior build to redeploy. Run \`lizard up\` to deploy code first.`,
+        );
+      }
+
       const spinner = ora("Starting redeploy...").start();
       await api.post(`/api/apps/${id}/redeploy`);
       spinner.stop();
