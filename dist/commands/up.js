@@ -31,6 +31,10 @@ export function registerUp(program) {
         .option("--path-as-root", "Use the path argument as the archive root")
         .option("-m, --message <text>", "Message to attach to the deployment")
         .option("--verbose", "Verbose output")
+        .option("--build-command <cmd>", "Build command to run (e.g. 'npm run build')")
+        .option("--start-command <cmd>", "Start command to run (e.g. 'node dist/index.js')")
+        .option("--pre-deploy-command <cmd>", "Pre-deploy command (e.g. 'node dist/migrate.js')")
+        .option("--port <number>", "Container port (default: 3000)")
         .action(async (pathArg, opts, _cmd) => {
         const serviceFlag = opts.service;
         const projectFlag = opts.project;
@@ -68,6 +72,10 @@ export function registerUp(program) {
             serviceFlag,
             existingServiceId: ctx.service?.id,
             environmentId: ctx.environment?.id,
+            buildCommand: opts.buildCommand,
+            startCommand: opts.startCommand,
+            preDeployCommand: opts.preDeployCommand,
+            port: opts.port ? parseInt(opts.port, 10) : undefined,
             opts,
         });
     });
@@ -139,13 +147,21 @@ async function deployFromLocal(args) {
     const spinner = ora("Uploading...").start();
     let newApp;
     try {
-        const qs = new URLSearchParams({ name: appName, port: "3000" });
+        const qs = new URLSearchParams({ port: String(args.port ?? 3000) });
+        if (!args.existingServiceId)
+            qs.set("name", appName);
         if (args.environmentId)
             qs.set("environment", args.environmentId);
         if (args.opts.message)
             qs.set("message", args.opts.message);
         if (args.existingServiceId)
             qs.set("appId", args.existingServiceId);
+        if (args.buildCommand)
+            qs.set("buildCommand", args.buildCommand);
+        if (args.startCommand)
+            qs.set("startCommand", args.startCommand);
+        if (args.preDeployCommand)
+            qs.set("preDeployCommand", args.preDeployCommand);
         const url = `${getBaseURL()}/api/projects/${args.projectId}/apps/upload?${qs.toString()}`;
         const res = await fetch(url, {
             method: "POST",
