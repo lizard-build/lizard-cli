@@ -7,8 +7,18 @@ const CATALOG = [
     { name: "postgres", label: "PostgreSQL", description: "Relational database" },
     { name: "redis", label: "Redis", description: "In-memory key-value store" },
     { name: "mysql", label: "MySQL", description: "Relational database" },
-    { name: "mongodb", label: "MongoDB", description: "Document database" },
+    { name: "mongo", label: "MongoDB", description: "Document database", aliases: ["mongodb"] },
+    { name: "s3", label: "S3 Bucket", description: "S3-compatible object storage" },
 ];
+function normalizeDbName(name) {
+    for (const c of CATALOG) {
+        if (c.name === name)
+            return c.name;
+        if (c.aliases?.includes(name))
+            return c.name;
+    }
+    return name;
+}
 /**
  * Resolve a project by name/slug/id. Name-based lookup hits /api/projects and
  * matches against the list. Falls back to the cwd-linked project when no
@@ -54,6 +64,7 @@ export function registerAdd(program) {
         .option("-v, --variables <kv...>", "KEY=value pairs to seed the service")
         .option("-p, --project <name>", "Project name or ID")
         .option("--region <region>", "Region for the service")
+        .option("--instance-name <name>", "Stable instance name used in ${{<name>.KEY}} templates (must be DNS-safe)")
         .option("--list", "Show available database types")
         .action(async (name, opts) => {
         const projectFlag = opts.project;
@@ -72,9 +83,12 @@ export function registerAdd(program) {
         // ── -d <type...> or positional <name> for backwards compat ────────
         const databases = [];
         if (opts.database?.length)
-            databases.push(...opts.database);
-        if (name && CATALOG.some((c) => c.name === name))
-            databases.push(name);
+            databases.push(...opts.database.map(normalizeDbName));
+        if (name) {
+            const norm = normalizeDbName(name);
+            if (CATALOG.some((c) => c.name === norm))
+                databases.push(norm);
+        }
         if (databases.length > 0) {
             const projectId = await resolveProject(projectFlag);
             const isSingle = databases.length === 1;
@@ -88,6 +102,7 @@ export function registerAdd(program) {
                     type: db,
                     region,
                     variables,
+                    ...(opts.instanceName ? { instanceName: opts.instanceName } : {}),
                 });
                 if (isJSONMode())
                     printJSON(addon);

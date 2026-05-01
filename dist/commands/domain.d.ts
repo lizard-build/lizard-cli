@@ -1,9 +1,9 @@
 import { Command } from "commander";
 /**
  * `lizard domain` — Railway-style domain management.
- *   bare         → list domains for linked/--service
- *   <hostname>   → add a custom domain
+ *   bare         → if no domain, auto-generate one; otherwise show current
+ *   <hostname>   → attach a custom domain
  *   delete <h>   → remove a domain
- *   generate     → create a *.lizard.app subdomain
+ *   generate     → force-generate a fresh *.onlizard.com subdomain
  */
 export declare function registerDomain(program: Command): void;

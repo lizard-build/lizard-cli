@@ -35,6 +35,7 @@ export function registerUp(program) {
         .option("--start-command <cmd>", "Start command to run (e.g. 'node dist/index.js')")
         .option("--pre-deploy-command <cmd>", "Pre-deploy command (e.g. 'node dist/migrate.js')")
         .option("--port <number>", "Container port (default: 3000)")
+        .option("--worker", "Worker mode — service has no HTTP port (no Caddy route, no port wait)")
         .action(async (pathArg, opts, _cmd) => {
         const serviceFlag = opts.service;
         const projectFlag = opts.project;
@@ -75,7 +76,7 @@ export function registerUp(program) {
             buildCommand: opts.buildCommand,
             startCommand: opts.startCommand,
             preDeployCommand: opts.preDeployCommand,
-            port: opts.port ? parseInt(opts.port, 10) : undefined,
+            port: opts.worker ? 0 : (opts.port ? parseInt(opts.port, 10) : undefined),
             opts,
         });
     });

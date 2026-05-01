@@ -16,8 +16,17 @@ const CATALOG = [
   { name: "postgres", label: "PostgreSQL", description: "Relational database" },
   { name: "redis", label: "Redis", description: "In-memory key-value store" },
   { name: "mysql", label: "MySQL", description: "Relational database" },
-  { name: "mongodb", label: "MongoDB", description: "Document database" },
+  { name: "mongo", label: "MongoDB", description: "Document database", aliases: ["mongodb"] },
+  { name: "s3", label: "S3 Bucket", description: "S3-compatible object storage" },
 ] as const;
+
+function normalizeDbName(name: string): string {
+  for (const c of CATALOG) {
+    if (c.name === name) return c.name;
+    if ((c as any).aliases?.includes(name)) return c.name;
+  }
+  return name;
+}
 
 interface Project {
   id: string;
@@ -84,6 +93,7 @@ export function registerAdd(program: Command) {
     .option("-v, --variables <kv...>", "KEY=value pairs to seed the service")
     .option("-p, --project <name>", "Project name or ID")
     .option("--region <region>", "Region for the service")
+    .option("--instance-name <name>", "Stable instance name used in ${{<name>.KEY}} templates (must be DNS-safe)")
     .option("--list", "Show available database types")
     .action(async (name: string | undefined, opts) => {
       const projectFlag = opts.project;
@@ -106,8 +116,11 @@ export function registerAdd(program: Command) {
 
       // ── -d <type...> or positional <name> for backwards compat ────────
       const databases: string[] = [];
-      if (opts.database?.length) databases.push(...opts.database);
-      if (name && CATALOG.some((c) => c.name === name)) databases.push(name);
+      if (opts.database?.length) databases.push(...opts.database.map(normalizeDbName));
+      if (name) {
+        const norm = normalizeDbName(name);
+        if (CATALOG.some((c) => c.name === norm)) databases.push(norm);
+      }
 
       if (databases.length > 0) {
         const projectId = await resolveProject(projectFlag);
@@ -131,6 +144,7 @@ export function registerAdd(program: Command) {
             type: db,
             region,
             variables,
+            ...(opts.instanceName ? { instanceName: opts.instanceName } : {}),
           });
 
           if (isJSONMode()) printJSON(addon);

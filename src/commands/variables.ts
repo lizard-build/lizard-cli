@@ -61,70 +61,18 @@ async function resolveScope(
   };
 }
 
-const REF_PATTERN = /\$\{\{[^}]+\}\}/;
-
-function hasReference(vars: Record<string, string>): boolean {
-  return Object.values(vars).some((v) => REF_PATTERN.test(v));
-}
-
 /**
- * Apply variables. When any value contains a `${{...}}` reference we route
- * through `config:apply` — that's the only endpoint that resolves references
- * (see service-set.ts). Plain values keep using the simple secrets PUT.
+ * Apply variables. We store values verbatim — including ${{name.KEY}} templates.
+ * The platform's deployer expands templates against the project context at
+ * deploy time (see server `resolveEnv`). No client-side resolver needed.
  *
- * On 404 from config:apply we fall back to PUT with a warning so the user
- * knows the reference will end up stored as a literal string until the
- * backend lands the resolver.
+ * Merges with existing values; only keys in `newVars` are touched.
  */
 async function applyVariables(
   scope: Scope,
   newVars: Record<string, string>,
   noRedeploy: boolean,
 ): Promise<void> {
-  const needsResolver = hasReference(newVars);
-
-  if (needsResolver && scope.label === "service" && scope.serviceId) {
-    const variables: Record<string, { value: string }> = {};
-    for (const [k, v] of Object.entries(newVars)) variables[k] = { value: v };
-
-    try {
-      await api.post(`/api/projects/${scope.projectId}/config:apply`, {
-        patch: { services: { [scope.serviceId]: { variables } } },
-      });
-      return;
-    } catch (err: any) {
-      if (err?.status !== 404) throw err;
-      console.warn(
-        chalk.yellow(
-          "warning: config:apply not available — storing as literal string. " +
-            "${{...}} references will NOT be resolved until the backend lands the resolver.",
-        ),
-      );
-      // fall through to PUT
-    }
-  }
-
-  if (needsResolver && scope.label === "project") {
-    // Project-level shared variables also flow through config:apply.
-    try {
-      await api.post(`/api/projects/${scope.projectId}/config:apply`, {
-        patch: {
-          sharedVariables: Object.fromEntries(
-            Object.entries(newVars).map(([k, v]) => [k, { value: v }]),
-          ),
-        },
-      });
-      return;
-    } catch (err: any) {
-      if (err?.status !== 404) throw err;
-      console.warn(
-        chalk.yellow(
-          "warning: config:apply not available — storing as literal string.",
-        ),
-      );
-    }
-  }
-
   const existing = await api.get<Variable[]>(scope.path);
   const map = new Map(existing.map((s) => [s.key, s.value]));
   for (const [k, v] of Object.entries(newVars)) map.set(k, v);

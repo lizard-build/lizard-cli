@@ -59,21 +59,25 @@ export function registerServiceSet(svc: Command) {
         return;
       }
 
+      // The backend `/api/projects/:id/config:apply` schema expects:
+      //   { services: [{ name, buildCommand?, startCommand?, ... }],
+      //     addons:   [...],
+      //     secrets:  { shared?, services? } }
+      // The internal `patch.services` we built is keyed by service id with a
+      // nested {build,deploy,source,variables} layout — flatten it before send.
+      const body = await flattenPatch(patch, projectId);
       const result = await api
         .post<{
-          staged?: boolean;
-          committed?: boolean;
-          diff?: unknown;
-        }>(`/api/projects/${projectId}/config:apply`, {
-          patch,
-          message: opts.message,
-          stage: Boolean(opts.stage),
-        })
+          ok?: boolean;
+          revision?: number;
+          services?: any[];
+          addons?: any[];
+        }>(`/api/projects/${projectId}/config:apply`, body)
         .catch((err: any) => {
           if (err?.status === 404) {
             throw new Error(
               "Config-apply endpoint not yet implemented. The API needs " +
-                "`POST /api/projects/{id}/config:apply` with body { patch, message, stage }, " +
+                "`POST /api/projects/{id}/config:apply` with body { services, addons, secrets }, " +
                 "or `PATCH /api/apps/{id}` per service.",
             );
           }
@@ -82,26 +86,128 @@ export function registerServiceSet(svc: Command) {
 
       if (isJSONMode()) {
         printJSON({
-          staged: result?.staged ?? Boolean(opts.stage),
-          committed: result?.committed ?? !opts.stage,
+          ok: result?.ok ?? true,
+          revision: result?.revision,
+          services: result?.services,
+          addons: result?.addons,
           message: opts.message,
-          diff: result?.diff,
         });
         return;
       }
 
-      if (opts.stage) {
-        success(
-          `Changes staged` +
-            chalk.dim(" (commit with `lizard service set` again)"),
-        );
-      } else {
-        success(
-          `Service configuration applied` +
-            (opts.message ? chalk.dim(` (${opts.message})`) : ""),
-        );
-      }
+      success(
+        `Service configuration applied` +
+          (opts.message ? chalk.dim(` (${opts.message})`) : ""),
+      );
     });
+}
+
+/**
+ * Convert the internal nested patch shape (keyed by service id, with build/deploy
+ * sub-objects) into the flat array shape the server expects:
+ *   { services: [{ name, buildCommand?, startCommand?, ... }], secrets?: {...} }
+ *
+ * Dot-path mapping: build.X / deploy.X / source.X all collapse to the matching
+ * top-level field on the service. `variables.<KEY>.value` becomes envVars[KEY].
+ */
+async function flattenPatch(
+  patch: any,
+  projectId: string,
+): Promise<{ services: any[]; secrets?: any }> {
+  const out: { services: any[]; secrets?: any } = { services: [] };
+  if (!patch || typeof patch !== "object") return out;
+
+  const services = patch.services ?? {};
+  const idsInPatch = Object.keys(services);
+
+  // Need each service's name (server keys upserts by name, not id)
+  let nameById = new Map<string, string>();
+  if (idsInPatch.length > 0) {
+    const data = await api.get<{ apps?: any[]; addons?: any[] }>(
+      `/api/projects/${projectId}/services`,
+    );
+    const all = [...(data.apps || []), ...(data.addons || [])];
+    nameById = new Map(all.map((s: any) => [s.id, s.name]));
+  }
+
+  for (const id of idsInPatch) {
+    const cfg = services[id] || {};
+    const name = nameById.get(id);
+    if (!name) {
+      throw new Error(`Service ${id} no longer exists in the project.`);
+    }
+    const flat: Record<string, unknown> = { name };
+
+    // Source group
+    if (cfg.source?.repo !== undefined) flat.repoUrl = cfg.source.repo;
+    if (cfg.source?.branch !== undefined) flat.branch = cfg.source.branch;
+    if (cfg.source?.image !== undefined) flat.image = cfg.source.image;
+    if (cfg.source?.rootDirectory !== undefined)
+      flat.rootDirectory = cfg.source.rootDirectory;
+
+    // Build group
+    if (cfg.build?.builder !== undefined) flat.builder = cfg.build.builder;
+    if (cfg.build?.buildCommand !== undefined)
+      flat.buildCommand = cfg.build.buildCommand;
+    if (cfg.build?.watchPatterns !== undefined)
+      flat.watchPatterns = cfg.build.watchPatterns;
+    if (cfg.build?.dockerfilePath !== undefined)
+      flat.dockerfilePath = cfg.build.dockerfilePath;
+
+    // Deploy group
+    if (cfg.deploy?.startCommand !== undefined)
+      flat.startCommand = cfg.deploy.startCommand;
+    if (cfg.deploy?.preDeployCommand !== undefined)
+      flat.preDeployCommand = cfg.deploy.preDeployCommand;
+    if (cfg.deploy?.healthcheckPath !== undefined)
+      flat.healthcheckPath = cfg.deploy.healthcheckPath;
+    if (cfg.deploy?.healthcheckTimeout !== undefined)
+      flat.healthcheckTimeoutMs = cfg.deploy.healthcheckTimeout;
+    if (cfg.deploy?.numReplicas !== undefined)
+      flat.desiredReplicas = cfg.deploy.numReplicas;
+    if (cfg.deploy?.restartPolicyType !== undefined) {
+      // Railway uses ON_FAILURE/ALWAYS/NEVER; server uses on-failure/always/never
+      const v = String(cfg.deploy.restartPolicyType).toLowerCase().replace(/_/g, "-");
+      flat.restartPolicyType = v;
+    }
+
+    // Variables → envVars (templated values are stored verbatim, deployer resolves)
+    if (cfg.variables && typeof cfg.variables === "object") {
+      const envVars: Record<string, string> = {};
+      for (const [k, raw] of Object.entries(cfg.variables)) {
+        envVars[k] = typeof raw === "object" && raw && "value" in (raw as any)
+          ? String((raw as any).value)
+          : String(raw);
+      }
+      flat.envVars = envVars;
+    }
+
+    // Allow an explicit envVars block at the service level too
+    if (cfg.envVars && typeof cfg.envVars === "object") {
+      flat.envVars = { ...(flat.envVars as object | undefined), ...cfg.envVars };
+    }
+
+    out.services.push(flat);
+  }
+
+  // Pass through shared / per-service secrets if the patch carries them
+  if (patch.sharedVariables || patch.secrets) {
+    const secrets: { shared?: Record<string, string>; services?: Record<string, Record<string, string>> } = {};
+    if (patch.sharedVariables) {
+      secrets.shared = {};
+      for (const [k, raw] of Object.entries(patch.sharedVariables)) {
+        secrets.shared[k] =
+          typeof raw === "object" && raw && "value" in (raw as any)
+            ? String((raw as any).value)
+            : String(raw);
+      }
+    }
+    if (patch.secrets?.services) secrets.services = patch.secrets.services;
+    if (patch.secrets?.shared) secrets.shared = { ...(secrets.shared || {}), ...patch.secrets.shared };
+    out.secrets = secrets;
+  }
+
+  return out;
 }
 
 // ── input handling ──────────────────────────────────────────────────────────

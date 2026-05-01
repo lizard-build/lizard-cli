@@ -5,28 +5,31 @@ import { resolveProjectId } from "../lib/config.js";
 import { getActiveService } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON, table } from "../lib/format.js";
 
-interface Domain {
-  domain: string;
-  type: "service" | "custom";
-  port?: number;
-  /** Backend should return the env-var name this domain is exposed as
-   *  (e.g. "LIZARD_PUBLIC_DOMAIN"), so the CLI can print a copy-paste
-   *  reference template like `${{<svc>.LIZARD_PUBLIC_DOMAIN}}`. */
-  envVar?: string;
+interface DomainResponse {
+  ok?: boolean;
+  hostname: string;
+  generated?: boolean;
+}
+
+interface AppLite {
+  id: string;
+  name: string;
+  domain?: string | null;
+  containerPort?: number | null;
 }
 
 /**
  * `lizard domain` — Railway-style domain management.
- *   bare         → list domains for linked/--service
- *   <hostname>   → add a custom domain
+ *   bare         → if no domain, auto-generate one; otherwise show current
+ *   <hostname>   → attach a custom domain
  *   delete <h>   → remove a domain
- *   generate     → create a *.lizard.app subdomain
+ *   generate     → force-generate a fresh *.onlizard.com subdomain
  */
 export function registerDomain(program: Command) {
   const dom = program
     .command("domain")
     .alias("domains")
-    .argument("[hostname]", "Custom domain to add (e.g. app.example.com)")
+    .argument("[hostname]", "Custom domain to attach (e.g. app.example.com)")
     .description("Manage service domains")
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
@@ -37,56 +40,77 @@ export function registerDomain(program: Command) {
       const service = await getActiveService(opts.service, projectId);
 
       if (!hostname) {
-        // List
-        const domains = await api
-          .get<Domain[]>(`/api/apps/${service.id}/domains`)
-          .catch(() => [] as Domain[]);
+        // Bare `lizard domain` — Railway-compat: show or auto-generate.
+        const appRow = await api
+          .get<AppLite>(`/api/apps/${service.id}`)
+          .catch(() => null);
+        const existing = appRow?.domain;
+
+        if (existing) {
+          if (isJSONMode()) {
+            printJSON({ hostname: existing, generated: false });
+          } else {
+            console.log(chalk.cyan(`https://${existing}`));
+            console.log(
+              chalk.dim(
+                `  Reference from other services: ${chalk.cyan(`\${{${service.name}.LIZARD_PUBLIC_DOMAIN}}`)}`,
+              ),
+            );
+          }
+          return;
+        }
+
+        const result = await api
+          .post<DomainResponse>(`/api/apps/${service.id}/domains`, { generate: true })
+          .catch((err: any) => {
+            if (err?.status === 404) {
+              throw new Error(
+                "Domain endpoint not yet implemented. The API needs " +
+                  "`POST /api/apps/{id}/domains` with body { generate: true }.",
+              );
+            }
+            throw err;
+          });
 
         if (isJSONMode()) {
-          printJSON(domains);
-          return;
+          printJSON(result);
+        } else {
+          success(`Domain generated: ${chalk.cyan(`https://${result.hostname}`)}`);
+          console.log(
+            chalk.dim(
+              `  Reference from other services: ${chalk.cyan(`\${{${service.name}.LIZARD_PUBLIC_DOMAIN}}`)}`,
+            ),
+          );
         }
-
-        if (domains.length === 0) {
-          console.log("No domains. Add one with `lizard domain <hostname>`.");
-          return;
-        }
-
-        table(
-          ["Domain", "Type", "Port"],
-          domains.map((d) => [
-            chalk.cyan(`https://${d.domain}`),
-            d.type,
-            String(d.port || ""),
-          ]),
-        );
         return;
       }
 
-      // Add custom domain
-      const result = await api.post<Domain>(`/api/apps/${service.id}/domains`, {
-        domain: hostname,
-        port: opts.port,
-      }).catch((err: any) => {
-        if (err?.status === 404) {
-          throw new Error(
-            "Domain endpoint not yet implemented. The API needs " +
-              "`POST /api/apps/{id}/domains` with body { domain, port }.",
-          );
-        }
-        throw err;
-      });
+      // Attach custom hostname
+      const result = await api
+        .post<DomainResponse>(`/api/apps/${service.id}/domains`, {
+          hostname,
+          port: opts.port,
+        })
+        .catch((err: any) => {
+          if (err?.status === 404) {
+            throw new Error(
+              "Domain endpoint not yet implemented. The API needs " +
+                "`POST /api/apps/{id}/domains` with body { hostname }.",
+            );
+          }
+          throw err;
+        });
 
       if (isJSONMode()) {
         printJSON(result);
       } else {
-        success(`Domain ${chalk.cyan(hostname)} added`);
+        success(`Domain ${chalk.cyan(hostname)} attached`);
       }
     });
 
   dom
     .command("generate")
-    .description("Generate a *.lizard.app subdomain")
+    .description("Generate a fresh *.onlizard.com subdomain")
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (opts, _sub) => {
@@ -94,7 +118,7 @@ export function registerDomain(program: Command) {
       const service = await getActiveService(opts.service, projectId);
 
       const result = await api
-        .post<Domain>(`/api/apps/${service.id}/domains`, { generate: true })
+        .post<DomainResponse>(`/api/apps/${service.id}/domains`, { generate: true })
         .catch((err: any) => {
           if (err?.status === 404) {
             throw new Error(
@@ -108,11 +132,10 @@ export function registerDomain(program: Command) {
       if (isJSONMode()) {
         printJSON(result);
       } else {
-        success(`Domain generated: ${chalk.cyan(`https://${result.domain}`)}`);
-        const envVar = result.envVar || "LIZARD_PUBLIC_DOMAIN";
+        success(`Domain generated: ${chalk.cyan(`https://${result.hostname}`)}`);
         console.log(
           chalk.dim(
-            `  Reference from other services: ${chalk.cyan(`\${{${service.name}.${envVar}}}`)}`,
+            `  Reference from other services: ${chalk.cyan(`\${{${service.name}.LIZARD_PUBLIC_DOMAIN}}`)}`,
           ),
         );
       }

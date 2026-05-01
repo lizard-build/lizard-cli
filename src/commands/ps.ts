@@ -50,14 +50,23 @@ export function registerPs(program: Command) {
           ]),
         );
 
-        // Show env vars for running addons
-        const withEnv = addons.filter((a: any) => a.envVars && Object.keys(a.envVars).length > 0);
-        if (withEnv.length > 0) {
-          console.log();
-          console.log(chalk.dim("  Connection strings:"));
-          for (const a of withEnv) {
-            for (const [key, val] of Object.entries(a.envVars as Record<string, string>)) {
-              console.log(`  ${chalk.bold(key)}=${chalk.dim(val)}`);
+        const withConn = addons.filter(
+          (a: any) => a.connection && (a.connection.internalUrl || a.connection.externalUrl || a.connection.endpoint),
+        );
+        if (withConn.length > 0) {
+          for (const a of withConn) {
+            console.log();
+            console.log(`  ${chalk.bold(a.name || a.type)} ${chalk.dim(`(${a.type})`)}`);
+            const c = a.connection;
+            if (c.internalUrl) {
+              console.log(`    ${chalk.dim("private:")} ${chalk.cyan(c.internalUrl)}`);
+            }
+            if (c.externalUrl) {
+              console.log(`    ${chalk.dim("public: ")} ${chalk.cyan(c.externalUrl)}`);
+            }
+            if (c.endpoint) {
+              console.log(`    ${chalk.dim("endpoint:")} ${chalk.cyan(c.endpoint)}`);
+              if (c.accessKeyId) console.log(`    ${chalk.dim("key:     ")} ${chalk.dim(c.accessKeyId)}`);
             }
           }
         }

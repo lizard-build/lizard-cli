@@ -3,30 +3,45 @@ import { api } from "../lib/api.js";
 import { getProjectLink, resolveProjectId } from "../lib/config.js";
 import { getActiveService } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON, table } from "../lib/format.js";
-/**
- * `lizard variables` — Railway-style variable management. Defaults to
- * the linked service scope, with --global for project-wide.
- *
- * Bare command without subcommand prints the variable list (mirrors
- * `railway variables`).
- *
- * `--set KEY=value [...]` is the inline-set form.
- */
 async function resolveScope(projectFlag, serviceFlag, global) {
-    if (global) {
-        const projectId = resolveProjectId(projectFlag);
-        return { path: `/api/projects/${projectId}/secrets`, label: "project" };
-    }
     const projectId = resolveProjectId(projectFlag);
+    if (global) {
+        return { path: `/api/projects/${projectId}/secrets`, label: "project", projectId };
+    }
     if (serviceFlag) {
         const svc = await getActiveService(serviceFlag, projectId);
-        return { path: `/api/apps/${svc.id}/secrets`, label: "service" };
+        return {
+            path: `/api/apps/${svc.id}/secrets`,
+            label: "service",
+            projectId,
+            serviceId: svc.id,
+        };
     }
     const link = getProjectLink();
     if (!link?.serviceId) {
         throw new Error("No service linked. Pass --service <name>, run `lizard service link <name>`, or use --global.");
     }
-    return { path: `/api/apps/${link.serviceId}/secrets`, label: "service" };
+    return {
+        path: `/api/apps/${link.serviceId}/secrets`,
+        label: "service",
+        projectId,
+        serviceId: link.serviceId,
+    };
+}
+/**
+ * Apply variables. We store values verbatim — including ${{name.KEY}} templates.
+ * The platform's deployer expands templates against the project context at
+ * deploy time (see server `resolveEnv`). No client-side resolver needed.
+ *
+ * Merges with existing values; only keys in `newVars` are touched.
+ */
+async function applyVariables(scope, newVars, noRedeploy) {
+    const existing = await api.get(scope.path);
+    const map = new Map(existing.map((s) => [s.key, s.value]));
+    for (const [k, v] of Object.entries(newVars))
+        map.set(k, v);
+    const merged = Array.from(map.entries()).map(([key, value]) => ({ key, value }));
+    await api.put(scope.path, { secrets: merged, noRedeploy });
 }
 function parsePairs(pairs) {
     const out = {};
@@ -46,24 +61,22 @@ export function registerVariables(program) {
         .option("--global", "Target the whole project")
         .option("--show", "Reveal values")
         .option("--set <kv...>", "KEY=value pairs to set (mutually exclusive with subcommands)")
+        .option("--refs", "List reference templates available in this scope")
         .option("--no-redeploy", "Don't trigger redeploy on set/delete")
         .option("-s, --service <name>", "Service to scope to (overrides linked)")
         .option("-p, --project <id>", "Project to scope to")
         .option("-e, --environment <name>", "Environment to scope to")
         .action(async (opts) => {
         const scope = await resolveScope(opts.project ?? program.opts().project, opts.service, opts.global);
+        // --refs → list reference templates exposed by the platform
+        if (opts.refs) {
+            await printRefs(scope);
+            return;
+        }
         // --set <kv...>
         if (opts.set?.length) {
             const newVars = parsePairs(opts.set);
-            const existing = await api.get(scope.path);
-            const map = new Map(existing.map((s) => [s.key, s.value]));
-            for (const [k, v] of Object.entries(newVars))
-                map.set(k, v);
-            const merged = Array.from(map.entries()).map(([key, value]) => ({ key, value }));
-            await api.put(scope.path, {
-                secrets: merged,
-                noRedeploy: opts.redeploy === false,
-            });
+            await applyVariables(scope, newVars, opts.redeploy === false);
             if (isJSONMode()) {
                 printJSON({ updated: Object.keys(newVars), scope: scope.label });
             }
@@ -128,15 +141,7 @@ export function registerVariables(program) {
         const inherited = sub.parent?.opts() || {};
         const scope = await resolveScope(opts.project ?? inherited.project ?? program.opts().project, opts.service ?? inherited.service, opts.global || inherited.global);
         const newVars = parsePairs(pairs);
-        const existing = await api.get(scope.path);
-        const map = new Map(existing.map((s) => [s.key, s.value]));
-        for (const [k, v] of Object.entries(newVars))
-            map.set(k, v);
-        const merged = Array.from(map.entries()).map(([key, value]) => ({ key, value }));
-        await api.put(scope.path, {
-            secrets: merged,
-            noRedeploy: opts.redeploy === false,
-        });
+        await applyVariables(scope, newVars, opts.redeploy === false);
         if (isJSONMode()) {
             printJSON({ updated: Object.keys(newVars), scope: scope.label });
         }
@@ -212,5 +217,46 @@ export function registerVariables(program) {
             success(`${Object.keys(newVars).length} ${scope.label} variable(s) imported`);
         }
     });
+}
+/**
+ * Fetch the reference manifest from the backend so users know which
+ * `${{...}}` templates are valid (e.g. `${{Postgres.DATABASE_URL}}`,
+ * `${{api.LIZARD_PUBLIC_DOMAIN}}`). Backend endpoint:
+ *   GET /api/projects/<id>/variables:refs
+ *   GET /api/apps/<id>/variables:refs       (for service-scope)
+ *
+ * Returns a flat list of templates ready to copy-paste.
+ */
+async function printRefs(scope) {
+    const endpoint = scope.label === "service" && scope.serviceId
+        ? `/api/apps/${scope.serviceId}/variables:refs`
+        : `/api/projects/${scope.projectId}/variables:refs`;
+    let refs;
+    try {
+        refs = await api.get(endpoint);
+    }
+    catch (err) {
+        if (err?.status === 404) {
+            console.log(chalk.yellow("Variable-refs endpoint not yet implemented. The API needs " +
+                `\`GET ${endpoint}\` returning [{ template, description?, source? }].`));
+            console.log(chalk.dim("\nReserved templates (subject to change once backend lands):\n" +
+                "  ${{<service>.LIZARD_PUBLIC_DOMAIN}}    public hostname (after `domain generate`)\n" +
+                "  ${{<service>.LIZARD_PRIVATE_DOMAIN}}   internal cluster hostname\n" +
+                "  ${{<service>.PORT}}                    port the service listens on\n" +
+                "  ${{<addon>.DATABASE_URL}}              addon-issued connection string\n" +
+                "  ${{<addon>.DATABASE_PUBLIC_URL}}       publicly reachable variant"));
+            return;
+        }
+        throw err;
+    }
+    if (isJSONMode()) {
+        printJSON(refs);
+        return;
+    }
+    if (!refs.length) {
+        console.log("No reference variables exposed in this scope.");
+        return;
+    }
+    table(["Template", "Source", "Description"], refs.map((r) => [chalk.cyan(r.template), r.source || "—", r.description || ""]));
 }
 //# sourceMappingURL=variables.js.map
