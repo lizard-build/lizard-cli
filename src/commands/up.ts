@@ -202,13 +202,16 @@ async function deployFromLocal(args: {
   if (files.length === 0) throw new Error("No files to upload.");
   info(chalk.dim(`  ${files.length} files selected`));
 
+  const detectedPort = args.port === undefined ? detectLocalPort(args.targetPath) : undefined;
+  if (detectedPort) info(`Detected port ${chalk.bold(detectedPort)} from Dockerfile`);
+
   const tarball = await createTarball(files, args.archiveRoot);
   info(chalk.dim(`  Tarball: ${(tarball.length / 1024 / 1024).toFixed(1)} MB`));
 
   const spinner = ora("Uploading...").start();
   let newApp: App & { buildId?: string };
   try {
-    const qs = new URLSearchParams({ port: String(args.port ?? 3000) });
+    const qs = new URLSearchParams({ port: String(args.port ?? detectedPort ?? 3000) });
     if (!args.existingServiceId) qs.set("name", appName);
     if (args.environmentId) qs.set("environment", args.environmentId);
     if (args.opts.message) qs.set("message", args.opts.message);
@@ -374,6 +377,17 @@ function createTarball(files: string[], cwd: string): Promise<Uint8Array> {
     tar.stdin.write(files.join("\n"));
     tar.stdin.end();
   });
+}
+
+function detectLocalPort(dir: string): number | undefined {
+  for (const name of ["Dockerfile", "dockerfile", "Dockerfile.production"]) {
+    try {
+      const text = fs.readFileSync(path.join(dir, name), "utf8");
+      const match = text.match(/^EXPOSE\s+(\d+)/m);
+      if (match) return parseInt(match[1], 10);
+    } catch {}
+  }
+  return undefined;
 }
 
 function prompt(question: string): Promise<string> {
