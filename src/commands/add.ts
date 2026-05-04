@@ -20,6 +20,23 @@ const CATALOG = [
   { name: "s3", label: "S3 Bucket", description: "S3-compatible object storage" },
 ] as const;
 
+async function detectPortFromDockerfile(repo: string): Promise<number | undefined> {
+  const repoPath = repo.startsWith("http") ? repo.replace(/^https?:\/\/github\.com\//, "") : repo;
+  for (const branch of ["main", "master"]) {
+    try {
+      const res = await fetch(
+        `https://raw.githubusercontent.com/${repoPath}/${branch}/Dockerfile`,
+        { signal: AbortSignal.timeout(5000) },
+      );
+      if (!res.ok) continue;
+      const text = await res.text();
+      const match = text.match(/^EXPOSE\s+(\d+)/m);
+      if (match) return parseInt(match[1], 10);
+    } catch {}
+  }
+  return undefined;
+}
+
 function normalizeDbName(name: string): string {
   for (const c of CATALOG) {
     if (c.name === name) return c.name;
@@ -173,6 +190,8 @@ export function registerAdd(program: Command) {
         const projectId = await resolveProject(projectFlag);
         const serviceName = opts.service || opts.repo.split("/").pop() || "service";
         info(`Creating service ${chalk.bold(serviceName)} from ${chalk.cyan(opts.repo)}...`);
+        const detectedPort = await detectPortFromDockerfile(opts.repo);
+        if (detectedPort) info(`Detected port ${chalk.bold(detectedPort)} from Dockerfile`);
         const app = await api.post<{ id: string; name: string }>(
           `/api/projects/${projectId}/apps`,
           {
@@ -181,6 +200,7 @@ export function registerAdd(program: Command) {
               ? opts.repo
               : `https://github.com/${opts.repo}`,
             variables,
+            ...(detectedPort ? { containerPort: detectedPort } : {}),
           },
         );
         if (isJSONMode()) printJSON(app);
