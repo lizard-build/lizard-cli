@@ -211,8 +211,16 @@ async function deployFromLocal(args: {
   const spinner = ora("Uploading...").start();
   let newApp: App & { buildId?: string };
   try {
-    const qs = new URLSearchParams({ port: String(args.port ?? detectedPort ?? 3000) });
-    if (!args.existingServiceId) qs.set("name", appName);
+    const resolvedPort = args.port ?? detectedPort;
+    const qs = new URLSearchParams();
+    // Only send port when explicitly given or detected — lets server keep the stored
+    // containerPort on redeploy instead of overwriting it with the 3000 default.
+    if (resolvedPort !== undefined) qs.set("port", String(resolvedPort));
+    if (!args.existingServiceId) {
+      qs.set("name", appName);
+      // New services with no detected port default to 3000
+      if (resolvedPort === undefined) qs.set("port", "3000");
+    }
     if (args.environmentId) qs.set("environment", args.environmentId);
     if (args.opts.message) qs.set("message", args.opts.message);
     if (args.existingServiceId) qs.set("appId", args.existingServiceId);
