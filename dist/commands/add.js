@@ -154,6 +154,7 @@ export function registerAdd(program) {
                 repoUrl: opts.repo.startsWith("http")
                     ? opts.repo
                     : `https://github.com/${opts.repo}`,
+                region,
                 variables,
                 ...(detectedPort ? { containerPort: detectedPort } : {}),
             });
@@ -175,6 +176,7 @@ export function registerAdd(program) {
             const app = await api.post(`/api/projects/${projectId}/apps`, {
                 name: serviceName,
                 image: opts.image,
+                region,
                 variables,
             });
             if (isJSONMode())
@@ -193,6 +195,7 @@ export function registerAdd(program) {
             info(`Creating empty service ${chalk.bold(opts.service)}...`);
             const app = await api.post(`/api/projects/${projectId}/apps`, {
                 name: opts.service,
+                region,
                 variables,
             });
             if (isJSONMode())

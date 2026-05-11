@@ -45,8 +45,6 @@ export function registerUp(program: Command) {
     .option("-c, --ci", "Stream build logs only, exit on completion")
     .option("-s, --service <name>", "Service to deploy to (defaults to linked)")
     .option("-e, --environment <name>", "Environment to deploy to (defaults to linked)")
-    .option("-p, --project <id>", "Project ID to deploy to (defaults to linked)")
-    .option("--region <region>", "Region for deployment")
     .option("--no-gitignore", "Don't ignore paths from .gitignore")
     .option("--path-as-root", "Use the path argument as the archive root")
     .option("-m, --message <text>", "Message to attach to the deployment")
@@ -56,10 +54,11 @@ export function registerUp(program: Command) {
     .option("--pre-deploy-command <cmd>", "Pre-deploy command (e.g. 'node dist/migrate.js')")
     .option("--port <number>", "Container port (default: 3000)")
     .option("--worker", "Worker mode — service has no HTTP port (no Caddy route, no port wait)")
-    .action(async (pathArg: string | undefined, opts, _cmd) => {
-      const serviceFlag = opts.service;
-      const projectFlag = opts.project;
-      const envFlag = opts.environment;
+    .action(async (pathArg: string | undefined, opts, cmd) => {
+      const merged = cmd.optsWithGlobals();
+      const serviceFlag = merged.service ?? opts.service;
+      const projectFlag = merged.project;
+      const envFlag = merged.environment ?? opts.environment;
 
       // Run init flow if cwd isn't linked yet
       const link = await ensureLinked({ projectName: projectFlag });

@@ -25,8 +25,6 @@ export function registerUp(program) {
         .option("-c, --ci", "Stream build logs only, exit on completion")
         .option("-s, --service <name>", "Service to deploy to (defaults to linked)")
         .option("-e, --environment <name>", "Environment to deploy to (defaults to linked)")
-        .option("-p, --project <id>", "Project ID to deploy to (defaults to linked)")
-        .option("--region <region>", "Region for deployment")
         .option("--no-gitignore", "Don't ignore paths from .gitignore")
         .option("--path-as-root", "Use the path argument as the archive root")
         .option("-m, --message <text>", "Message to attach to the deployment")
@@ -36,10 +34,11 @@ export function registerUp(program) {
         .option("--pre-deploy-command <cmd>", "Pre-deploy command (e.g. 'node dist/migrate.js')")
         .option("--port <number>", "Container port (default: 3000)")
         .option("--worker", "Worker mode — service has no HTTP port (no Caddy route, no port wait)")
-        .action(async (pathArg, opts, _cmd) => {
-        const serviceFlag = opts.service;
-        const projectFlag = opts.project;
-        const envFlag = opts.environment;
+        .action(async (pathArg, opts, cmd) => {
+        const merged = cmd.optsWithGlobals();
+        const serviceFlag = merged.service ?? opts.service;
+        const projectFlag = merged.project;
+        const envFlag = merged.environment ?? opts.environment;
         // Run init flow if cwd isn't linked yet
         const link = await ensureLinked({ projectName: projectFlag });
         const projectId = link.projectId;
@@ -143,14 +142,26 @@ async function deployFromLocal(args) {
     if (files.length === 0)
         throw new Error("No files to upload.");
     info(chalk.dim(`  ${files.length} files selected`));
+    const detectedPort = args.port === undefined ? detectLocalPort(args.targetPath) : undefined;
+    if (detectedPort)
+        info(`Detected port ${chalk.bold(detectedPort)} from Dockerfile`);
     const tarball = await createTarball(files, args.archiveRoot);
     info(chalk.dim(`  Tarball: ${(tarball.length / 1024 / 1024).toFixed(1)} MB`));
     const spinner = ora("Uploading...").start();
     let newApp;
     try {
-        const qs = new URLSearchParams({ port: String(args.port ?? 3000) });
-        if (!args.existingServiceId)
+        const resolvedPort = args.port ?? detectedPort;
+        const qs = new URLSearchParams();
+        // Only send port when explicitly given or detected — lets server keep the stored
+        // containerPort on redeploy instead of overwriting it with the 3000 default.
+        if (resolvedPort !== undefined)
+            qs.set("port", String(resolvedPort));
+        if (!args.existingServiceId) {
             qs.set("name", appName);
+            // New services with no detected port default to 3000
+            if (resolvedPort === undefined)
+                qs.set("port", "3000");
+        }
         if (args.environmentId)
             qs.set("environment", args.environmentId);
         if (args.opts.message)
@@ -317,6 +328,18 @@ function createTarball(files, cwd) {
         tar.stdin.write(files.join("\n"));
         tar.stdin.end();
     });
+}
+function detectLocalPort(dir) {
+    for (const name of ["Dockerfile", "dockerfile", "Dockerfile.production"]) {
+        try {
+            const text = fs.readFileSync(path.join(dir, name), "utf8");
+            const match = text.match(/^EXPOSE\s+(\d+)/m);
+            if (match)
+                return parseInt(match[1], 10);
+        }
+        catch { }
+    }
+    return undefined;
 }
 function prompt(question) {
     return new Promise((resolve) => {

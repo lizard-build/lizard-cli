@@ -198,6 +198,7 @@ export function registerAdd(program: Command) {
             repoUrl: opts.repo.startsWith("http")
               ? opts.repo
               : `https://github.com/${opts.repo}`,
+            region,
             variables,
             ...(detectedPort ? { containerPort: detectedPort } : {}),
           },
@@ -221,6 +222,7 @@ export function registerAdd(program: Command) {
           {
             name: serviceName,
             image: opts.image,
+            region,
             variables,
           },
         );
@@ -240,6 +242,7 @@ export function registerAdd(program: Command) {
           `/api/projects/${projectId}/apps`,
           {
             name: opts.service,
+            region,
             variables,
           },
         );
