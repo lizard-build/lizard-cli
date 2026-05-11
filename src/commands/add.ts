@@ -96,13 +96,13 @@ export function registerAdd(program: Command) {
   program
     .command("add")
     .argument(
-      "[name]",
-      "Database type (postgres/redis/mysql/mongodb) — kept for backwards compat",
+      "[type]",
+      "Addon type to add (postgres / redis / mysql / mongo / s3)",
     )
     .description("Add a database, service, or repo/image to the project")
     .option(
       "-d, --database <type...>",
-      "Add a managed database (postgres/redis/mysql/mongodb)",
+      "Add one or more managed databases (multi-add: -d postgres -d redis)",
     )
     .option("-s, --service <name>", "Create an empty service with this name")
     .option("-r, --repo <repo>", "Create a service from a GitHub repo (owner/repo)")
@@ -110,13 +110,13 @@ export function registerAdd(program: Command) {
     .option("-v, --variables <kv...>", "KEY=value pairs to seed the service")
     .option("--instance-name <name>", "Stable instance name used in ${{<name>.KEY}} templates (must be DNS-safe)")
     .option("--list", "Show available database types")
-    .action(async (name: string | undefined, opts, command) => {
+    .action(async (type: string | undefined, opts, command) => {
       const merged = command.optsWithGlobals();
       const projectFlag = merged.project;
       const region = merged.region;
 
       // ── --list: show DB catalog and exit ──────────────────────────────
-      if (opts.list || (!name && !opts.database && !opts.service && !opts.repo && !opts.image && !isTTY())) {
+      if (opts.list || (!type && !opts.database && !opts.service && !opts.repo && !opts.image && !isTTY())) {
         if (isJSONMode()) {
           printJSON(CATALOG);
         } else {
@@ -130,12 +130,17 @@ export function registerAdd(program: Command) {
 
       const variables = parseVariables(opts.variables);
 
-      // ── -d <type...> or positional <name> for backwards compat ────────
+      // ── positional <type> and/or -d <type...> ─────────────────────────
       const databases: string[] = [];
       if (opts.database?.length) databases.push(...opts.database.map(normalizeDbName));
-      if (name) {
-        const norm = normalizeDbName(name);
+      if (type) {
+        const norm = normalizeDbName(type);
         if (CATALOG.some((c) => c.name === norm)) databases.push(norm);
+      }
+
+      // Nudge users off the verbose single-arg `-d` form toward `lizard add <type>`.
+      if (opts.database?.length === 1 && !type && !isJSONMode()) {
+        info(chalk.dim(`Tip: shorter form — \`lizard add ${opts.database[0]}\``));
       }
 
       if (databases.length > 0) {
@@ -255,7 +260,7 @@ export function registerAdd(program: Command) {
       }
 
       // ── No flags + no positional → interactive wizard ────────────────
-      if (!name && isTTY()) {
+      if (!type && isTTY()) {
         const kind = await p.select({
           message: "What do you need?",
           options: [
@@ -273,9 +278,9 @@ export function registerAdd(program: Command) {
             options: CATALOG.map((c) => ({ value: c.name, label: c.label, hint: c.description })),
           });
           if (p.isCancel(sel)) process.exit(5);
-          // recursively call with -d
+          // recursively call with positional type
           await new Promise<void>((resolve) => {
-            program.parseAsync(["add", "-d", sel as string], { from: "user" }).then(() => resolve());
+            program.parseAsync(["add", sel as string], { from: "user" }).then(() => resolve());
           });
           return;
         }
@@ -317,11 +322,11 @@ export function registerAdd(program: Command) {
       }
 
       throw new Error(
-        "No service type specified. Use one of:\n" +
-          "  --database <type>   Add a database (postgres/redis/mysql/mongodb)\n" +
-          "  --service <name>    Create an empty service\n" +
-          "  --repo <repo>       Create a service from a GitHub repo\n" +
-          "  --image <image>     Create a service from a Docker image",
+        "No service type specified. Examples:\n" +
+          "  lizard add postgres        Add a managed database\n" +
+          "  lizard add -r owner/repo   Create a service from a GitHub repo\n" +
+          "  lizard add -i nginx:alpine Create a service from a Docker image\n" +
+          "  lizard add -s my-service   Empty service",
       );
     });
 }
