@@ -42,7 +42,6 @@ import { registerPort } from "./commands/port.js";
 import { registerVolume } from "./commands/volume.js";
 import { registerScale } from "./commands/scale.js";
 import { registerEnv } from "./commands/env.js";
-import { registerBucket } from "./commands/bucket.js";
 
 const program = new Command();
 
@@ -130,7 +129,6 @@ registerGit(program);
 registerVersion(program);
 registerUpdate(program);
 registerEnv(program);
-registerBucket(program);
 
 // Shell completion
 program
