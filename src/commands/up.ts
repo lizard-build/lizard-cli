@@ -61,8 +61,7 @@ export function registerUp(program: Command) {
       const envFlag = merged.environment ?? opts.environment;
 
       // Run init flow if cwd isn't linked yet
-      const link = await ensureLinked({ projectName: projectFlag });
-      const projectId = link.projectId;
+      await ensureLinked({ projectName: projectFlag });
 
       // Resolve target service: --service flag → linked → first-in-project → prompt-or-fail
       const ctx = await resolveContext({
@@ -70,6 +69,7 @@ export function registerUp(program: Command) {
         serviceFlag,
         environmentFlag: envFlag,
       });
+      const projectId = ctx.projectId;
 
       const targetPath = pathArg ? path.resolve(pathArg) : process.cwd();
       const archiveRoot = opts.pathAsRoot ? targetPath : process.cwd();

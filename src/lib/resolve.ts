@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { getProjectLink, resolveProjectId } from "./config.js";
+import { getProjectLink, resolveProjectIdFromApi } from "./config.js";
 
 interface AppLite {
   id: string;
@@ -152,7 +152,7 @@ export async function resolveContext(opts: {
   service?: { id: string; name: string };
   environment?: { id: string; name: string };
 }> {
-  const projectId = resolveProjectId(opts.projectFlag);
+  const projectId = await resolveProjectIdFromApi(opts.projectFlag);
 
   const environment = await resolveEnvironment(
     projectId,

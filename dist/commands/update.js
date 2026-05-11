@@ -13,7 +13,7 @@ export function registerUpdate(program) {
             return;
         }
         const updateAvailable = latest !== CURRENT_VERSION;
-        if (isJSONMode()) {
+        if (isJSONMode() && opts.check) {
             printJSON({ currentVersion: CURRENT_VERSION, latestVersion: latest, updateAvailable });
             return;
         }

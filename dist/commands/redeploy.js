@@ -8,7 +8,7 @@ export function registerRedeploy(program) {
     program
         .command("redeploy")
         .argument("[id]", "App ID to redeploy")
-        .description("Redeploy an app from latest build with current secrets")
+        .description("Trigger a fresh build (latest commit / last upload) with current vars")
         .option("--detach", "Run in background")
         .action(async (id, opts) => {
         if (!id) {

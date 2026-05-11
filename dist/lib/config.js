@@ -70,4 +70,19 @@ export function resolveProjectId(flagValue) {
         return link.projectId;
     throw new Error("No project linked. Run `lizard init` or pass --project <id>.");
 }
+/** Resolve a project flag (name, slug, or ID) to an actual project ID via the API. */
+export async function resolveProjectIdFromApi(flagValue) {
+    if (!flagValue) {
+        const link = getProjectLink();
+        if (link?.projectId)
+            return link.projectId;
+        throw new Error("No project linked. Run `lizard init` or pass --project <id>.");
+    }
+    const { api } = await import("./api.js");
+    const projects = await api.get("/api/projects");
+    const match = projects.find((p) => p.id === flagValue || p.slug === flagValue || p.name === flagValue);
+    if (!match)
+        throw new Error(`Project "${flagValue}" not found.`);
+    return match.id;
+}
 //# sourceMappingURL=config.js.map

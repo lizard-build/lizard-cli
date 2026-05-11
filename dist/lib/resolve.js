@@ -1,5 +1,5 @@
 import { api } from "./api.js";
-import { getProjectLink, resolveProjectId } from "./config.js";
+import { getProjectLink, resolveProjectIdFromApi } from "./config.js";
 /**
  * Resolve a service (app or addon) within a project. Match by ID or name.
  * Throws with a helpful list of available services when not found.
@@ -81,7 +81,7 @@ export async function resolveEnvironment(projectId, nameOrId) {
  * Convenience: resolve project + active service + active environment in one go.
  */
 export async function resolveContext(opts) {
-    const projectId = resolveProjectId(opts.projectFlag);
+    const projectId = await resolveProjectIdFromApi(opts.projectFlag);
     const environment = await resolveEnvironment(projectId, opts.environmentFlag).catch(() => null);
     let service;
     if (opts.serviceFlag || opts.requireService) {

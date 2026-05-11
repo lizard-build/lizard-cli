@@ -18,7 +18,7 @@ export function registerUpdate(program: Command) {
 
       const updateAvailable = latest !== CURRENT_VERSION;
 
-      if (isJSONMode()) {
+      if (isJSONMode() && opts.check) {
         printJSON({ currentVersion: CURRENT_VERSION, latestVersion: latest, updateAvailable });
         return;
       }

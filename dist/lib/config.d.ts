@@ -40,3 +40,5 @@ export declare function clearProjectLink(cwd?: string): void;
  * For name-based resolution, callers should look up the project list first.
  */
 export declare function resolveProjectId(flagValue?: string): string;
+/** Resolve a project flag (name, slug, or ID) to an actual project ID via the API. */
+export declare function resolveProjectIdFromApi(flagValue?: string): Promise<string>;
