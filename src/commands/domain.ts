@@ -108,12 +108,14 @@ export function registerDomain(program: Command) {
       }
     });
 
+  // Subcommands intentionally don't redeclare -s/-p: Commander 14 binds a
+  // duplicate short flag to the parent, leaving the subcommand action with
+  // `opts.service === undefined`. Read parent values via optsWithGlobals().
   dom
     .command("generate")
     .description("Generate a fresh *.onlizard.com subdomain")
-    .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name or ID")
-    .action(async (opts, _sub) => {
+    .action(async (_opts, sub) => {
+      const opts = sub.optsWithGlobals();
       const projectId = resolveProjectId(opts.project);
       const service = await getActiveService(opts.service, projectId);
 
@@ -146,9 +148,8 @@ export function registerDomain(program: Command) {
     .alias("rm")
     .argument("<hostname>", "Domain to remove")
     .description("Remove a domain")
-    .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name or ID")
-    .action(async (hostname: string, opts) => {
+    .action(async (hostname: string, _opts, sub) => {
+      const opts = sub.optsWithGlobals();
       const projectId = resolveProjectId(opts.project);
       const service = await getActiveService(opts.service, projectId);
 
