@@ -10,6 +10,22 @@ const CATALOG = [
     { name: "mongo", label: "MongoDB", description: "Document database", aliases: ["mongodb"] },
     { name: "s3", label: "S3 Bucket", description: "S3-compatible object storage" },
 ];
+async function detectPortFromDockerfile(repo) {
+    const repoPath = repo.startsWith("http") ? repo.replace(/^https?:\/\/github\.com\//, "") : repo;
+    for (const branch of ["main", "master"]) {
+        try {
+            const res = await fetch(`https://raw.githubusercontent.com/${repoPath}/${branch}/Dockerfile`, { signal: AbortSignal.timeout(5000) });
+            if (!res.ok)
+                continue;
+            const text = await res.text();
+            const match = text.match(/^EXPOSE\s+(\d+)/m);
+            if (match)
+                return parseInt(match[1], 10);
+        }
+        catch { }
+    }
+    return undefined;
+}
 function normalizeDbName(name) {
     for (const c of CATALOG) {
         if (c.name === name)
@@ -62,13 +78,12 @@ export function registerAdd(program) {
         .option("-r, --repo <repo>", "Create a service from a GitHub repo (owner/repo)")
         .option("-i, --image <image>", "Create a service from a Docker image")
         .option("-v, --variables <kv...>", "KEY=value pairs to seed the service")
-        .option("-p, --project <name>", "Project name or ID")
-        .option("--region <region>", "Region for the service")
         .option("--instance-name <name>", "Stable instance name used in ${{<name>.KEY}} templates (must be DNS-safe)")
         .option("--list", "Show available database types")
-        .action(async (name, opts) => {
-        const projectFlag = opts.project;
-        const region = opts.region;
+        .action(async (name, opts, command) => {
+        const merged = command.optsWithGlobals();
+        const projectFlag = merged.project;
+        const region = merged.region;
         // ── --list: show DB catalog and exit ──────────────────────────────
         if (opts.list || (!name && !opts.database && !opts.service && !opts.repo && !opts.image && !isTTY())) {
             if (isJSONMode()) {
@@ -131,12 +146,16 @@ export function registerAdd(program) {
             const projectId = await resolveProject(projectFlag);
             const serviceName = opts.service || opts.repo.split("/").pop() || "service";
             info(`Creating service ${chalk.bold(serviceName)} from ${chalk.cyan(opts.repo)}...`);
+            const detectedPort = await detectPortFromDockerfile(opts.repo);
+            if (detectedPort)
+                info(`Detected port ${chalk.bold(detectedPort)} from Dockerfile`);
             const app = await api.post(`/api/projects/${projectId}/apps`, {
                 name: serviceName,
                 repoUrl: opts.repo.startsWith("http")
                     ? opts.repo
                     : `https://github.com/${opts.repo}`,
                 variables,
+                ...(detectedPort ? { containerPort: detectedPort } : {}),
             });
             if (isJSONMode())
                 printJSON(app);

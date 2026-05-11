@@ -108,13 +108,12 @@ export function registerAdd(program: Command) {
     .option("-r, --repo <repo>", "Create a service from a GitHub repo (owner/repo)")
     .option("-i, --image <image>", "Create a service from a Docker image")
     .option("-v, --variables <kv...>", "KEY=value pairs to seed the service")
-    .option("-p, --project <name>", "Project name or ID")
-    .option("--region <region>", "Region for the service")
     .option("--instance-name <name>", "Stable instance name used in ${{<name>.KEY}} templates (must be DNS-safe)")
     .option("--list", "Show available database types")
-    .action(async (name: string | undefined, opts) => {
-      const projectFlag = opts.project;
-      const region = opts.region;
+    .action(async (name: string | undefined, opts, command) => {
+      const merged = command.optsWithGlobals();
+      const projectFlag = merged.project;
+      const region = merged.region;
 
       // ── --list: show DB catalog and exit ──────────────────────────────
       if (opts.list || (!name && !opts.database && !opts.service && !opts.repo && !opts.image && !isTTY())) {
