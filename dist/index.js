@@ -1,50 +1,65 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import chalk from "chalk";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
 import { setTokenOverride, requireAuth } from "./lib/auth.js";
 import { setBaseURL, setAccessToken } from "./lib/api.js";
 import { checkForUpdateInBackground } from "./lib/updater.js";
-// Commands
-import { registerLogin } from "./commands/login.js";
-import { registerLogout } from "./commands/logout.js";
-import { registerWhoami } from "./commands/whoami.js";
-import { registerInit } from "./commands/init.js";
-import { registerProjects } from "./commands/projects.js";
-import { registerList } from "./commands/list.js";
-import { registerUp } from "./commands/up.js";
-import { registerDeploy } from "./commands/deploy.js";
-import { registerPs } from "./commands/ps.js";
+const BANNER = [
+    "╔═══════════════════════════════════════════════════╗",
+    "║                                                   ║",
+    "║    ██╗     ██╗███████╗ █████╗ ██████╗ ██████╗     ║",
+    "║    ██║     ██║╚══███╔╝██╔══██╗██╔══██╗██╔══██╗    ║",
+    "║    ██║     ██║  ███╔╝ ███████║██████╔╝██║  ██║    ║",
+    "║    ██║     ██║ ███╔╝  ██╔══██║██╔══██╗██║  ██║    ║",
+    "║    ███████╗██║███████╗██║  ██║██║  ██║██████╔╝    ║",
+    "║    ╚══════╝╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝     ║",
+    "║                                                   ║",
+    "╚═══════════════════════════════════════════════════╝",
+].join("\n");
+// Commands (alphabetical by command name)
 import { registerAdd } from "./commands/add.js";
-import { registerSnapshot } from "./commands/snapshot.js";
-import { registerDestroy } from "./commands/destroy.js";
-import { registerDown } from "./commands/down.js";
-import { registerRestart } from "./commands/restart.js";
-import { registerRedeploy } from "./commands/redeploy.js";
-import { registerLogs } from "./commands/logs.js";
-import { registerSecrets } from "./commands/secrets.js";
-import { registerVariables } from "./commands/variables.js";
-import { registerRegions } from "./commands/regions.js";
-import { registerStatus } from "./commands/status.js";
-import { registerOpen } from "./commands/open.js";
-import { registerRun } from "./commands/run.js";
 import { registerConnect } from "./commands/connect.js";
 import { registerContext } from "./commands/context.js";
-import { registerGit } from "./commands/git.js";
-import { registerVersion } from "./commands/version.js";
-import { registerUpdate } from "./commands/update.js";
-import { registerLink } from "./commands/link.js";
-import { registerUnlink } from "./commands/unlink.js";
-import { registerService } from "./commands/service.js";
+import { registerDeploy } from "./commands/deploy.js";
+import { registerDestroy } from "./commands/destroy.js";
 import { registerDomain } from "./commands/domain.js";
-import { registerPort } from "./commands/port.js";
-import { registerVolume } from "./commands/volume.js";
-import { registerScale } from "./commands/scale.js";
+import { registerDown } from "./commands/down.js";
 import { registerEnv } from "./commands/env.js";
+import { registerGit } from "./commands/git.js";
+import { registerInit } from "./commands/init.js";
+import { registerLink } from "./commands/link.js";
+import { registerList } from "./commands/list.js";
+import { registerLogin } from "./commands/login.js";
+import { registerLogout } from "./commands/logout.js";
+import { registerLogs } from "./commands/logs.js";
+import { registerOpen } from "./commands/open.js";
+import { registerPort } from "./commands/port.js";
+import { registerProjects } from "./commands/projects.js";
+import { registerPs } from "./commands/ps.js";
+import { registerRedeploy } from "./commands/redeploy.js";
+import { registerRegions } from "./commands/regions.js";
+import { registerRestart } from "./commands/restart.js";
+import { registerRun } from "./commands/run.js";
+import { registerScale } from "./commands/scale.js";
+import { registerSecrets } from "./commands/secrets.js";
+import { registerService } from "./commands/service.js";
+import { registerSnapshot } from "./commands/snapshot.js";
+import { registerSSH } from "./commands/ssh.js";
+import { registerStatus } from "./commands/status.js";
+import { registerUnlink } from "./commands/unlink.js";
+import { registerUp } from "./commands/up.js";
+import { registerUpdate } from "./commands/update.js";
+import { registerVariables } from "./commands/variables.js";
+import { registerVersion } from "./commands/version.js";
+import { registerVolume } from "./commands/volume.js";
+import { registerWhoami } from "./commands/whoami.js";
 const program = new Command();
 program
     .name("lizard")
     .description("Lizard CLI — deploy and manage apps on Lizard")
     .version("0.1.0")
+    .addHelpText("before", chalk.green(BANNER) + "\n")
     .option("--json", "Output in JSON format")
     .option("-y, --yes", "Skip confirmation prompts")
     .option("--workspace <id>", "Workspace name or ID")
@@ -83,43 +98,8 @@ program
     const creds = await requireAuth();
     setAccessToken(creds.accessToken);
 });
-// Register all commands
-registerLogin(program);
-registerLogout(program);
-registerWhoami(program);
-registerInit(program);
-registerLink(program);
-registerUnlink(program);
-registerProjects(program);
-registerList(program);
-registerUp(program);
-registerDeploy(program);
-registerPs(program);
+// Register all commands (alphabetical)
 registerAdd(program);
-registerService(program);
-registerDomain(program);
-registerPort(program);
-registerVolume(program);
-registerScale(program);
-registerSnapshot(program);
-registerDestroy(program);
-registerDown(program);
-registerRestart(program);
-registerRedeploy(program);
-registerLogs(program);
-registerSecrets(program);
-registerVariables(program);
-registerRegions(program);
-registerStatus(program);
-registerOpen(program);
-registerRun(program);
-registerConnect(program);
-registerContext(program);
-registerGit(program);
-registerVersion(program);
-registerUpdate(program);
-registerEnv(program);
-// Shell completion
 program
     .command("completion")
     .argument("<shell>", "Shell type (bash, zsh, fish)")
@@ -140,6 +120,41 @@ program
         console.log(`# Coming soon`);
     }
 });
+registerConnect(program);
+registerContext(program);
+registerDeploy(program);
+registerDestroy(program);
+registerDomain(program);
+registerDown(program);
+registerEnv(program);
+registerGit(program);
+registerInit(program);
+registerLink(program);
+registerList(program);
+registerLogin(program);
+registerLogout(program);
+registerLogs(program);
+registerOpen(program);
+registerPort(program);
+registerProjects(program);
+registerPs(program);
+registerRedeploy(program);
+registerRegions(program);
+registerRestart(program);
+registerRun(program);
+registerScale(program);
+registerSecrets(program);
+registerService(program);
+registerSnapshot(program);
+registerSSH(program);
+registerStatus(program);
+registerUnlink(program);
+registerUp(program);
+registerUpdate(program);
+registerVariables(program);
+registerVersion(program);
+registerVolume(program);
+registerWhoami(program);
 // Error handling
 program.exitOverride();
 async function main() {
