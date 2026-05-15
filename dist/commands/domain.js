@@ -4,7 +4,7 @@ import { resolveProjectId } from "../lib/config.js";
 import { getActiveService } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON } from "../lib/format.js";
 /**
- * `lizard domain` — Railway-style domain management.
+ * `lizard domain` — domain management.
  *   bare         → if no domain, auto-generate one; otherwise show current
  *   <hostname>   → attach a custom domain
  *   delete <h>   → remove a domain
@@ -24,7 +24,7 @@ export function registerDomain(program) {
         const projectId = resolveProjectId(opts.project);
         const service = await getActiveService(opts.service, projectId);
         if (!hostname) {
-            // Bare `lizard domain` — Railway-compat: show or auto-generate.
+            // Bare `lizard domain` — show or auto-generate.
             const appRow = await api
                 .get(`/api/apps/${service.id}`)
                 .catch(() => null);

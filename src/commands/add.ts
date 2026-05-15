@@ -11,6 +11,7 @@ import {
   isTTY,
   table,
 } from "../lib/format.js";
+import { validateName } from "../lib/name.js";
 
 const CATALOG = [
   { name: "postgres", label: "PostgreSQL", description: "Relational database" },
@@ -107,7 +108,8 @@ export function registerAdd(program: Command) {
     .option("-s, --service <name>", "Create an empty service with this name")
     .option("-r, --repo <repo>", "Create a service from a GitHub repo (owner/repo)")
     .option("-v, --variables <kv...>", "KEY=value pairs to seed the service")
-    .option("--instance-name <name>", "Stable instance name used in ${{<name>.KEY}} templates (must be DNS-safe)")
+    .option("-n, --name <name>", "Name used in ${{<name>.KEY}} templates and shown in the dashboard. Renamable; refs stay stable.")
+    .option("--instance-name <name>", "(deprecated) alias for --name")
     .option("--list", "Show available database types")
     .action(async (type: string | undefined, opts, command) => {
       const merged = command.optsWithGlobals();
@@ -128,6 +130,15 @@ export function registerAdd(program: Command) {
       }
 
       const variables = parseVariables(opts.variables);
+
+      if (opts.instanceName && !opts.name) {
+        info(chalk.yellow("Warning: --instance-name is deprecated, use --name instead."));
+        opts.name = opts.instanceName;
+      }
+      if (opts.name) {
+        const err = validateName(opts.name);
+        if (err) throw new Error(`Invalid --name: ${err}`);
+      }
 
       // ── positional <type> and/or -d <type...> ─────────────────────────
       const databases: string[] = [];
@@ -164,7 +175,7 @@ export function registerAdd(program: Command) {
             type: db,
             region,
             variables,
-            ...(opts.instanceName ? { instanceName: opts.instanceName } : {}),
+            ...(opts.name ? { name: opts.name } : {}),
           });
 
           if (isJSONMode()) printJSON(addon);
@@ -191,7 +202,7 @@ export function registerAdd(program: Command) {
       // ── -r <repo> ─────────────────────────────────────────────────────
       if (opts.repo) {
         const projectId = await resolveProject(projectFlag);
-        const serviceName = opts.service || opts.repo.split("/").pop() || "service";
+        const serviceName = opts.name || opts.service || opts.repo.split("/").pop() || "service";
         info(`Creating service ${chalk.bold(serviceName)} from ${chalk.cyan(opts.repo)}...`);
         const detectedPort = await detectPortFromDockerfile(opts.repo);
         if (detectedPort) info(`Detected port ${chalk.bold(detectedPort)} from Dockerfile`);

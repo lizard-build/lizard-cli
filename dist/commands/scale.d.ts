@@ -1,8 +1,7 @@
 import { Command } from "commander";
 /**
- * `lizard scale` — Railway-style scaling.
+ * `lizard scale` — service scaling.
  *   --replicas <n>     change replica count
- *   --region <code>    bind to a region
  *   --cpu <cores>      cap CPU
  *   --memory <mb>      cap memory
  */

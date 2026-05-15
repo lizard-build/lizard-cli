@@ -1,6 +1,6 @@
 import { Command } from "commander";
 /**
- * `lizard domain` — Railway-style domain management.
+ * `lizard domain` — domain management.
  *   bare         → if no domain, auto-generate one; otherwise show current
  *   <hostname>   → attach a custom domain
  *   delete <h>   → remove a domain

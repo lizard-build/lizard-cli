@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
+import { getProjectLink, resolveProjectId } from "../lib/config.js";
 import { isJSONMode, printJSON, table, statusColor } from "../lib/format.js";
 export function registerPs(program) {
     program
@@ -16,14 +16,16 @@ export function registerPs(program) {
         const apps = data.apps || [];
         const addons = data.addons || [];
         if (apps.length === 0 && addons.length === 0) {
-            console.log("No services. Use `lizard add` or `lizard deploy`.");
+            console.log("No services. Use `lizard add` or `lizard up`.");
             return;
         }
+        const linkedId = getProjectLink()?.serviceId;
         if (apps.length > 0) {
-            table(["App", "Status", "URL"], apps.map((a) => [
+            table(["App", "Status", "URL", "Linked"], apps.map((a) => [
                 a.name || a.id,
                 statusColor(a.status),
                 a.domain ? chalk.cyan(`https://${a.domain}`) : chalk.dim("—"),
+                a.id === linkedId ? chalk.green("✓") : "",
             ]));
         }
         if (addons.length > 0) {

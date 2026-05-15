@@ -4,9 +4,9 @@ import { api } from "../lib/api.js";
 import { setProjectLink } from "../lib/config.js";
 import { isJSONMode, printJSON, isTTY, success } from "../lib/format.js";
 /**
- * `lizard link` — Railway-style. Associates the current directory with an
- * existing project + environment + (optional) service. Each piece can be
- * passed via flags or selected interactively.
+ * `lizard link` — associates the current directory with an existing
+ * project + environment + (optional) service. Each piece can be passed
+ * via flags or selected interactively.
  */
 export function registerLink(program) {
     program

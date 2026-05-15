@@ -4,7 +4,7 @@ import { resolveProjectId } from "../lib/config.js";
 import { getActiveService } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON, table } from "../lib/format.js";
 /**
- * `lizard volume` — Railway-style volume management.
+ * `lizard volume` — persistent volume management.
  */
 export function registerVolume(program) {
     const vol = program

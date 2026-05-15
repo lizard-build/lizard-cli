@@ -5,44 +5,40 @@ import { getActiveService } from "../lib/resolve.js";
 import { success, info, isJSONMode, printJSON } from "../lib/format.js";
 /**
  * `lizard port [number]`
- *   bare         → show current container port
- *   <number>     → update container port (takes effect on next deploy)
- *   0 / --worker → set worker mode (no port, no HTTP proxy)
+ *   bare     → show current container port
+ *   <number> → update container port (takes effect on next deploy)
  */
 export function registerPort(program) {
     program
         .command("port")
-        .argument("[port]", "Port number to set (0 = worker mode)")
+        .argument("[port]", "Port number to set")
         .description("Show or change the container port for a service")
         .option("-s, --service <name>", "Service name or ID")
-        .option("-p, --project <id>", "Project name or ID")
-        .option("--worker", "Set worker mode (no HTTP port)")
+        .option("--project <id>", "Project name or ID")
         .action(async (portArg, opts) => {
         const projectId = resolveProjectId(opts.project);
         const service = await getActiveService(opts.service, projectId);
-        if (portArg === undefined && !opts.worker) {
+        if (portArg === undefined) {
             const app = await api.get(`/api/apps/${service.id}`);
             const port = app.containerPort ?? 3000;
             if (isJSONMode()) {
                 printJSON({ port });
             }
             else {
-                info(`${chalk.bold(service.name)} container port: ${chalk.cyan(port === 0 ? "none (worker)" : port)}`);
+                info(`${chalk.bold(service.name)} container port: ${chalk.cyan(port)}`);
             }
             return;
         }
-        const newPort = opts.worker ? 0 : parseInt(portArg, 10);
-        if (!opts.worker && (isNaN(newPort) || newPort < 0 || newPort > 65535)) {
-            throw new Error(`Invalid port: ${portArg}. Must be 0–65535.`);
+        const newPort = parseInt(portArg, 10);
+        if (isNaN(newPort) || newPort < 1 || newPort > 65535) {
+            throw new Error(`Invalid port: ${portArg}. Must be 1–65535.`);
         }
         await api.patch(`/api/apps/${service.id}`, { containerPort: newPort });
         if (isJSONMode()) {
             printJSON({ ok: true, port: newPort });
         }
         else {
-            success(newPort === 0
-                ? `${chalk.bold(service.name)} set to worker mode (no HTTP port)`
-                : `${chalk.bold(service.name)} container port set to ${chalk.cyan(newPort)} — takes effect on next deploy`);
+            success(`${chalk.bold(service.name)} container port set to ${chalk.cyan(newPort)} — takes effect on next deploy`);
         }
     });
 }

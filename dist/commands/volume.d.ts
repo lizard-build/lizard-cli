@@ -1,5 +1,5 @@
 import { Command } from "commander";
 /**
- * `lizard volume` — Railway-style volume management.
+ * `lizard volume` — persistent volume management.
  */
 export declare function registerVolume(program: Command): void;

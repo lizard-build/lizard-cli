@@ -4,6 +4,7 @@ import { Command } from "commander";
 import { api } from "../lib/api.js";
 import { resolveProjectId, updateProjectLink, getProjectLink } from "../lib/config.js";
 import { resolveService } from "../lib/resolve.js";
+import { validateName } from "../lib/name.js";
 import { registerServiceSet } from "./service-set.js";
 import { registerServiceShow } from "./service-show.js";
 import {
@@ -218,6 +219,8 @@ export function registerService(program: Command) {
     .option("-s, --service <name>", "Service name or ID (defaults to linked service)")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (newName: string, opts) => {
+      const nameErr = validateName(newName);
+      if (nameErr) throw new Error(`Invalid name: ${nameErr}`);
       const projectId = resolveProjectId(opts.project);
       const target = opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");

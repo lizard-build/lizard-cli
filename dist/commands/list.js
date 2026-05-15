@@ -1,8 +1,7 @@
 import { api } from "../lib/api.js";
 import { isJSONMode, printJSON, table } from "../lib/format.js";
 /**
- * `lizard list` — Railway-style project list. Equivalent to the legacy
- * `lizard project list`.
+ * `lizard list` — list all projects. Alias of `lizard project list`.
  */
 export function registerList(program) {
     program

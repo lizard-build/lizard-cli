@@ -9,7 +9,7 @@ import { success, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
  * `lizard service set` — atomic patch of per-service configuration.
  *
  * Three input modes (priority):
- *   1. -s <SERVICE> <DOT_PATH> <VALUE>  — repeatable Railway-style flags
+ *   1. -s <SERVICE> <DOT_PATH> <VALUE>  — repeatable per-service flags
  *   2. -f <file>                         — read JSON from file
  *   3. piped stdin JSON                  — auto-detected when stdin has data
  *   4. interactive                       — TTY prompts when nothing else is given
@@ -26,7 +26,6 @@ import { success, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
  *   deploy.restartPolicyType   "ON_FAILURE" | "ALWAYS" | "NEVER"
  *   source.repo                string
  *   source.branch              string
- *   source.image               string
  *   source.rootDirectory       string
  *   variables.<KEY>.value      string (supports ${{...}} references)
  */
@@ -115,8 +114,6 @@ async function flattenPatch(patch, projectId) {
             flat.repoUrl = cfg.source.repo;
         if (cfg.source?.branch !== undefined)
             flat.branch = cfg.source.branch;
-        if (cfg.source?.image !== undefined)
-            flat.image = cfg.source.image;
         if (cfg.source?.rootDirectory !== undefined)
             flat.rootDirectory = cfg.source.rootDirectory;
         // Build group
@@ -140,7 +137,7 @@ async function flattenPatch(patch, projectId) {
         if (cfg.deploy?.numReplicas !== undefined)
             flat.desiredReplicas = cfg.deploy.numReplicas;
         if (cfg.deploy?.restartPolicyType !== undefined) {
-            // Railway uses ON_FAILURE/ALWAYS/NEVER; server uses on-failure/always/never
+            // Accept ON_FAILURE/ALWAYS/NEVER input; server uses on-failure/always/never
             const v = String(cfg.deploy.restartPolicyType).toLowerCase().replace(/_/g, "-");
             flat.restartPolicyType = v;
         }
@@ -319,7 +316,6 @@ async function interactivePatch(projectId) {
                 { value: "deploy.restartPolicyType", label: "Restart policy" },
                 { value: "source.rootDirectory", label: "Root directory" },
                 { value: "source.repo", label: "GitHub repo" },
-                { value: "source.image", label: "Docker image" },
             ],
         });
         if (p.isCancel(field))

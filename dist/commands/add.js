@@ -3,6 +3,7 @@ import * as p from "@clack/prompts";
 import { api } from "../lib/api.js";
 import { getProjectLink, updateProjectLink } from "../lib/config.js";
 import { success, info, isJSONMode, printJSON, isTTY, table, } from "../lib/format.js";
+import { validateName } from "../lib/name.js";
 const CATALOG = [
     { name: "postgres", label: "PostgreSQL", description: "Relational database" },
     { name: "redis", label: "Redis", description: "In-memory key-value store" },
@@ -72,20 +73,20 @@ export function registerAdd(program) {
     program
         .command("add")
         .argument("[type]", "Addon type to add (postgres / redis / mysql / mongo / s3)")
-        .description("Add a database, service, or repo/image to the project")
+        .description("Add a database, service, or repo to the project")
         .option("-d, --database <type...>", "Add one or more managed databases (multi-add: -d postgres -d redis)")
         .option("-s, --service <name>", "Create an empty service with this name")
         .option("-r, --repo <repo>", "Create a service from a GitHub repo (owner/repo)")
-        .option("-i, --image <image>", "Create a service from a Docker image")
         .option("-v, --variables <kv...>", "KEY=value pairs to seed the service")
-        .option("--instance-name <name>", "Stable instance name used in ${{<name>.KEY}} templates (must be DNS-safe)")
+        .option("-n, --name <name>", "Name used in ${{<name>.KEY}} templates and shown in the dashboard. Renamable; refs stay stable.")
+        .option("--instance-name <name>", "(deprecated) alias for --name")
         .option("--list", "Show available database types")
         .action(async (type, opts, command) => {
         const merged = command.optsWithGlobals();
         const projectFlag = merged.project;
         const region = merged.region;
         // ── --list: show DB catalog and exit ──────────────────────────────
-        if (opts.list || (!type && !opts.database && !opts.service && !opts.repo && !opts.image && !isTTY())) {
+        if (opts.list || (!type && !opts.database && !opts.service && !opts.repo && !isTTY())) {
             if (isJSONMode()) {
                 printJSON(CATALOG);
             }
@@ -95,6 +96,15 @@ export function registerAdd(program) {
             return;
         }
         const variables = parseVariables(opts.variables);
+        if (opts.instanceName && !opts.name) {
+            info(chalk.yellow("Warning: --instance-name is deprecated, use --name instead."));
+            opts.name = opts.instanceName;
+        }
+        if (opts.name) {
+            const err = validateName(opts.name);
+            if (err)
+                throw new Error(`Invalid --name: ${err}`);
+        }
         // ── positional <type> and/or -d <type...> ─────────────────────────
         const databases = [];
         if (opts.database?.length)
@@ -121,7 +131,7 @@ export function registerAdd(program) {
                     type: db,
                     region,
                     variables,
-                    ...(opts.instanceName ? { instanceName: opts.instanceName } : {}),
+                    ...(opts.name ? { name: opts.name } : {}),
                 });
                 if (isJSONMode())
                     printJSON(addon);
@@ -148,7 +158,7 @@ export function registerAdd(program) {
         // ── -r <repo> ─────────────────────────────────────────────────────
         if (opts.repo) {
             const projectId = await resolveProject(projectFlag);
-            const serviceName = opts.service || opts.repo.split("/").pop() || "service";
+            const serviceName = opts.name || opts.service || opts.repo.split("/").pop() || "service";
             info(`Creating service ${chalk.bold(serviceName)} from ${chalk.cyan(opts.repo)}...`);
             const detectedPort = await detectPortFromDockerfile(opts.repo);
             if (detectedPort)
@@ -161,27 +171,6 @@ export function registerAdd(program) {
                 region,
                 variables,
                 ...(detectedPort ? { containerPort: detectedPort } : {}),
-            });
-            if (isJSONMode())
-                printJSON(app);
-            else
-                success(`Service ${chalk.bold(app.name)} created`);
-            try {
-                updateProjectLink({ serviceId: app.id, serviceName: app.name });
-            }
-            catch { }
-            return;
-        }
-        // ── -i <image> ────────────────────────────────────────────────────
-        if (opts.image) {
-            const projectId = await resolveProject(projectFlag);
-            const serviceName = opts.service || opts.image.split(":")[0].split("/").pop() || "service";
-            info(`Creating service ${chalk.bold(serviceName)} from image ${chalk.cyan(opts.image)}...`);
-            const app = await api.post(`/api/projects/${projectId}/apps`, {
-                name: serviceName,
-                image: opts.image,
-                region,
-                variables,
             });
             if (isJSONMode())
                 printJSON(app);
@@ -219,7 +208,6 @@ export function registerAdd(program) {
                 options: [
                     { value: "database", label: "Database", hint: "postgres / redis / mysql / mongodb" },
                     { value: "repo", label: "GitHub Repo", hint: "create a service from a repo" },
-                    { value: "image", label: "Docker Image", hint: "create a service from an image" },
                     { value: "service", label: "Empty Service", hint: "create a service to upload code into" },
                 ],
             });
@@ -252,20 +240,6 @@ export function registerAdd(program) {
                 });
                 return;
             }
-            if (kind === "image") {
-                const img = await p.text({ message: "Image (e.g. nginx:alpine)" });
-                if (p.isCancel(img))
-                    process.exit(5);
-                const svc = await p.text({ message: "Service name" });
-                if (p.isCancel(svc))
-                    process.exit(5);
-                await new Promise((resolve) => {
-                    program
-                        .parseAsync(["add", "-i", String(img), "-s", String(svc) || ""], { from: "user" })
-                        .then(() => resolve());
-                });
-                return;
-            }
             if (kind === "service") {
                 const svc = await p.text({ message: "Service name" });
                 if (p.isCancel(svc))
@@ -279,7 +253,6 @@ export function registerAdd(program) {
         throw new Error("No service type specified. Examples:\n" +
             "  lizard add postgres        Add a managed database\n" +
             "  lizard add -r owner/repo   Create a service from a GitHub repo\n" +
-            "  lizard add -i nginx:alpine Create a service from a Docker image\n" +
             "  lizard add -s my-service   Empty service");
     });
 }

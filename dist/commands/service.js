@@ -3,18 +3,18 @@ import * as p from "@clack/prompts";
 import { api } from "../lib/api.js";
 import { resolveProjectId, updateProjectLink, getProjectLink } from "../lib/config.js";
 import { resolveService } from "../lib/resolve.js";
+import { validateName } from "../lib/name.js";
 import { registerServiceSet } from "./service-set.js";
 import { registerServiceShow } from "./service-show.js";
-import { success, info, isJSONMode, printJSON, isTTY, table, statusColor, } from "../lib/format.js";
+import { success, info, isJSONMode, printJSON, isTTY, statusColor, } from "../lib/format.js";
 /**
- * `lizard service` — Railway-style group:
- *   - bare: link a service to cwd (legacy: `railway service <name>`)
+ * `lizard service` — service group:
+ *   - bare: link a service to cwd
  *   - list / link / status / delete / redeploy / restart / scale / logs
  */
 export function registerService(program) {
     const svc = program
         .command("service")
-        .alias("svc")
         .argument("[name]", "Service name to link (legacy form for `service link <name>`)")
         .description("Manage services")
         .action(async (name, _opts, cmd) => {
@@ -31,45 +31,6 @@ export function registerService(program) {
     // Live in their own files because the apply logic is substantial.
     registerServiceSet(svc);
     registerServiceShow(svc);
-    svc
-        .command("list")
-        .alias("ls")
-        .description("List services in the project")
-        .action(async (opts, sub) => {
-        const inherited = sub.parent?.opts() || {};
-        const projectId = resolveProjectId(opts.project ?? inherited.project ?? program.opts().project);
-        const data = await api.get(`/api/projects/${projectId}/services`);
-        const apps = data.apps || [];
-        const addons = data.addons || [];
-        if (isJSONMode()) {
-            printJSON({ apps, addons });
-            return;
-        }
-        const linkedId = getProjectLink()?.serviceId;
-        if (apps.length) {
-            console.log(chalk.bold("Apps"));
-            table(["Name", "Status", "URL", "Linked"], apps.map((a) => [
-                a.name || a.id,
-                statusColor(a.status),
-                a.domain ? chalk.cyan(`https://${a.domain}`) : chalk.dim("—"),
-                a.id === linkedId ? chalk.green("✓") : "",
-            ]));
-        }
-        if (addons.length) {
-            if (apps.length)
-                console.log();
-            console.log(chalk.bold("Addons"));
-            table(["Name", "Type", "Status", "Host"], addons.map((a) => [
-                a.name || a.addonType,
-                a.addonType,
-                statusColor(a.status),
-                a.hostname || chalk.dim("—"),
-            ]));
-        }
-        if (!apps.length && !addons.length) {
-            console.log("No services. Use `lizard add`.");
-        }
-    });
     svc
         .command("link")
         .argument("[name]", "Service name or ID")
@@ -106,8 +67,6 @@ export function registerService(program) {
             console.log(`  url: ${chalk.cyan(`https://${detail.domain}`)}`);
         if (detail.repo || detail.repoUrl)
             console.log(`  repo: ${detail.repo || detail.repoUrl}`);
-        if (detail.image)
-            console.log(`  image: ${detail.image}`);
         if (detail.builds?.length) {
             console.log(`  latest build: ${statusColor(detail.builds[0].status)}`);
         }
@@ -236,6 +195,9 @@ export function registerService(program) {
         .option("-s, --service <name>", "Service name or ID (defaults to linked service)")
         .option("-p, --project <id>", "Project name or ID")
         .action(async (newName, opts) => {
+        const nameErr = validateName(newName);
+        if (nameErr)
+            throw new Error(`Invalid name: ${nameErr}`);
         const projectId = resolveProjectId(opts.project);
         const target = opts.service || getProjectLink()?.serviceId;
         if (!target)
