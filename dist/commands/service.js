@@ -230,6 +230,36 @@ export function registerService(program) {
         }
     });
     svc
+        .command("rename")
+        .argument("<new-name>", "New name for the service")
+        .description("Rename a service (apps and addons)")
+        .option("-s, --service <name>", "Service name or ID (defaults to linked service)")
+        .option("-p, --project <id>", "Project name or ID")
+        .action(async (newName, opts) => {
+        const projectId = resolveProjectId(opts.project);
+        const target = opts.service || getProjectLink()?.serviceId;
+        if (!target)
+            throw new Error("No service specified or linked.");
+        const svcInfo = await resolveService(projectId, target);
+        if (svcInfo.kind === "app") {
+            await api.patch(`/api/apps/${svcInfo.id}`, { name: newName });
+        }
+        else {
+            await api.patch(`/api/projects/${projectId}/addons/${svcInfo.id}`, { name: newName });
+        }
+        // Keep the cwd link's cached name in sync when we just renamed the linked one.
+        const link = getProjectLink();
+        if (link?.serviceId === svcInfo.id) {
+            updateProjectLink({ serviceId: svcInfo.id, serviceName: newName });
+        }
+        if (isJSONMode()) {
+            printJSON({ id: svcInfo.id, oldName: svcInfo.name, name: newName });
+        }
+        else {
+            success(`Renamed ${chalk.bold(svcInfo.name)} → ${chalk.bold(newName)}`);
+        }
+    });
+    svc
         .command("logs")
         .description("Stream logs of a service")
         .option("-s, --service <name>", "Service name or ID")

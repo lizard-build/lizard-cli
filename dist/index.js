@@ -60,6 +60,12 @@ program
     .description("Lizard CLI — deploy and manage apps on Lizard")
     .version("0.1.0")
     .addHelpText("before", chalk.green(BANNER) + "\n")
+    .configureHelp({
+    subcommandTerm: (cmd) => {
+        const alias = cmd.aliases()[0];
+        return alias ? `${cmd.name()}|${alias}` : cmd.name();
+    },
+})
     .option("--json", "Output in JSON format")
     .option("-y, --yes", "Skip confirmation prompts")
     .option("--workspace <id>", "Workspace name or ID")
