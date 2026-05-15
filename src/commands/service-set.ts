@@ -306,7 +306,6 @@ async function normalisePatch(raw: any, projectId: string): Promise<any> {
 
   const out: any = { services };
   if (raw.sharedVariables) out.sharedVariables = raw.sharedVariables;
-  if (raw.volumes) out.volumes = raw.volumes;
   return out;
 }
 

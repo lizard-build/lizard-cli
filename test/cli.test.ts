@@ -323,7 +323,7 @@ describe("project config apply", () => {
   });
 });
 
-// ── Domain + Volume (backend not yet implemented — should degrade gracefully) ──
+// ── Domain (backend not yet implemented — should degrade gracefully) ──
 
 describe("domain (backend stub)", () => {
   test("domain list returns empty array when no backend", async () => {
@@ -333,18 +333,6 @@ describe("domain (backend stub)", () => {
     const apps: Array<{ id: string; name: string }> = services?.apps ?? [];
     if (apps.length === 0) { console.log("  ⚠ no apps, skipping domain test"); return; }
     const data = await cliJSON("domain", "-p", projectId, "--service", apps[0].name)
-      .catch(() => []);
-    expect(Array.isArray(data)).toBe(true);
-  });
-});
-
-describe("volume (backend stub)", () => {
-  test("volume list returns empty array when no backend", async () => {
-    // GET /api/apps/:id/volumes is not implemented yet — CLI catches and returns []
-    const services = await cliJSON("--project", projectId, "ps").catch(() => ({ apps: [] }));
-    const apps: Array<{ id: string; name: string }> = services?.apps ?? [];
-    if (apps.length === 0) { console.log("  ⚠ no apps, skipping volume test"); return; }
-    const data = await cliJSON("volume", "list", "--service", apps[0].name, "--project", projectId)
       .catch(() => []);
     expect(Array.isArray(data)).toBe(true);
   });

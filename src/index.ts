@@ -22,8 +22,6 @@ const BANNER = [
 
 // Commands (alphabetical by command name)
 import { registerAdd } from "./commands/add.js";
-import { registerConnect } from "./commands/connect.js";
-import { registerContext } from "./commands/context.js";
 import { registerDomain } from "./commands/domain.js";
 import { registerDown } from "./commands/down.js";
 import { registerGit } from "./commands/git.js";
@@ -46,12 +44,10 @@ import { registerSecrets } from "./commands/secrets.js";
 import { registerService } from "./commands/service.js";
 import { registerSnapshot } from "./commands/snapshot.js";
 import { registerSSH } from "./commands/ssh.js";
-import { registerStatus } from "./commands/status.js";
 import { registerUnlink } from "./commands/unlink.js";
 import { registerUp } from "./commands/up.js";
 import { registerUpdate } from "./commands/update.js";
 import { registerVersion } from "./commands/version.js";
-import { registerVolume } from "./commands/volume.js";
 import { registerWhoami } from "./commands/whoami.js";
 
 const program = new Command();
@@ -113,8 +109,6 @@ program
 
 // Register all commands (alphabetical)
 registerAdd(program);
-registerConnect(program);
-registerContext(program);
 registerDomain(program);
 registerDown(program);
 registerGit(program);
@@ -137,12 +131,10 @@ registerSecrets(program);
 registerService(program);
 registerSnapshot(program);
 registerSSH(program);
-registerStatus(program);
 registerUnlink(program);
 registerUp(program);
 registerUpdate(program);
 registerVersion(program);
-registerVolume(program);
 registerWhoami(program);
 
 // Error handling

@@ -475,7 +475,7 @@ async function streamBuildLogs(appId: string, ciMode: boolean = false) {
   else if (app.status === "failed")
     error("Deploy failed. Check logs with `lizard logs --build`");
   else if (app.status === "deploying")
-    info(chalk.dim("Still deploying... check status with `lizard status`"));
+    info(chalk.dim("Still deploying... check status with `lizard ps`"));
 }
 
 function sleep(ms: number) {
