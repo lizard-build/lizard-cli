@@ -87,7 +87,6 @@ export function registerService(program: Command) {
       console.log(`  status: ${statusColor(detail.status)}`);
       if (detail.domain) console.log(`  url: ${chalk.cyan(`https://${detail.domain}`)}`);
       if (detail.repo || detail.repoUrl) console.log(`  repo: ${detail.repo || detail.repoUrl}`);
-      if (detail.image) console.log(`  image: ${detail.image}`);
       if (detail.builds?.length) {
         console.log(`  latest build: ${statusColor(detail.builds[0].status)}`);
       }

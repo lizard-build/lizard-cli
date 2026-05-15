@@ -99,14 +99,13 @@ export function registerAdd(program: Command) {
       "[type]",
       "Addon type to add (postgres / redis / mysql / mongo / s3)",
     )
-    .description("Add a database, service, or repo/image to the project")
+    .description("Add a database, service, or repo to the project")
     .option(
       "-d, --database <type...>",
       "Add one or more managed databases (multi-add: -d postgres -d redis)",
     )
     .option("-s, --service <name>", "Create an empty service with this name")
     .option("-r, --repo <repo>", "Create a service from a GitHub repo (owner/repo)")
-    .option("-i, --image <image>", "Create a service from a Docker image")
     .option("-v, --variables <kv...>", "KEY=value pairs to seed the service")
     .option("--instance-name <name>", "Stable instance name used in ${{<name>.KEY}} templates (must be DNS-safe)")
     .option("--list", "Show available database types")
@@ -116,7 +115,7 @@ export function registerAdd(program: Command) {
       const region = merged.region;
 
       // ── --list: show DB catalog and exit ──────────────────────────────
-      if (opts.list || (!type && !opts.database && !opts.service && !opts.repo && !opts.image && !isTTY())) {
+      if (opts.list || (!type && !opts.database && !opts.service && !opts.repo && !isTTY())) {
         if (isJSONMode()) {
           printJSON(CATALOG);
         } else {
@@ -216,29 +215,6 @@ export function registerAdd(program: Command) {
         return;
       }
 
-      // ── -i <image> ────────────────────────────────────────────────────
-      if (opts.image) {
-        const projectId = await resolveProject(projectFlag);
-        const serviceName =
-          opts.service || opts.image.split(":")[0].split("/").pop() || "service";
-        info(`Creating service ${chalk.bold(serviceName)} from image ${chalk.cyan(opts.image)}...`);
-        const app = await api.post<{ id: string; name: string }>(
-          `/api/projects/${projectId}/apps`,
-          {
-            name: serviceName,
-            image: opts.image,
-            region,
-            variables,
-          },
-        );
-        if (isJSONMode()) printJSON(app);
-        else success(`Service ${chalk.bold(app.name)} created`);
-        try {
-          updateProjectLink({ serviceId: app.id, serviceName: app.name });
-        } catch {}
-        return;
-      }
-
       // ── --service <name> (empty service) ──────────────────────────────
       if (opts.service) {
         const projectId = await resolveProject(projectFlag);
@@ -266,7 +242,6 @@ export function registerAdd(program: Command) {
           options: [
             { value: "database", label: "Database", hint: "postgres / redis / mysql / mongodb" },
             { value: "repo", label: "GitHub Repo", hint: "create a service from a repo" },
-            { value: "image", label: "Docker Image", hint: "create a service from an image" },
             { value: "service", label: "Empty Service", hint: "create a service to upload code into" },
           ],
         });
@@ -298,19 +273,6 @@ export function registerAdd(program: Command) {
           return;
         }
 
-        if (kind === "image") {
-          const img = await p.text({ message: "Image (e.g. nginx:alpine)" });
-          if (p.isCancel(img)) process.exit(5);
-          const svc = await p.text({ message: "Service name" });
-          if (p.isCancel(svc)) process.exit(5);
-          await new Promise<void>((resolve) => {
-            program
-              .parseAsync(["add", "-i", String(img), "-s", String(svc) || ""], { from: "user" })
-              .then(() => resolve());
-          });
-          return;
-        }
-
         if (kind === "service") {
           const svc = await p.text({ message: "Service name" });
           if (p.isCancel(svc)) process.exit(5);
@@ -325,7 +287,6 @@ export function registerAdd(program: Command) {
         "No service type specified. Examples:\n" +
           "  lizard add postgres        Add a managed database\n" +
           "  lizard add -r owner/repo   Create a service from a GitHub repo\n" +
-          "  lizard add -i nginx:alpine Create a service from a Docker image\n" +
           "  lizard add -s my-service   Empty service",
       );
     });

@@ -28,7 +28,6 @@ import { success, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
  *   deploy.restartPolicyType   "ON_FAILURE" | "ALWAYS" | "NEVER"
  *   source.repo                string
  *   source.branch              string
- *   source.image               string
  *   source.rootDirectory       string
  *   variables.<KEY>.value      string (supports ${{...}} references)
  */
@@ -141,7 +140,6 @@ async function flattenPatch(
     // Source group
     if (cfg.source?.repo !== undefined) flat.repoUrl = cfg.source.repo;
     if (cfg.source?.branch !== undefined) flat.branch = cfg.source.branch;
-    if (cfg.source?.image !== undefined) flat.image = cfg.source.image;
     if (cfg.source?.rootDirectory !== undefined)
       flat.rootDirectory = cfg.source.rootDirectory;
 
@@ -371,7 +369,6 @@ async function interactivePatch(projectId: string): Promise<any> {
         { value: "deploy.restartPolicyType", label: "Restart policy" },
         { value: "source.rootDirectory", label: "Root directory" },
         { value: "source.repo", label: "GitHub repo" },
-        { value: "source.image", label: "Docker image" },
       ],
     });
     if (p.isCancel(field)) break;
