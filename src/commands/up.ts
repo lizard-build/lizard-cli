@@ -30,7 +30,7 @@ interface App {
 }
 
 /**
- * Builds the `up` command. Mirrors `railway up`:
+ * Builds the `up` command:
  *   - upload local code (or `[path]`) as a tarball
  *   - target a service via --service / linked / first-in-project
  *   - --ci streams build logs only and exits when build finishes
@@ -74,7 +74,7 @@ export function registerUp(program: Command) {
       const targetPath = pathArg ? path.resolve(pathArg) : process.cwd();
       const archiveRoot = opts.pathAsRoot ? targetPath : process.cwd();
 
-      // `up` always uploads code (railway-style). For redeploy of an existing
+      // `up` always uploads code. For redeploy of an existing
       // build without re-uploading, use `lizard redeploy`.
       const gitRemote = !pathArg ? getGitRemote() : null;
 

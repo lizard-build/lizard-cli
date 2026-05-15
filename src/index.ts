@@ -24,11 +24,8 @@ const BANNER = [
 import { registerAdd } from "./commands/add.js";
 import { registerConnect } from "./commands/connect.js";
 import { registerContext } from "./commands/context.js";
-import { registerDeploy } from "./commands/deploy.js";
-import { registerDestroy } from "./commands/destroy.js";
 import { registerDomain } from "./commands/domain.js";
 import { registerDown } from "./commands/down.js";
-import { registerEnv } from "./commands/env.js";
 import { registerGit } from "./commands/git.js";
 import { registerInit } from "./commands/init.js";
 import { registerLink } from "./commands/link.js";
@@ -53,7 +50,6 @@ import { registerStatus } from "./commands/status.js";
 import { registerUnlink } from "./commands/unlink.js";
 import { registerUp } from "./commands/up.js";
 import { registerUpdate } from "./commands/update.js";
-import { registerVariables } from "./commands/variables.js";
 import { registerVersion } from "./commands/version.js";
 import { registerVolume } from "./commands/volume.js";
 import { registerWhoami } from "./commands/whoami.js";
@@ -107,7 +103,7 @@ program
     }
 
     // Commands that don't need auth
-    const noAuth = new Set(["login", "logout", "version", "completion", "update", "help"]);
+    const noAuth = new Set(["login", "logout", "version", "update", "help"]);
     if (noAuth.has(actionCommand.name())) return;
 
     // Require auth — auto-triggers login flow if not logged in
@@ -117,31 +113,10 @@ program
 
 // Register all commands (alphabetical)
 registerAdd(program);
-program
-  .command("completion")
-  .argument("<shell>", "Shell type (bash, zsh, fish)")
-  .description("Generate shell completion script")
-  .action((shell: string) => {
-    // Commander doesn't have built-in completion like Cobra
-    // Point users to manual setup
-    console.log(`# Add to your .${shell}rc:`);
-    if (shell === "bash") {
-      console.log(`eval "$(lizard completion bash)"`);
-    } else if (shell === "zsh") {
-      console.log(`# lizard completion is not yet available for zsh`);
-      console.log(`# Coming soon`);
-    } else if (shell === "fish") {
-      console.log(`# lizard completion is not yet available for fish`);
-      console.log(`# Coming soon`);
-    }
-  });
 registerConnect(program);
 registerContext(program);
-registerDeploy(program);
-registerDestroy(program);
 registerDomain(program);
 registerDown(program);
-registerEnv(program);
 registerGit(program);
 registerInit(program);
 registerLink(program);
@@ -166,7 +141,6 @@ registerStatus(program);
 registerUnlink(program);
 registerUp(program);
 registerUpdate(program);
-registerVariables(program);
 registerVersion(program);
 registerVolume(program);
 registerWhoami(program);

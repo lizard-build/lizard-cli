@@ -13,8 +13,7 @@ interface Project {
 }
 
 /**
- * `lizard list` — Railway-style project list. Equivalent to the legacy
- * `lizard project list`.
+ * `lizard list` — list all projects. Alias of `lizard project list`.
  */
 export function registerList(program: Command) {
   program

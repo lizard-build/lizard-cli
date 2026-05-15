@@ -3,7 +3,7 @@ import { clearProjectLink } from "../lib/config.js";
 import { isJSONMode, printJSON, success } from "../lib/format.js";
 
 /**
- * `lizard unlink` — Railway-style. Drops the cwd↔project mapping.
+ * `lizard unlink` — drops the cwd↔project mapping.
  */
 export function registerUnlink(program: Command) {
   program

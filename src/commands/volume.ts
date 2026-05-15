@@ -14,7 +14,7 @@ interface Volume {
 }
 
 /**
- * `lizard volume` — Railway-style volume management.
+ * `lizard volume` — persistent volume management.
  */
 export function registerVolume(program: Command) {
   const vol = program

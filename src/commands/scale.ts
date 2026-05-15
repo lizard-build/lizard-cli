@@ -6,7 +6,7 @@ import { getActiveService } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON } from "../lib/format.js";
 
 /**
- * `lizard scale` — Railway-style scaling.
+ * `lizard scale` — service scaling.
  *   --replicas <n>     change replica count
  *   --region <code>    bind to a region
  *   --cpu <cores>      cap CPU

@@ -2,6 +2,7 @@ import chalk from "chalk";
 import { Command } from "commander";
 import { api } from "../lib/api.js";
 import { getProjectLink, resolveProjectId } from "../lib/config.js";
+import { getActiveService } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON, table } from "../lib/format.js";
 
 interface Secret {
@@ -10,55 +11,124 @@ interface Secret {
 }
 
 /**
- * Return (scopePath, label) pair for secret endpoints.
- * - --global → project-wide: /api/projects/{id}/secrets
- * - default  → service-wide: /api/apps/{id}/secrets
+ * `lizard secrets` — secret management. Defaults to the linked service
+ * scope, with --global for project-wide.
  *
- * Throws a helpful error when service scope is requested but no app is linked
- * to the current directory.
+ * Bare command without subcommand prints the secret list.
+ *
+ * `--set KEY=value [...]` is the inline-set form.
+ * `--refs` lists `${{...}}` templates available in this scope.
  */
-function resolveScope(
+interface Scope {
+  path: string;
+  label: "project" | "service";
+  projectId: string;
+  serviceId?: string;
+}
+
+async function resolveScope(
   projectFlag: string | undefined,
+  serviceFlag: string | undefined,
   global: boolean,
-): { path: string; label: string } {
+): Promise<Scope> {
+  const projectId = resolveProjectId(projectFlag);
+
   if (global) {
-    const projectId = resolveProjectId(projectFlag);
-    return { path: `/api/projects/${projectId}/secrets`, label: "project" };
+    return { path: `/api/projects/${projectId}/secrets`, label: "project", projectId };
+  }
+
+  if (serviceFlag) {
+    const svc = await getActiveService(serviceFlag, projectId);
+    return {
+      path: `/api/apps/${svc.id}/secrets`,
+      label: "service",
+      projectId,
+      serviceId: svc.id,
+    };
   }
 
   const link = getProjectLink();
-  if (!link?.appId) {
+  if (!link?.serviceId) {
     throw new Error(
-      "No service linked to this directory. Run `lizard deploy` first, or use --global to target the whole project.",
+      "No service linked. Pass --service <name>, run `lizard service link <name>`, or use --global.",
     );
   }
-  return { path: `/api/apps/${link.appId}/secrets`, label: "service" };
+  return {
+    path: `/api/apps/${link.serviceId}/secrets`,
+    label: "service",
+    projectId,
+    serviceId: link.serviceId,
+  };
+}
+
+/**
+ * Apply secrets. Values are stored verbatim — including ${{name.KEY}} templates.
+ * The platform's deployer expands templates against the project context at
+ * deploy time. No client-side resolver needed.
+ *
+ * Merges with existing values; only keys in `newSecrets` are touched.
+ */
+async function applySecrets(
+  scope: Scope,
+  newSecrets: Record<string, string>,
+  noRedeploy: boolean,
+): Promise<void> {
+  const existing = await api.get<Secret[]>(scope.path);
+  const map = new Map(existing.map((s) => [s.key, s.value]));
+  for (const [k, v] of Object.entries(newSecrets)) map.set(k, v);
+  const merged = Array.from(map.entries()).map(([key, value]) => ({ key, value }));
+  await api.put(scope.path, { secrets: merged, noRedeploy });
 }
 
 function parsePairs(pairs: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const pair of pairs) {
-    const eqIdx = pair.indexOf("=");
-    if (eqIdx < 1) {
-      throw new Error(`Invalid format: "${pair}". Use KEY=value`);
-    }
-    out[pair.slice(0, eqIdx)] = pair.slice(eqIdx + 1);
+    const eq = pair.indexOf("=");
+    if (eq < 1) throw new Error(`Invalid format: "${pair}". Use KEY=value`);
+    out[pair.slice(0, eq)] = pair.slice(eq + 1);
   }
   return out;
 }
 
 export function registerSecrets(program: Command) {
-  const secret = program
-    .command("secret")
-    .description("Manage secrets (default scope: service; use --global for project)");
-
-  secret
-    .command("list")
-    .description("List secrets")
-    .option("--global", "Target the whole project instead of the linked service")
-    .option("--show", "Reveal secret values")
+  const cmd = program
+    .command("secrets")
+    .alias("secret")
+    .description("Manage secrets (default scope: service; use --global for project)")
+    .option("--global", "Target the whole project")
+    .option("--show", "Reveal values")
+    .option(
+      "--set <kv...>",
+      "KEY=value pairs to set (mutually exclusive with subcommands)",
+    )
+    .option("--refs", "List reference templates available in this scope")
+    .option("--no-redeploy", "Don't trigger redeploy on set/delete")
+    .option("-s, --service <name>", "Service to scope to (overrides linked)")
+    .option("-p, --project <id>", "Project to scope to")
+    .option("-e, --environment <name>", "Environment to scope to")
     .action(async (opts) => {
-      const scope = resolveScope(program.opts().project, opts.global);
+      const scope = await resolveScope(opts.project ?? program.opts().project, opts.service, opts.global);
+
+      // --refs → list reference templates exposed by the platform
+      if (opts.refs) {
+        await printRefs(scope);
+        return;
+      }
+
+      // --set <kv...>
+      if (opts.set?.length) {
+        const newSecrets = parsePairs(opts.set);
+        await applySecrets(scope, newSecrets, opts.redeploy === false);
+
+        if (isJSONMode()) {
+          printJSON({ updated: Object.keys(newSecrets), scope: scope.label });
+        } else {
+          success(`${Object.keys(newSecrets).length} ${scope.label} secret(s) updated`);
+        }
+        return;
+      }
+
+      // No --set → list
       const secrets = await api.get<Secret[]>(scope.path);
 
       if (isJSONMode()) {
@@ -72,7 +142,7 @@ export function registerSecrets(program: Command) {
 
       if (secrets.length === 0) {
         console.log(
-          `No ${scope.label} secrets. Use \`lizard secret set KEY=value${opts.global ? " --global" : ""}\`.`,
+          `No ${scope.label} secrets. Use \`lizard secrets --set KEY=value${opts.global ? " --global" : ""}\`.`,
         );
         return;
       }
@@ -81,63 +151,100 @@ export function registerSecrets(program: Command) {
         ["Key", "Value"],
         secrets.map((s) => [
           s.key,
-          opts.show ? s.value : chalk.dim("•".repeat(Math.min(s.value.length, 20))),
+          opts.show
+            ? s.value
+            : chalk.dim("•".repeat(Math.min(s.value.length, 20))),
         ]),
       );
     });
 
-  secret
+  cmd
+    .command("list")
+    .description("List secrets")
+    .option("--global", "Target the whole project")
+    .option("--show", "Reveal values")
+    .option("--refs", "List reference templates available in this scope")
+    .action(async (opts, sub) => {
+      const inherited = sub.parent?.opts() || {};
+      const scope = await resolveScope(
+        opts.project ?? inherited.project ?? program.opts().project,
+        opts.service ?? inherited.service,
+        opts.global || inherited.global,
+      );
+
+      if (opts.refs) {
+        await printRefs(scope);
+        return;
+      }
+
+      const secrets = await api.get<Secret[]>(scope.path);
+
+      if (isJSONMode()) {
+        printJSON(
+          opts.show
+            ? secrets
+            : secrets.map((s) => ({ key: s.key, value: "***" })),
+        );
+        return;
+      }
+
+      if (secrets.length === 0) {
+        console.log(`No ${scope.label} secrets.`);
+        return;
+      }
+
+      table(
+        ["Key", "Value"],
+        secrets.map((s) => [
+          s.key,
+          opts.show
+            ? s.value
+            : chalk.dim("•".repeat(Math.min(s.value.length, 20))),
+        ]),
+      );
+    });
+
+  cmd
     .command("set")
     .argument("<pairs...>", "KEY=value pairs")
     .description("Set one or more secrets")
-    .option("--global", "Target the whole project instead of the linked service")
+    .option("--global", "Target the whole project")
     .option("--no-redeploy", "Don't trigger redeploy")
-    .action(async (pairs: string[], opts) => {
-      const scope = resolveScope(program.opts().project, opts.global);
+    .action(async (pairs: string[], opts, sub) => {
+      const inherited = sub.parent?.opts() || {};
+      const scope = await resolveScope(
+        opts.project ?? inherited.project ?? program.opts().project,
+        opts.service ?? inherited.service,
+        opts.global || inherited.global,
+      );
       const newSecrets = parsePairs(pairs);
-
-      const existing = await api.get<Secret[]>(scope.path);
-      const existingKeys = new Set<string>();
-      const merged: Secret[] = [];
-
-      for (const s of existing) {
-        if (newSecrets[s.key] !== undefined) {
-          merged.push({ key: s.key, value: newSecrets[s.key] });
-          existingKeys.add(s.key);
-        } else {
-          merged.push(s);
-        }
-      }
-      for (const [key, value] of Object.entries(newSecrets)) {
-        if (!existingKeys.has(key)) merged.push({ key, value });
-      }
-
-      await api.put(scope.path, {
-        secrets: merged,
-        noRedeploy: opts.redeploy === false,
-      });
+      await applySecrets(scope, newSecrets, opts.redeploy === false);
 
       if (isJSONMode()) {
         printJSON({ updated: Object.keys(newSecrets), scope: scope.label });
       } else {
-        success(
-          `${Object.keys(newSecrets).length} ${scope.label} secret(s) updated`,
-        );
+        success(`${Object.keys(newSecrets).length} ${scope.label} secret(s) updated`);
       }
     });
 
-  secret
+  cmd
     .command("delete")
+    .alias("rm")
     .argument("<keys...>", "Secret keys to delete")
     .description("Delete one or more secrets")
-    .option("--global", "Target the whole project instead of the linked service")
+    .option("--global", "Target the whole project")
     .option("--no-redeploy", "Don't trigger redeploy")
-    .action(async (keys: string[], opts) => {
-      const scope = resolveScope(program.opts().project, opts.global);
+    .action(async (keys: string[], opts, sub) => {
+      const inherited = sub.parent?.opts() || {};
+      const scope = await resolveScope(
+        opts.project ?? inherited.project ?? program.opts().project,
+        opts.service ?? inherited.service,
+        opts.global || inherited.global,
+      );
       const existing = await api.get<Secret[]>(scope.path);
 
-      const keysSet = new Set(keys);
-      const filtered = existing.filter((s) => !keysSet.has(s.key));
+      const set = new Set(keys);
+      const filtered = existing.filter((s) => !set.has(s.key));
 
       if (filtered.length === existing.length) {
         throw new Error(`Secret(s) not found: ${keys.join(", ")}`);
@@ -155,42 +262,40 @@ export function registerSecrets(program: Command) {
       }
     });
 
-  secret
+  cmd
     .command("import")
     .description("Import secrets from stdin (KEY=value, one per line)")
-    .option("--global", "Target the whole project instead of the linked service")
+    .option("--global", "Target the whole project")
     .option("--no-redeploy", "Don't trigger redeploy")
-    .action(async (opts) => {
-      const scope = resolveScope(program.opts().project, opts.global);
+    .action(async (opts, sub) => {
+      const inherited = sub.parent?.opts() || {};
+      const scope = await resolveScope(
+        opts.project ?? inherited.project ?? program.opts().project,
+        opts.service ?? inherited.service,
+        opts.global || inherited.global,
+      );
 
       const chunks: Buffer[] = [];
-      for await (const chunk of process.stdin) {
-        chunks.push(chunk as Buffer);
-      }
+      for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
       const input = Buffer.concat(chunks).toString("utf-8");
 
       const newSecrets: Record<string, string> = {};
       for (const line of input.split("\n")) {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith("#")) continue;
-        const eqIdx = trimmed.indexOf("=");
-        if (eqIdx < 1) continue;
-        newSecrets[trimmed.slice(0, eqIdx)] = trimmed.slice(eqIdx + 1);
+        const eq = trimmed.indexOf("=");
+        if (eq < 1) continue;
+        newSecrets[trimmed.slice(0, eq)] = trimmed.slice(eq + 1);
       }
 
-      if (Object.keys(newSecrets).length === 0) {
-        throw new Error("No valid KEY=value pairs found in input");
+      if (!Object.keys(newSecrets).length) {
+        throw new Error("No valid KEY=value pairs in input");
       }
 
       const existing = await api.get<Secret[]>(scope.path);
-      const existingMap = new Map(existing.map((s) => [s.key, s.value]));
-      for (const [k, v] of Object.entries(newSecrets)) {
-        existingMap.set(k, v);
-      }
-      const merged = Array.from(existingMap.entries()).map(([key, value]) => ({
-        key,
-        value,
-      }));
+      const map = new Map(existing.map((s) => [s.key, s.value]));
+      for (const [k, v] of Object.entries(newSecrets)) map.set(k, v);
+      const merged = Array.from(map.entries()).map(([key, value]) => ({ key, value }));
 
       await api.put(scope.path, {
         secrets: merged,
@@ -200,9 +305,46 @@ export function registerSecrets(program: Command) {
       if (isJSONMode()) {
         printJSON({ imported: Object.keys(newSecrets), scope: scope.label });
       } else {
-        success(
-          `${Object.keys(newSecrets).length} ${scope.label} secret(s) imported`,
-        );
+        success(`${Object.keys(newSecrets).length} ${scope.label} secret(s) imported`);
       }
     });
+}
+
+interface VarRef {
+  template: string;
+  description?: string;
+  source?: string;
+}
+
+/**
+ * Fetch the reference manifest from the backend so users know which
+ * `${{...}}` templates are valid (e.g. `${{Postgres.DATABASE_URL}}`,
+ * `${{api.LIZARD_PUBLIC_DOMAIN}}`). Backend endpoint:
+ *   GET /api/projects/<id>/variables:refs
+ *   GET /api/apps/<id>/variables:refs       (for service-scope)
+ *
+ * Returns a flat list of templates ready to copy-paste into secret values.
+ */
+async function printRefs(scope: Scope): Promise<void> {
+  const endpoint =
+    scope.label === "service" && scope.serviceId
+      ? `/api/apps/${scope.serviceId}/variables:refs`
+      : `/api/projects/${scope.projectId}/variables:refs`;
+
+  const refs = await api.get<VarRef[]>(endpoint);
+
+  if (isJSONMode()) {
+    printJSON(refs);
+    return;
+  }
+
+  if (!refs.length) {
+    console.log("No reference variables exposed in this scope.");
+    return;
+  }
+
+  table(
+    ["Template", "Source", "Description"],
+    refs.map((r) => [chalk.cyan(r.template), r.source || "—", r.description || ""]),
+  );
 }

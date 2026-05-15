@@ -12,7 +12,6 @@ import {
   isJSONMode,
   printJSON,
   isTTY,
-  table,
   statusColor,
 } from "../lib/format.js";
 
@@ -22,14 +21,13 @@ interface ServicesResponse {
 }
 
 /**
- * `lizard service` — Railway-style group:
- *   - bare: link a service to cwd (legacy: `railway service <name>`)
+ * `lizard service` — service group:
+ *   - bare: link a service to cwd
  *   - list / link / status / delete / redeploy / restart / scale / logs
  */
 export function registerService(program: Command) {
   const svc = program
     .command("service")
-    .alias("svc")
     .argument(
       "[name]",
       "Service name to link (legacy form for `service link <name>`)",
@@ -50,58 +48,6 @@ export function registerService(program: Command) {
   // Live in their own files because the apply logic is substantial.
   registerServiceSet(svc);
   registerServiceShow(svc);
-
-  svc
-    .command("list")
-    .alias("ls")
-    .description("List services in the project")
-    .action(async (opts, sub) => {
-      const inherited = sub.parent?.opts() || {};
-      const projectId = resolveProjectId(opts.project ?? inherited.project ?? program.opts().project);
-      const data = await api.get<ServicesResponse>(
-        `/api/projects/${projectId}/services`,
-      );
-      const apps = data.apps || [];
-      const addons = data.addons || [];
-
-      if (isJSONMode()) {
-        printJSON({ apps, addons });
-        return;
-      }
-
-      const linkedId = getProjectLink()?.serviceId;
-
-      if (apps.length) {
-        console.log(chalk.bold("Apps"));
-        table(
-          ["Name", "Status", "URL", "Linked"],
-          apps.map((a: any) => [
-            a.name || a.id,
-            statusColor(a.status),
-            a.domain ? chalk.cyan(`https://${a.domain}`) : chalk.dim("—"),
-            a.id === linkedId ? chalk.green("✓") : "",
-          ]),
-        );
-      }
-
-      if (addons.length) {
-        if (apps.length) console.log();
-        console.log(chalk.bold("Addons"));
-        table(
-          ["Name", "Type", "Status", "Host"],
-          addons.map((a: any) => [
-            a.name || a.addonType,
-            a.addonType,
-            statusColor(a.status),
-            a.hostname || chalk.dim("—"),
-          ]),
-        );
-      }
-
-      if (!apps.length && !addons.length) {
-        console.log("No services. Use `lizard add`.");
-      }
-    });
 
   svc
     .command("link")
