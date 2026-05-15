@@ -19,8 +19,6 @@ const BANNER = [
 ].join("\n");
 // Commands (alphabetical by command name)
 import { registerAdd } from "./commands/add.js";
-import { registerConnect } from "./commands/connect.js";
-import { registerContext } from "./commands/context.js";
 import { registerDomain } from "./commands/domain.js";
 import { registerDown } from "./commands/down.js";
 import { registerGit } from "./commands/git.js";
@@ -43,12 +41,10 @@ import { registerSecrets } from "./commands/secrets.js";
 import { registerService } from "./commands/service.js";
 import { registerSnapshot } from "./commands/snapshot.js";
 import { registerSSH } from "./commands/ssh.js";
-import { registerStatus } from "./commands/status.js";
 import { registerUnlink } from "./commands/unlink.js";
 import { registerUp } from "./commands/up.js";
 import { registerUpdate } from "./commands/update.js";
 import { registerVersion } from "./commands/version.js";
-import { registerVolume } from "./commands/volume.js";
 import { registerWhoami } from "./commands/whoami.js";
 const program = new Command();
 program
@@ -65,15 +61,10 @@ program
     .option("--json", "Output in JSON format")
     .option("-y, --yes", "Skip confirmation prompts")
     .option("--workspace <id>", "Workspace name or ID")
-    // Note: --service is intentionally NOT a global — it conflicts with
-    // `environment edit -s, --service-config`. Commands that need it
-    // declare it locally.
     .option("-p, --project <id>", "Project name or ID")
-    .option("-e, --environment <name>", "Environment name or ID")
+    .option("-s, --service <id>", "Service name or ID")
     .option("--region <region>", "Region for creating services")
     .option("--token <token>", "API token")
-    .option("--no-color", "Disable colors")
-    .option("--verbose", "Verbose output")
     .hook("preAction", async (thisCommand, actionCommand) => {
     const opts = thisCommand.opts();
     // Check for updates silently in background (shows notice after command)
@@ -102,8 +93,6 @@ program
 });
 // Register all commands (alphabetical)
 registerAdd(program);
-registerConnect(program);
-registerContext(program);
 registerDomain(program);
 registerDown(program);
 registerGit(program);
@@ -126,12 +115,10 @@ registerSecrets(program);
 registerService(program);
 registerSnapshot(program);
 registerSSH(program);
-registerStatus(program);
 registerUnlink(program);
 registerUp(program);
 registerUpdate(program);
 registerVersion(program);
-registerVolume(program);
 registerWhoami(program);
 // Error handling
 program.exitOverride();

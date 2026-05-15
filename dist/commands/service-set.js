@@ -8,39 +8,40 @@ import { success, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
 /**
  * `lizard service set` — atomic patch of per-service configuration.
  *
- * Three input modes (priority):
- *   1. -s <SERVICE> <DOT_PATH> <VALUE>  — repeatable per-service flags
- *   2. -f <file>                         — read JSON from file
+ * Input modes (priority):
+ *   1. <service> --set <path>=<value>    — positional service + repeatable --set pairs
+ *   2. -f <file>                         — read JSON from file (multi-service)
  *   3. piped stdin JSON                  — auto-detected when stdin has data
  *   4. interactive                       — TTY prompts when nothing else is given
  *
  * Dot-paths supported:
- *   build.builder              "RAILPACK" | "DOCKERFILE"
  *   build.buildCommand         string
  *   build.watchPatterns        string[] (JSON array or comma-separated)
  *   build.dockerfilePath       string
  *   deploy.startCommand        string
  *   deploy.healthcheckPath     string
  *   deploy.healthcheckTimeout  number
- *   deploy.numReplicas         number
  *   deploy.restartPolicyType   "ON_FAILURE" | "ALWAYS" | "NEVER"
- *   source.repo                string
+ *   source.repoUrl             string
  *   source.branch              string
  *   source.rootDirectory       string
  *   variables.<KEY>.value      string (supports ${{...}} references)
+ *
+ * Note: replica count is changed via `lizard scale`, not here.
  */
 export function registerServiceSet(svc) {
     svc
         .command("set")
-        .description("Apply build/start/watch/variable changes to one or more services")
+        .description("Apply build/start/watch/variable changes to a service")
+        .argument("[service]", "Service name or ID (required when using --set)")
+        .option("--set <pair>", "Set a field: <path>=<value>. Repeatable.", (val, prev) => [...prev, val], [])
         .option("-f, --file <path>", "JSON config file to apply")
-        .option("-s, --service-config <args...>", "Repeatable: <SERVICE> <DOT_PATH> <VALUE>")
         .option("-m, --message <text>", "Commit message for the changes")
         .option("--stage", "Stage changes without committing")
         .option("-p, --project <id>", "Project name or ID")
-        .action(async (opts) => {
+        .action(async (serviceArg, opts) => {
         const projectId = resolveProjectId(opts.project);
-        const patch = await buildPatch(opts, projectId);
+        const patch = await buildPatch(serviceArg, opts, projectId);
         if (!patch || isEmpty(patch)) {
             if (isJSONMode()) {
                 printJSON({ staged: false, committed: false, message: "No changes" });
@@ -110,15 +111,13 @@ async function flattenPatch(patch, projectId) {
         }
         const flat = { name };
         // Source group
-        if (cfg.source?.repo !== undefined)
-            flat.repoUrl = cfg.source.repo;
+        if (cfg.source?.repoUrl !== undefined)
+            flat.repoUrl = cfg.source.repoUrl;
         if (cfg.source?.branch !== undefined)
             flat.branch = cfg.source.branch;
         if (cfg.source?.rootDirectory !== undefined)
             flat.rootDirectory = cfg.source.rootDirectory;
         // Build group
-        if (cfg.build?.builder !== undefined)
-            flat.builder = cfg.build.builder;
         if (cfg.build?.buildCommand !== undefined)
             flat.buildCommand = cfg.build.buildCommand;
         if (cfg.build?.watchPatterns !== undefined)
@@ -134,8 +133,6 @@ async function flattenPatch(patch, projectId) {
             flat.healthcheckPath = cfg.deploy.healthcheckPath;
         if (cfg.deploy?.healthcheckTimeout !== undefined)
             flat.healthcheckTimeoutMs = cfg.deploy.healthcheckTimeout;
-        if (cfg.deploy?.numReplicas !== undefined)
-            flat.desiredReplicas = cfg.deploy.numReplicas;
         if (cfg.deploy?.restartPolicyType !== undefined) {
             // Accept ON_FAILURE/ALWAYS/NEVER input; server uses on-failure/always/never
             const v = String(cfg.deploy.restartPolicyType).toLowerCase().replace(/_/g, "-");
@@ -178,10 +175,16 @@ async function flattenPatch(patch, projectId) {
     return out;
 }
 // ── input handling ──────────────────────────────────────────────────────────
-async function buildPatch(opts, projectId) {
-    // 1. -s <SERVICE> <DOT_PATH> <VALUE> repeatable
-    if (opts.serviceConfig?.length) {
-        return await flagsToPatch(opts.serviceConfig, projectId);
+async function buildPatch(serviceArg, opts, projectId) {
+    // 1. <service> --set <path>=<value> (repeatable)
+    if (opts.set?.length) {
+        if (!serviceArg) {
+            throw new Error("Service name is required when using --set. Usage: lizard service set <service> --set <path>=<value>");
+        }
+        if (opts.file) {
+            throw new Error("Cannot combine --set with --file. Use one input mode.");
+        }
+        return await setPairsToPatch(serviceArg, opts.set, projectId);
     }
     // 2. -f <file> → JSON file
     if (opts.file) {
@@ -262,24 +265,23 @@ async function normalisePatch(raw, projectId) {
     const out = { services };
     if (raw.sharedVariables)
         out.sharedVariables = raw.sharedVariables;
-    if (raw.volumes)
-        out.volumes = raw.volumes;
     return out;
 }
-/** Convert a flat (service, dotPath, value) list into a nested patch. */
-async function flagsToPatch(flat, projectId) {
-    if (flat.length % 3 !== 0) {
-        throw new Error("--service-config expects triples: <SERVICE> <DOT_PATH> <VALUE>");
-    }
-    const services = {};
-    for (let i = 0; i < flat.length; i += 3) {
-        const [svcRef, dotPath, rawValue] = [flat[i], flat[i + 1], flat[i + 2]];
-        const svc = await resolveService(projectId, svcRef);
+/** Convert a list of "<path>=<value>" pairs (for one service) into a nested patch. */
+async function setPairsToPatch(serviceRef, pairs, projectId) {
+    const svc = await resolveService(projectId, serviceRef);
+    const cfg = {};
+    for (const pair of pairs) {
+        const eq = pair.indexOf("=");
+        if (eq <= 0) {
+            throw new Error(`--set expects <path>=<value>, got "${pair}"`);
+        }
+        const dotPath = pair.slice(0, eq).trim();
+        const rawValue = pair.slice(eq + 1);
         const value = parseValue(dotPath, rawValue);
-        services[svc.id] = services[svc.id] || {};
-        setDeep(services[svc.id], dotPath, value);
+        setDeep(cfg, dotPath, value);
     }
-    return { services };
+    return { services: { [svc.id]: cfg } };
 }
 /** Interactive prompt loop. Pick service → pick field → enter value. */
 async function interactivePatch(projectId) {
@@ -309,13 +311,11 @@ async function interactivePatch(projectId) {
                 { value: "deploy.startCommand", label: "Start command" },
                 { value: "build.buildCommand", label: "Build command" },
                 { value: "build.watchPatterns", label: "Watch patterns" },
-                { value: "build.builder", label: "Builder (RAILPACK/DOCKERFILE)" },
                 { value: "build.dockerfilePath", label: "Dockerfile path" },
                 { value: "deploy.healthcheckPath", label: "Healthcheck path" },
-                { value: "deploy.numReplicas", label: "Replicas" },
                 { value: "deploy.restartPolicyType", label: "Restart policy" },
                 { value: "source.rootDirectory", label: "Root directory" },
-                { value: "source.repo", label: "GitHub repo" },
+                { value: "source.repoUrl", label: "GitHub repo" },
             ],
         });
         if (p.isCancel(field))
@@ -336,8 +336,7 @@ async function interactivePatch(projectId) {
 }
 // ── value coercion ──────────────────────────────────────────────────────────
 function parseValue(dotPath, raw) {
-    if (dotPath === "deploy.numReplicas" ||
-        dotPath === "deploy.healthcheckTimeout" ||
+    if (dotPath === "deploy.healthcheckTimeout" ||
         dotPath === "deploy.restartPolicyMaxRetries") {
         const n = Number(raw);
         if (Number.isNaN(n))

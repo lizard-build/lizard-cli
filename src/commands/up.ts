@@ -48,7 +48,6 @@ export function registerUp(program: Command) {
     .option("--no-gitignore", "Don't ignore paths from .gitignore")
     .option("--path-as-root", "Use the path argument as the archive root")
     .option("-m, --message <text>", "Message to attach to the deployment")
-    .option("--verbose", "Verbose output")
     .option("--build-command <cmd>", "Build command to run (e.g. 'npm run build')")
     .option("--start-command <cmd>", "Start command to run (e.g. 'node dist/index.js')")
     .option("--pre-deploy-command <cmd>", "Pre-deploy command (e.g. 'node dist/migrate.js')")
@@ -58,7 +57,7 @@ export function registerUp(program: Command) {
       const merged = cmd.optsWithGlobals();
       const serviceFlag = merged.service ?? opts.service;
       const projectFlag = merged.project;
-      const envFlag = merged.environment ?? opts.environment;
+      const envFlag = opts.environment;
 
       // Run init flow if cwd isn't linked yet
       await ensureLinked({ projectName: projectFlag });

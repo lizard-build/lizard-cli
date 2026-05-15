@@ -66,15 +66,10 @@ program
   .option("--json", "Output in JSON format")
   .option("-y, --yes", "Skip confirmation prompts")
   .option("--workspace <id>", "Workspace name or ID")
-  // Note: --service is intentionally NOT a global — it conflicts with
-  // `environment edit -s, --service-config`. Commands that need it
-  // declare it locally.
   .option("-p, --project <id>", "Project name or ID")
-  .option("-e, --environment <name>", "Environment name or ID")
+  .option("-s, --service <id>", "Service name or ID")
   .option("--region <region>", "Region for creating services")
   .option("--token <token>", "API token")
-  .option("--no-color", "Disable colors")
-  .option("--verbose", "Verbose output")
   .hook("preAction", async (thisCommand, actionCommand) => {
     const opts = thisCommand.opts();
 

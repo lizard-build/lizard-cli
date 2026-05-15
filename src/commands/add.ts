@@ -16,8 +16,6 @@ import { validateName } from "../lib/name.js";
 const CATALOG = [
   { name: "postgres", label: "PostgreSQL", description: "Relational database" },
   { name: "redis", label: "Redis", description: "In-memory key-value store" },
-  { name: "mysql", label: "MySQL", description: "Relational database" },
-  { name: "mongo", label: "MongoDB", description: "Document database", aliases: ["mongodb"] },
   { name: "s3", label: "S3 Bucket", description: "S3-compatible object storage" },
 ] as const;
 
@@ -98,7 +96,7 @@ export function registerAdd(program: Command) {
     .command("add")
     .argument(
       "[type]",
-      "Addon type to add (postgres / redis / mysql / mongo / s3)",
+      "Addon type to add (postgres / redis / s3)",
     )
     .description("Add a database, service, or repo to the project")
     .option(
@@ -251,7 +249,7 @@ export function registerAdd(program: Command) {
         const kind = await p.select({
           message: "What do you need?",
           options: [
-            { value: "database", label: "Database", hint: "postgres / redis / mysql / mongodb" },
+            { value: "database", label: "Database", hint: "postgres / redis" },
             { value: "repo", label: "GitHub Repo", hint: "create a service from a repo" },
             { value: "service", label: "Empty Service", hint: "create a service to upload code into" },
           ],
