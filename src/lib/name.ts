@@ -11,3 +11,17 @@ export function validateName(name: string): string | null {
   if (!NAME_REGEX.test(name)) return `invalid name (${NAME_VALIDATION_HINT})`;
   return null;
 }
+
+/** Mirrors `slugifyName` in lizard-client/src/lib/api.ts. */
+export function slugifyName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** Mirrors `addonRefName` in lizard-client — what users type inside ${{...}}. */
+export function addonRefName(addon: { name?: string | null; type?: string; addonType?: string }): string {
+  const display = addon.name || addon.type || addon.addonType || "";
+  return slugifyName(display) || display;
+}

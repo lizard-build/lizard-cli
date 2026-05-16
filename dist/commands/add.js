@@ -3,7 +3,7 @@ import * as p from "@clack/prompts";
 import { api } from "../lib/api.js";
 import { getProjectLink, updateProjectLink } from "../lib/config.js";
 import { success, info, isJSONMode, printJSON, isTTY, table, } from "../lib/format.js";
-import { validateName } from "../lib/name.js";
+import { validateName, addonRefName } from "../lib/name.js";
 const CATALOG = [
     { name: "postgres", label: "PostgreSQL", description: "Relational database" },
     { name: "redis", label: "Redis", description: "In-memory key-value store" },
@@ -24,6 +24,23 @@ async function detectPortFromDockerfile(repo) {
         catch { }
     }
     return undefined;
+}
+/** Most-useful env var to surface as a reference example for each addon type.
+ *  Mirrors urlKey in lizard-client/src/components/AddonPanel.tsx. */
+function addonExampleVar(type) {
+    switch (type) {
+        case "postgres":
+        case "mysql":
+            return "DATABASE_URL";
+        case "mongo":
+            return "MONGODB_URL";
+        case "redis":
+            return "REDIS_URL";
+        case "s3":
+            return "S3_ENDPOINT";
+        default:
+            return "KEY";
+    }
 }
 function normalizeDbName(name) {
     for (const c of CATALOG) {
@@ -135,13 +152,14 @@ export function registerAdd(program) {
                     printJSON(addon);
                 else {
                     success(`${cat.label} added`);
-                    if (addon.hostname)
-                        info(`  Host: ${chalk.cyan(addon.hostname)}`);
-                    if (addon.envVars) {
-                        info(chalk.dim("\n  Environment variables:"));
-                        for (const [k, v] of Object.entries(addon.envVars)) {
-                            info(`  ${chalk.bold(k)}=${chalk.dim(v)}`);
-                        }
+                    const ref = addonRefName({ name: addon.name, type: addon.type, addonType: addon.addonType });
+                    const exampleVar = addonExampleVar(db);
+                    if (ref)
+                        info(`  Name: ${chalk.bold(ref)}`);
+                    if (ref) {
+                        info("");
+                        info(chalk.dim(`  Reference the ${exampleVar} from other services:`));
+                        info(`    ${chalk.cyan(`\${{${ref}.${exampleVar}}}`)}`);
                     }
                 }
                 if (isSingle) {
@@ -172,8 +190,12 @@ export function registerAdd(program) {
             });
             if (isJSONMode())
                 printJSON(app);
-            else
+            else {
                 success(`Service ${chalk.bold(app.name)} created`);
+                info("");
+                info(chalk.dim(`  Reference this service's private URL from other services:`));
+                info(`    ${chalk.cyan(`\${{${app.name}.LIZARD_PRIVATE_DOMAIN}}`)}`);
+            }
             try {
                 updateProjectLink({ serviceId: app.id, serviceName: app.name });
             }
@@ -191,8 +213,12 @@ export function registerAdd(program) {
             });
             if (isJSONMode())
                 printJSON(app);
-            else
+            else {
                 success(`Service ${chalk.bold(app.name)} created`);
+                info("");
+                info(chalk.dim(`  Reference this service's private URL from other services:`));
+                info(`    ${chalk.cyan(`\${{${app.name}.LIZARD_PRIVATE_DOMAIN}}`)}`);
+            }
             try {
                 updateProjectLink({ serviceId: app.id, serviceName: app.name });
             }
@@ -205,6 +231,7 @@ export function registerAdd(program) {
                 message: "What do you need?",
                 options: [
                     { value: "database", label: "Database", hint: "postgres / redis" },
+                    { value: "s3", label: "S3 Bucket", hint: "S3-compatible object storage" },
                     { value: "repo", label: "GitHub Repo", hint: "create a service from a repo" },
                     { value: "service", label: "Empty Service", hint: "create a service to upload code into" },
                 ],
@@ -214,13 +241,23 @@ export function registerAdd(program) {
             if (kind === "database") {
                 const sel = await p.select({
                     message: "Select database",
-                    options: CATALOG.map((c) => ({ value: c.name, label: c.label, hint: c.description })),
+                    options: CATALOG.filter((c) => c.name !== "s3").map((c) => ({
+                        value: c.name,
+                        label: c.label,
+                        hint: c.description,
+                    })),
                 });
                 if (p.isCancel(sel))
                     process.exit(5);
                 // recursively call with positional type
                 await new Promise((resolve) => {
                     program.parseAsync(["add", sel], { from: "user" }).then(() => resolve());
+                });
+                return;
+            }
+            if (kind === "s3") {
+                await new Promise((resolve) => {
+                    program.parseAsync(["add", "s3"], { from: "user" }).then(() => resolve());
                 });
                 return;
             }

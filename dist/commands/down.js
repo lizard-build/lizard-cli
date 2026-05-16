@@ -2,7 +2,7 @@ import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { api } from "../lib/api.js";
 import { resolveProjectId } from "../lib/config.js";
-import { resolveService } from "../lib/resolve.js";
+import { getActiveService } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON, isTTY } from "../lib/format.js";
 /**
  * `lizard down` — stops the latest deployment of a service.
@@ -17,15 +17,10 @@ export function registerDown(program) {
         .option("-p, --project <id>", "Project name or ID")
         .option("-e, --environment <name>", "Environment name or ID")
         .option("-y, --yes", "Skip confirmation")
-        .action(async (id, opts, cmd) => {
-        const globalOpts = cmd.parent?.opts() || {};
+        .action(async (id, opts) => {
         const projectId = resolveProjectId(opts.project);
-        const yes = opts.yes || globalOpts.yes;
-        const target = id || opts.service;
-        if (!target) {
-            throw new Error("Specify a service: positional ID or --service <name>.");
-        }
-        const svc = await resolveService(projectId, target);
+        const yes = opts.yes;
+        const svc = await getActiveService(id || opts.service, projectId);
         if (!yes) {
             if (!isTTY()) {
                 throw new Error("Use -y to confirm in non-interactive mode");

@@ -11,4 +11,16 @@ export function validateName(name) {
         return `invalid name (${NAME_VALIDATION_HINT})`;
     return null;
 }
+/** Mirrors `slugifyName` in lizard-client/src/lib/api.ts. */
+export function slugifyName(name) {
+    return name
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+}
+/** Mirrors `addonRefName` in lizard-client — what users type inside ${{...}}. */
+export function addonRefName(addon) {
+    const display = addon.name || addon.type || addon.addonType || "";
+    return slugifyName(display) || display;
+}
 //# sourceMappingURL=name.js.map

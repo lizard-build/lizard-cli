@@ -64,8 +64,7 @@ program
     },
   })
   .option("--json", "Output in JSON format")
-  .option("-y, --yes", "Skip confirmation prompts")
-  .option("--workspace <id>", "Workspace name or ID")
+  .option("-w, --workspace <id>", "Workspace name or ID")
   .option("-p, --project <id>", "Project name or ID")
   .option("-s, --service <id>", "Service name or ID")
   .option("--region <region>", "Region for creating services")
