@@ -11,8 +11,9 @@ export function registerLogs(program: Command) {
     .description("Stream runtime logs")
     .option("--build", "Show build logs instead of runtime")
     .option("--service <id>", "Only show logs for a specific service")
+    .option("-p, --project <id>", "Project name or ID")
     .action(async (opts) => {
-      const projectId = resolveProjectId(program.opts().project);
+      const projectId = resolveProjectId(opts.project);
 
       if (opts.build) {
         // Show build logs for the latest build

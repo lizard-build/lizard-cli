@@ -107,7 +107,7 @@ export function registerSecrets(program: Command) {
     .option("-p, --project <id>", "Project to scope to")
     .option("-e, --environment <name>", "Environment to scope to")
     .action(async (opts) => {
-      const scope = await resolveScope(opts.project ?? program.opts().project, opts.service, opts.global);
+      const scope = await resolveScope(opts.project, opts.service, opts.global);
 
       // --refs → list reference templates exposed by the platform
       if (opts.refs) {
@@ -167,7 +167,7 @@ export function registerSecrets(program: Command) {
     .action(async (opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
-        opts.project ?? inherited.project ?? program.opts().project,
+        opts.project ?? inherited.project,
         opts.service ?? inherited.service,
         opts.global || inherited.global,
       );
@@ -213,7 +213,7 @@ export function registerSecrets(program: Command) {
     .action(async (pairs: string[], opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
-        opts.project ?? inherited.project ?? program.opts().project,
+        opts.project ?? inherited.project,
         opts.service ?? inherited.service,
         opts.global || inherited.global,
       );
@@ -237,7 +237,7 @@ export function registerSecrets(program: Command) {
     .action(async (keys: string[], opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
-        opts.project ?? inherited.project ?? program.opts().project,
+        opts.project ?? inherited.project,
         opts.service ?? inherited.service,
         opts.global || inherited.global,
       );
@@ -270,7 +270,7 @@ export function registerSecrets(program: Command) {
     .action(async (opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
-        opts.project ?? inherited.project ?? program.opts().project,
+        opts.project ?? inherited.project,
         opts.service ?? inherited.service,
         opts.global || inherited.global,
       );

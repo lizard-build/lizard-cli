@@ -8,8 +8,9 @@ export function registerPs(program: Command) {
   program
     .command("ps")
     .description("List all services in the project")
-    .action(async () => {
-      const projectId = resolveProjectId(program.opts().project);
+    .option("-p, --project <id>", "Project name or ID")
+    .action(async (opts) => {
+      const projectId = resolveProjectId(opts.project);
       const data = await api.get<{ apps: any[]; addons: any[] }>(
         `/api/projects/${projectId}/services`,
       );

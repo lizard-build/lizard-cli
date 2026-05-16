@@ -10,11 +10,12 @@ export function registerRestart(program: Command) {
     .command("restart")
     .argument("[id]", "App ID to restart")
     .description("Restart an app")
-    .action(async (id: string | undefined) => {
+    .option("-p, --project <id>", "Project name or ID")
+    .action(async (id: string | undefined, opts) => {
       if (!id) {
         if (!isTTY()) throw new Error("Provide an app ID or run interactively");
 
-        const projectId = resolveProjectId(program.opts().project);
+        const projectId = resolveProjectId(opts.project);
         const data = await api.get<{ apps: any[] }>(`/api/projects/${projectId}/services`);
         const apps = data.apps || [];
 

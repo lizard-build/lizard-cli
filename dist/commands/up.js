@@ -24,7 +24,6 @@ export function registerUp(program) {
         .option("-d, --detach", "Don't attach to the log stream")
         .option("-c, --ci", "Stream build logs only, exit on completion")
         .option("-s, --service <name>", "Service to deploy to (defaults to linked)")
-        .option("-e, --environment <name>", "Environment to deploy to (defaults to linked)")
         .option("--no-gitignore", "Don't ignore paths from .gitignore")
         .option("--path-as-root", "Use the path argument as the archive root")
         .option("-m, --message <text>", "Message to attach to the deployment")
@@ -37,14 +36,12 @@ export function registerUp(program) {
         const merged = cmd.optsWithGlobals();
         const serviceFlag = merged.service ?? opts.service;
         const projectFlag = merged.project;
-        const envFlag = opts.environment;
         // Run init flow if cwd isn't linked yet
         await ensureLinked({ projectName: projectFlag });
         // Resolve target service: --service flag → linked → first-in-project → prompt-or-fail
         const ctx = await resolveContext({
             projectFlag,
             serviceFlag,
-            environmentFlag: envFlag,
         });
         const projectId = ctx.projectId;
         const targetPath = pathArg ? path.resolve(pathArg) : process.cwd();
@@ -70,7 +67,6 @@ export function registerUp(program) {
             useGitignore: opts.gitignore !== false,
             serviceFlag,
             existingServiceId: ctx.service?.id,
-            environmentId: ctx.environment?.id,
             buildCommand: opts.buildCommand,
             startCommand: opts.startCommand,
             preDeployCommand: opts.preDeployCommand,
@@ -161,8 +157,6 @@ async function deployFromLocal(args) {
             if (resolvedPort === undefined)
                 qs.set("port", "3000");
         }
-        if (args.environmentId)
-            qs.set("environment", args.environmentId);
         if (args.opts.message)
             qs.set("message", args.opts.message);
         if (args.existingServiceId)
