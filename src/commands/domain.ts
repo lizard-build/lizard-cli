@@ -9,6 +9,10 @@ interface DomainResponse {
   ok?: boolean;
   hostname: string;
   generated?: boolean;
+  verified?: boolean;
+  txtRecord?: string;
+  txtValue?: string;
+  cnameTarget?: string;
 }
 
 interface AppLite {
@@ -103,9 +107,27 @@ export function registerDomain(program: Command) {
 
       if (isJSONMode()) {
         printJSON(result);
-      } else {
-        success(`Domain ${chalk.cyan(hostname)} attached`);
+        return;
       }
+
+      // Custom domain — print verification + DNS instructions
+      success(`Custom domain ${chalk.cyan(hostname)} registered (pending verification)`);
+      console.log();
+      console.log(chalk.bold("1) Verify ownership — add this TXT record at your DNS provider:"));
+      console.log(`     ${chalk.dim("Name: ")}${chalk.cyan(result.txtRecord || `_lizard-verify.${hostname}`)}`);
+      console.log(`     ${chalk.dim("Value:")} ${chalk.cyan(result.txtValue || "")}`);
+      console.log();
+      if (result.cnameTarget) {
+        console.log(chalk.bold("2) Point traffic — add this CNAME record:"));
+        console.log(`     ${chalk.dim("Name: ")}${chalk.cyan(hostname)}`);
+        console.log(`     ${chalk.dim("Value:")} ${chalk.cyan(result.cnameTarget)}`);
+        console.log(chalk.dim(`     (${result.cnameTarget} is a multi-A record across all load balancers — no IP to track.)`));
+        console.log();
+      }
+      console.log(chalk.bold("3) Once both records propagate, run:"));
+      console.log(`     ${chalk.cyan(`lizard domain verify ${hostname}`)}`);
+      console.log();
+      console.log(chalk.dim("HTTPS certificate will be issued automatically by Let's Encrypt on first request."));
     });
 
   // Subcommands intentionally don't redeclare -s/-p: Commander 14 binds a
@@ -140,6 +162,43 @@ export function registerDomain(program: Command) {
             `  Reference from other services: ${chalk.cyan(`\${{${service.name}.LIZARD_PUBLIC_DOMAIN}}`)}`,
           ),
         );
+      }
+    });
+
+  dom
+    .command("verify")
+    .argument("<hostname>", "Custom domain to verify")
+    .description("Check the TXT record and activate the domain")
+    .action(async (hostname: string, _opts, sub) => {
+      const opts = sub.optsWithGlobals();
+      const projectId = resolveProjectId(opts.project);
+      const service = await getActiveService(opts.service, projectId);
+
+      const result = await api
+        .post<{ ok: boolean; verified: boolean; hostname?: string; message?: string }>(
+          `/api/apps/${service.id}/domains/verify`,
+          { hostname },
+        )
+        .catch((err: any) => {
+          if (err?.status === 404) {
+            throw new Error(
+              `No pending verification for ${hostname}. Run \`lizard domain ${hostname}\` first.`,
+            );
+          }
+          throw err;
+        });
+
+      if (isJSONMode()) {
+        printJSON(result);
+        return;
+      }
+
+      if (result.verified) {
+        success(`Domain ${chalk.cyan(hostname)} verified and active`);
+        console.log(chalk.dim(`https://${hostname} — TLS issues on first HTTPS request.`));
+      } else {
+        console.log(chalk.yellow(`Not verified yet.`));
+        if (result.message) console.log(chalk.dim(`  ${result.message}`));
       }
     });
 
