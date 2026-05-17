@@ -10,11 +10,12 @@ export function registerRedeploy(program) {
         .argument("[id]", "App ID to redeploy")
         .description("Trigger a fresh build (latest commit / last upload) with current vars")
         .option("--detach", "Run in background")
+        .option("-p, --project <id>", "Project name or ID")
         .action(async (id, opts) => {
         if (!id) {
             if (!isTTY())
                 throw new Error("Provide an app ID or run interactively");
-            const projectId = resolveProjectId(program.opts().project);
+            const projectId = resolveProjectId(opts.project);
             const data = await api.get(`/api/projects/${projectId}/services`);
             const apps = data.apps || [];
             if (apps.length === 0)
@@ -35,10 +36,6 @@ export function registerRedeploy(program) {
                     process.exit(5);
                 id = selected;
             }
-        }
-        const target = await api.get(`/api/apps/${id}`);
-        if (!target.builds?.length) {
-            throw new Error(`Service "${target.name}" has no prior build to redeploy. Run \`lizard up\` to deploy code first.`);
         }
         const spinner = ora("Starting redeploy...").start();
         await api.post(`/api/apps/${id}/redeploy`);

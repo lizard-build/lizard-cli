@@ -144,14 +144,6 @@ export function registerService(program: Command) {
       const target = opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
-      const app = await api.get<{
-        builds?: Array<{ id: string; status: string }>;
-      }>(`/api/apps/${svcInfo.id}`);
-      if (!app.builds?.length) {
-        throw new Error(
-          `Service "${svcInfo.name}" has no prior build to redeploy. Run \`lizard up\` to deploy code first.`,
-        );
-      }
       await api.post(`/api/apps/${svcInfo.id}/redeploy`);
       if (isJSONMode()) {
         printJSON({ id: svcInfo.id, status: "deploying" });
