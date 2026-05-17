@@ -37,11 +37,9 @@ export function registerLink(program: Command) {
     .command("link")
     .description("Associate the current directory with an existing project")
     .option("-p, --project <id>", "Project name or ID")
-    .option("-e, --environment <name>", "Environment name or ID")
     .option("-s, --service <name>", "Service name or ID (optional)")
     .action(async (opts) => {
       const projectFlag = opts.project;
-      const envFlag = opts.environment;
       const serviceFlag = opts.service;
 
       // 1. Project
@@ -79,14 +77,7 @@ export function registerLink(program: Command) {
           `/api/projects/${project.id}/environments`,
         );
         if (envs?.length) {
-          if (envFlag) {
-            const lower = envFlag.toLowerCase();
-            const m = envs.find(
-              (e) => e.id.toLowerCase() === lower || e.name.toLowerCase() === lower,
-            );
-            if (!m) throw new Error(`Environment "${envFlag}" not found`);
-            environment = m;
-          } else if (envs.length === 1) {
+          if (envs.length === 1) {
             environment = envs[0];
           } else if (isTTY()) {
             const sel = await p.select({

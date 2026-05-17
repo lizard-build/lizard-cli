@@ -99,7 +99,6 @@ export function registerSecrets(program: Command) {
     .option("--no-redeploy", "Don't trigger redeploy on set/delete")
     .option("-s, --service <name>", "Service to scope to (overrides linked)")
     .option("-p, --project <id>", "Project to scope to")
-    .option("-e, --environment <name>", "Environment to scope to")
     .action(async (opts) => {
       const scope = await resolveScope(opts.project, opts.service, opts.global);
 

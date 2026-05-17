@@ -15,7 +15,6 @@ export function registerDown(program) {
         .description("Stop the latest deployment of a service")
         .option("-s, --service <name>", "Service name or ID")
         .option("-p, --project <id>", "Project name or ID")
-        .option("-e, --environment <name>", "Environment name or ID")
         .option("-y, --yes", "Skip confirmation")
         .action(async (id, opts) => {
         const projectId = resolveProjectId(opts.project);

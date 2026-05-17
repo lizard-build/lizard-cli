@@ -44,13 +44,6 @@ export function registerGit(program) {
             process.exit(1);
         }
     });
-    // lizard git disconnect
-    git
-        .command("disconnect")
-        .description("Disconnect Git auto-deploy")
-        .action(async () => {
-        info(chalk.dim("Git disconnect via CLI will be available in a future update."));
-    });
     // lizard git status
     git
         .command("status")
