@@ -26,12 +26,10 @@ export function registerUp(program) {
         .option("-s, --service <name>", "Service to deploy to (defaults to linked)")
         .option("--no-gitignore", "Don't ignore paths from .gitignore")
         .option("--path-as-root", "Use the path argument as the archive root")
-        .option("-m, --message <text>", "Message to attach to the deployment")
         .option("--build-command <cmd>", "Build command to run (e.g. 'npm run build')")
         .option("--start-command <cmd>", "Start command to run (e.g. 'node dist/index.js')")
         .option("--pre-deploy-command <cmd>", "Pre-deploy command (e.g. 'node dist/migrate.js')")
         .option("--port <number>", "Container port (default: 3000)")
-        .option("--worker", "Worker mode — service has no HTTP port (no Caddy route, no port wait)")
         .action(async (pathArg, opts, cmd) => {
         const merged = cmd.optsWithGlobals();
         const serviceFlag = merged.service ?? opts.service;
@@ -58,7 +56,7 @@ export function registerUp(program) {
             buildCommand: opts.buildCommand,
             startCommand: opts.startCommand,
             preDeployCommand: opts.preDeployCommand,
-            port: opts.worker ? 0 : (opts.port ? parseInt(opts.port, 10) : undefined),
+            port: opts.port ? parseInt(opts.port, 10) : undefined,
             opts,
         });
     });
@@ -113,8 +111,6 @@ async function deployFromLocal(args) {
             if (resolvedPort === undefined)
                 qs.set("port", "3000");
         }
-        if (args.opts.message)
-            qs.set("message", args.opts.message);
         if (args.existingServiceId)
             qs.set("appId", args.existingServiceId);
         if (args.buildCommand)
