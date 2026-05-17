@@ -113,27 +113,32 @@ export function registerAdd(program: Command) {
   program
     .command("add")
     .argument(
-      "[type]",
-      "Addon type to add (postgres / redis / s3)",
+      "[types...]",
+      "Addon type(s) to add (postgres / redis / s3). Multiple allowed: `add postgres redis s3`",
     )
     .description("Add a database, service, or repo to the project")
     .option(
-      "-d, --database <type...>",
-      "Add one or more managed databases (multi-add: -d postgres -d redis)",
+      "-a, --addon <type...>",
+      "Add one or more managed addons (multi-add: -a postgres -a redis -a s3)",
     )
     .option("-s, --service <name>", "Create an empty service with this name")
     .option("-r, --repo <repo>", "Create a service from a GitHub repo (owner/repo)")
-    .option("-v, --variables <kv...>", "KEY=value pairs to seed the service")
+    .option(
+      "-v, --variables <kv>",
+      "KEY=value pair to seed the service. Repeat for multiple: -v K1=v1 -v K2=v2. Ignored for managed addons.",
+      (val: string, prev: string[]) => [...prev, val],
+      [] as string[],
+    )
     .option("-n, --name <name>", "Name used in ${{<name>.KEY}} templates and shown in the dashboard. Renamable; refs stay stable.")
     .option("--instance-name <name>", "(deprecated) alias for --name")
     .option("--list", "Show available database types")
-    .action(async (type: string | undefined, opts, command) => {
+    .action(async (types: string[], opts, command) => {
       const merged = command.optsWithGlobals();
       const projectFlag = merged.project;
       const region = merged.region;
 
       // ── --list: show DB catalog and exit ──────────────────────────────
-      if (opts.list || (!type && !opts.database && !opts.service && !opts.repo && !isTTY())) {
+      if (opts.list || (!types.length && !opts.addon && !opts.service && !opts.repo && !isTTY())) {
         if (isJSONMode()) {
           printJSON(CATALOG);
         } else {
@@ -160,28 +165,31 @@ export function registerAdd(program: Command) {
       // API calls instead of after the user has filled out the wizard.
       const projectId = await resolveProject(projectFlag);
 
-      // ── positional <type> and/or -d <type...> ─────────────────────────
+      // ── positional <types...> and/or -a <type...> ────────────────────
       const databases: string[] = [];
-      if (opts.database?.length) databases.push(...opts.database.map(normalizeDbName));
-      if (type) {
-        const norm = normalizeDbName(type);
-        if (CATALOG.some((c) => c.name === norm)) databases.push(norm);
+      const candidates = [...(opts.addon ?? []), ...types];
+      for (const t of candidates) {
+        const norm = normalizeDbName(t);
+        if (!CATALOG.some((c) => c.name === norm)) {
+          throw new Error(
+            `Unknown addon "${t}". Available: ${CATALOG.map((c) => c.name).join(", ")}`,
+          );
+        }
+        databases.push(norm);
       }
 
-      // Nudge users off the verbose single-arg `-d` form toward `lizard add <type>`.
-      if (opts.database?.length === 1 && !type && !isJSONMode()) {
-        info(chalk.dim(`Tip: shorter form — \`lizard add ${opts.database[0]}\``));
+      // Nudge users off the verbose single-arg `-a` form toward `lizard add <type>`.
+      if (opts.addon?.length === 1 && !types.length && !isJSONMode()) {
+        info(chalk.dim(`Tip: shorter form — \`lizard add ${opts.addon[0]}\``));
       }
 
       if (databases.length > 0) {
+        if (opts.variables?.length) {
+          info(chalk.yellow("Warning: --variables is ignored for managed addons"));
+        }
         const isSingle = databases.length === 1;
         for (const db of databases) {
-          const cat = CATALOG.find((c) => c.name === db);
-          if (!cat) {
-            throw new Error(
-              `Unknown database "${db}". Available: ${CATALOG.map((c) => c.name).join(", ")}`,
-            );
-          }
+          const cat = CATALOG.find((c) => c.name === db)!;
           info(`Adding ${chalk.cyan(cat.label)}...`);
           const addon = await api.post<{
             id: string;
@@ -193,7 +201,6 @@ export function registerAdd(program: Command) {
           }>(`/api/projects/${projectId}/addons`, {
             type: db,
             region,
-            variables,
             ...(opts.name ? { name: opts.name } : {}),
           });
 
@@ -275,7 +282,7 @@ export function registerAdd(program: Command) {
       }
 
       // ── No flags + no positional → interactive wizard ────────────────
-      if (!type && isTTY()) {
+      if (!types.length && isTTY()) {
         const kind = await p.select({
           message: "What do you need?",
           options: [
