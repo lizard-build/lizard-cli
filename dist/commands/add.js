@@ -120,6 +120,9 @@ export function registerAdd(program) {
             if (err)
                 throw new Error(`Invalid --name: ${err}`);
         }
+        // Resolve project up front so we fail before any wizard prompts or
+        // API calls instead of after the user has filled out the wizard.
+        const projectId = await resolveProject(projectFlag);
         // ── positional <type> and/or -d <type...> ─────────────────────────
         const databases = [];
         if (opts.database?.length)
@@ -134,7 +137,6 @@ export function registerAdd(program) {
             info(chalk.dim(`Tip: shorter form — \`lizard add ${opts.database[0]}\``));
         }
         if (databases.length > 0) {
-            const projectId = await resolveProject(projectFlag);
             const isSingle = databases.length === 1;
             for (const db of databases) {
                 const cat = CATALOG.find((c) => c.name === db);
@@ -173,7 +175,6 @@ export function registerAdd(program) {
         }
         // ── -r <repo> ─────────────────────────────────────────────────────
         if (opts.repo) {
-            const projectId = await resolveProject(projectFlag);
             const serviceName = opts.name || opts.service || opts.repo.split("/").pop() || "service";
             info(`Creating service ${chalk.bold(serviceName)} from ${chalk.cyan(opts.repo)}...`);
             const detectedPort = await detectPortFromDockerfile(opts.repo);
@@ -204,7 +205,6 @@ export function registerAdd(program) {
         }
         // ── --service <name> (empty service) ──────────────────────────────
         if (opts.service) {
-            const projectId = await resolveProject(projectFlag);
             info(`Creating empty service ${chalk.bold(opts.service)}...`);
             const app = await api.post(`/api/projects/${projectId}/apps`, {
                 name: opts.service,
