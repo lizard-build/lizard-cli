@@ -147,7 +147,7 @@ describe("project secrets", () => {
 
 // ── Deploy + service secrets ──────────────────────────────────────────────────
 
-// Temp dir for deploy — must be OUTSIDE the git repo so no remote is detected
+// Temp dir for deploy — kept outside the git repo so the fixture stays isolated
 let DEPLOY_DIR: string;
 
 describe("deploy", () => {
@@ -167,7 +167,7 @@ describe("deploy", () => {
   test(
     "deploy local fixture app (detached)",
     async () => {
-      // Copy fixture to a temp dir outside the git repo (no git remote = tarball upload)
+      // Copy fixture to a temp dir so the test isn't entangled with the CLI's own repo
       DEPLOY_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "lizard-test-"));
       for (const entry of fs.readdirSync(FIXTURE, { withFileTypes: true })) {
         if (!entry.isFile()) continue; // skip .lizard dir and symlinks
