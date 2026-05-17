@@ -15,8 +15,6 @@ interface Secret {
  * scope, with --global for project-wide.
  *
  * Bare command without subcommand prints the secret list.
- *
- * `--set KEY=value [...]` is the inline-set form.
  * `--refs` lists `${{...}}` templates available in this scope.
  */
 interface Scope {
@@ -97,10 +95,6 @@ export function registerSecrets(program: Command) {
     .description("Manage secrets (default scope: service; use --global for project)")
     .option("--global", "Target the whole project")
     .option("--show", "Reveal values")
-    .option(
-      "--set <kv...>",
-      "KEY=value pairs to set (mutually exclusive with subcommands)",
-    )
     .option("--refs", "List reference templates available in this scope")
     .option("--no-redeploy", "Don't trigger redeploy on set/delete")
     .option("-s, --service <name>", "Service to scope to (overrides linked)")
@@ -115,20 +109,6 @@ export function registerSecrets(program: Command) {
         return;
       }
 
-      // --set <kv...>
-      if (opts.set?.length) {
-        const newSecrets = parsePairs(opts.set);
-        await applySecrets(scope, newSecrets, opts.redeploy === false);
-
-        if (isJSONMode()) {
-          printJSON({ updated: Object.keys(newSecrets), scope: scope.label });
-        } else {
-          success(`${Object.keys(newSecrets).length} ${scope.label} secret(s) updated`);
-        }
-        return;
-      }
-
-      // No --set → list
       const secrets = await api.get<Secret[]>(scope.path);
 
       if (isJSONMode()) {
@@ -142,7 +122,7 @@ export function registerSecrets(program: Command) {
 
       if (secrets.length === 0) {
         console.log(
-          `No ${scope.label} secrets. Use \`lizard secrets --set KEY=value${opts.global ? " --global" : ""}\`.`,
+          `No ${scope.label} secrets. Use \`lizard secrets set KEY=value${opts.global ? " --global" : ""}\`.`,
         );
         return;
       }
