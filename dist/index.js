@@ -4,7 +4,7 @@ import chalk from "chalk";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
 import { setTokenOverride, requireAuth } from "./lib/auth.js";
 import { setBaseURL, setAccessToken } from "./lib/api.js";
-import { checkForUpdateInBackground } from "./lib/updater.js";
+import { checkForUpdateInBackground, CURRENT_VERSION } from "./lib/updater.js";
 const BANNER = [
     "╔═══════════════════════════════════════════════════╗",
     "║                                                   ║",
@@ -19,6 +19,7 @@ const BANNER = [
 ].join("\n");
 // Commands (alphabetical by command name)
 import { registerAdd } from "./commands/add.js";
+import { registerDocs } from "./commands/docs.js";
 import { registerDomain } from "./commands/domain.js";
 import { registerDown } from "./commands/down.js";
 import { registerGit } from "./commands/git.js";
@@ -44,13 +45,12 @@ import { registerSSH } from "./commands/ssh.js";
 import { registerUnlink } from "./commands/unlink.js";
 import { registerUp } from "./commands/up.js";
 import { registerUpdate } from "./commands/update.js";
-import { registerVersion } from "./commands/version.js";
 import { registerWhoami } from "./commands/whoami.js";
 const program = new Command();
 program
     .name("lizard")
     .description("Lizard CLI — deploy and manage apps on Lizard")
-    .version("0.1.0")
+    .version(CURRENT_VERSION)
     .addHelpText("before", chalk.green(BANNER) + "\n")
     .configureHelp({
     subcommandTerm: (cmd) => {
@@ -81,7 +81,7 @@ program
         setBaseURL(process.env.LIZARD_API_URL);
     }
     // Commands that don't need auth
-    const noAuth = new Set(["login", "logout", "version", "update", "help"]);
+    const noAuth = new Set(["login", "logout", "update", "help", "docs"]);
     if (noAuth.has(actionCommand.name()))
         return;
     // Require auth — auto-triggers login flow if not logged in
@@ -90,6 +90,7 @@ program
 });
 // Register all commands (alphabetical)
 registerAdd(program);
+registerDocs(program);
 registerDomain(program);
 registerDown(program);
 registerGit(program);
@@ -115,7 +116,6 @@ registerSSH(program);
 registerUnlink(program);
 registerUp(program);
 registerUpdate(program);
-registerVersion(program);
 registerWhoami(program);
 // Error handling
 program.exitOverride();

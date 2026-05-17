@@ -37,7 +37,6 @@ export function registerDomain(program: Command) {
     .description("Manage service domains")
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
-    .option("-e, --environment <name>", "Environment name or ID")
     .option("--port <n>", "Port to expose", parseIntOption)
     .action(async (hostname: string | undefined, opts, _cmd) => {
       const projectId = resolveProjectId(opts.project);
