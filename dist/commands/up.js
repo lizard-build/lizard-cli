@@ -46,20 +46,8 @@ export function registerUp(program) {
         const projectId = ctx.projectId;
         const targetPath = pathArg ? path.resolve(pathArg) : process.cwd();
         const archiveRoot = opts.pathAsRoot ? targetPath : process.cwd();
-        // `up` always uploads code. For redeploy of an existing
+        // `up` always uploads a local tarball. For redeploy of an existing
         // build without re-uploading, use `lizard redeploy`.
-        const gitRemote = !pathArg ? getGitRemote() : null;
-        if (gitRemote && !ctx.service) {
-            await deployFromGitRemote({
-                projectId,
-                repoUrl: normalizeGitUrl(gitRemote),
-                branch: getGitBranch(),
-                serviceFlag,
-                opts,
-            });
-            return;
-        }
-        // ── Local folder upload (or path-arg deploy) ────────────────────────
         await deployFromLocal({
             projectId,
             targetPath,
@@ -93,38 +81,6 @@ export function registerUp(program) {
     });
 }
 // ── deploy strategies ────────────────────────────────────────────────────────
-async function deployFromGitRemote(args) {
-    const defaultName = args.serviceFlag || getDefaultAppName();
-    info(`Creating service from ${chalk.cyan(args.repoUrl)} (${chalk.dim(args.branch)})...`);
-    const nameInput = args.serviceFlag || (await prompt(`Service name [${defaultName}]: `));
-    const appName = nameInput || defaultName;
-    const spinner = ora("Creating service...").start();
-    let newApp;
-    try {
-        newApp = await api.post(`/api/projects/${args.projectId}/apps`, {
-            name: appName,
-            repoUrl: args.repoUrl,
-            branch: args.branch,
-            message: args.opts.message,
-        });
-        spinner.succeed(`Service ${chalk.bold(newApp.name)} created`);
-    }
-    catch (err) {
-        spinner.fail("Failed to create service");
-        if (err?.message?.includes("private") || err?.message?.includes("Not Found")) {
-            info(chalk.dim("\nRepo may be private. Run `lizard git connect` to grant access."));
-        }
-        throw err;
-    }
-    saveServiceToConfig(args.projectId, newApp.id, newApp.name);
-    if (args.opts.detach) {
-        isJSONMode()
-            ? printJSON({ appId: newApp.id, version: 1, status: "deploying" })
-            : success(`Deploy v1 started  ${chalk.dim(`lizard up status ${newApp.id}`)}`);
-        return;
-    }
-    await streamBuildLogs(newApp.id, args.opts.ci);
-}
 async function deployFromLocal(args) {
     const defaultName = args.serviceFlag || getDefaultAppName(args.targetPath);
     info(`${args.existingServiceId ? "Uploading" : "Creating service from"} ${chalk.dim(args.targetPath)}`);
@@ -202,34 +158,6 @@ function saveServiceToConfig(_projectId, serviceId, serviceName) {
         updateProjectLink({ serviceId, serviceName });
     }
     catch { }
-}
-function getGitRemote() {
-    try {
-        return (execSync("git config --get remote.origin.url", {
-            encoding: "utf8",
-            stdio: ["pipe", "pipe", "pipe"],
-        }).trim() || null);
-    }
-    catch {
-        return null;
-    }
-}
-function normalizeGitUrl(url) {
-    const ssh = url.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
-    if (ssh)
-        return `https://${ssh[1]}/${ssh[2]}`;
-    return url.replace(/\.git$/, "");
-}
-function getGitBranch() {
-    try {
-        return (execSync("git rev-parse --abbrev-ref HEAD", {
-            encoding: "utf8",
-            stdio: ["pipe", "pipe", "pipe"],
-        }).trim() || "main");
-    }
-    catch {
-        return "main";
-    }
 }
 function getDefaultAppName(cwd = process.cwd()) {
     try {

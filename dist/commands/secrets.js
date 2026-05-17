@@ -60,32 +60,18 @@ export function registerSecrets(program) {
         .description("Manage secrets (default scope: service; use --global for project)")
         .option("--global", "Target the whole project")
         .option("--show", "Reveal values")
-        .option("--set <kv...>", "KEY=value pairs to set (mutually exclusive with subcommands)")
         .option("--refs", "List reference templates available in this scope")
         .option("--no-redeploy", "Don't trigger redeploy on set/delete")
         .option("-s, --service <name>", "Service to scope to (overrides linked)")
         .option("-p, --project <id>", "Project to scope to")
         .option("-e, --environment <name>", "Environment to scope to")
         .action(async (opts) => {
-        const scope = await resolveScope(opts.project ?? program.opts().project, opts.service, opts.global);
+        const scope = await resolveScope(opts.project, opts.service, opts.global);
         // --refs → list reference templates exposed by the platform
         if (opts.refs) {
             await printRefs(scope);
             return;
         }
-        // --set <kv...>
-        if (opts.set?.length) {
-            const newSecrets = parsePairs(opts.set);
-            await applySecrets(scope, newSecrets, opts.redeploy === false);
-            if (isJSONMode()) {
-                printJSON({ updated: Object.keys(newSecrets), scope: scope.label });
-            }
-            else {
-                success(`${Object.keys(newSecrets).length} ${scope.label} secret(s) updated`);
-            }
-            return;
-        }
-        // No --set → list
         const secrets = await api.get(scope.path);
         if (isJSONMode()) {
             printJSON(opts.show
@@ -94,7 +80,7 @@ export function registerSecrets(program) {
             return;
         }
         if (secrets.length === 0) {
-            console.log(`No ${scope.label} secrets. Use \`lizard secrets --set KEY=value${opts.global ? " --global" : ""}\`.`);
+            console.log(`No ${scope.label} secrets. Use \`lizard secrets set KEY=value${opts.global ? " --global" : ""}\`.`);
             return;
         }
         table(["Key", "Value"], secrets.map((s) => [
@@ -112,7 +98,7 @@ export function registerSecrets(program) {
         .option("--refs", "List reference templates available in this scope")
         .action(async (opts, sub) => {
         const inherited = sub.parent?.opts() || {};
-        const scope = await resolveScope(opts.project ?? inherited.project ?? program.opts().project, opts.service ?? inherited.service, opts.global || inherited.global);
+        const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global || inherited.global);
         if (opts.refs) {
             await printRefs(scope);
             return;
@@ -143,7 +129,7 @@ export function registerSecrets(program) {
         .option("--no-redeploy", "Don't trigger redeploy")
         .action(async (pairs, opts, sub) => {
         const inherited = sub.parent?.opts() || {};
-        const scope = await resolveScope(opts.project ?? inherited.project ?? program.opts().project, opts.service ?? inherited.service, opts.global || inherited.global);
+        const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global || inherited.global);
         const newSecrets = parsePairs(pairs);
         await applySecrets(scope, newSecrets, opts.redeploy === false);
         if (isJSONMode()) {
@@ -162,7 +148,7 @@ export function registerSecrets(program) {
         .option("--no-redeploy", "Don't trigger redeploy")
         .action(async (keys, opts, sub) => {
         const inherited = sub.parent?.opts() || {};
-        const scope = await resolveScope(opts.project ?? inherited.project ?? program.opts().project, opts.service ?? inherited.service, opts.global || inherited.global);
+        const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global || inherited.global);
         const existing = await api.get(scope.path);
         const set = new Set(keys);
         const filtered = existing.filter((s) => !set.has(s.key));
@@ -187,7 +173,7 @@ export function registerSecrets(program) {
         .option("--no-redeploy", "Don't trigger redeploy")
         .action(async (opts, sub) => {
         const inherited = sub.parent?.opts() || {};
-        const scope = await resolveScope(opts.project ?? inherited.project ?? program.opts().project, opts.service ?? inherited.service, opts.global || inherited.global);
+        const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global || inherited.global);
         const chunks = [];
         for await (const chunk of process.stdin)
             chunks.push(chunk);

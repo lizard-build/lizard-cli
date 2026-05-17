@@ -11,13 +11,14 @@ export function registerSSH(program) {
         .command("ssh [cmd...]")
         .description("Execute a command inside a running service VM")
         .option("-s, --service <id>", "Service name or ID")
+        .option("-p, --project <id>", "Project name or ID")
         .addHelpText("after", `
 Examples:
   lizard ssh -s my-app -- ls -la /app
   lizard ssh -s my-app -- printenv
   lizard ssh -s my-app -- bash -c "ps aux | head"`)
         .action(async (cmdArgs, opts) => {
-        const projectId = resolveProjectId(program.opts().project);
+        const projectId = resolveProjectId(opts.project);
         let serviceId = opts.service;
         // Resolve service interactively if not given
         if (!serviceId) {
