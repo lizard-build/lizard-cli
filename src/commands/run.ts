@@ -28,7 +28,7 @@ export function registerRun(program: Command) {
     .option("-p, --project <id>", "Project ID (defaults to linked)")
     .allowUnknownOption()
     .action(async (args: string[], opts: any) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
 
       const env: Record<string, string> = { ...(process.env as Record<string, string>) };
 

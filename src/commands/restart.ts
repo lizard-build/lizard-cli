@@ -1,21 +1,23 @@
-import * as p from "@clack/prompts";
+import chalk from "chalk";
 import ora from "ora";
+import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { api } from "../lib/api.js";
 import { resolveProjectId } from "../lib/config.js";
-import { success, isJSONMode, printJSON, isTTY } from "../lib/format.js";
+import { success, info, error, isJSONMode, printJSON, isTTY } from "../lib/format.js";
 
 export function registerRestart(program: Command) {
   program
     .command("restart")
     .argument("[id]", "App ID to restart")
     .description("Restart an app")
+    .option("--detach", "Run in background")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (id: string | undefined, opts) => {
       if (!id) {
         if (!isTTY()) throw new Error("Provide an app ID or run interactively");
 
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         const data = await api.get<{ apps: any[] }>(`/api/projects/${projectId}/services`);
         const apps = data.apps || [];
 
@@ -37,14 +39,50 @@ export function registerRestart(program: Command) {
         }
       }
 
-      const spinner = ora("Restarting...").start();
+      const spinner = ora("Starting restart...").start();
       await api.post(`/api/apps/${id}/restart`);
       spinner.stop();
 
-      if (isJSONMode()) {
-        printJSON({ id, status: "restarting" });
+      if (opts.detach || isJSONMode()) {
+        if (isJSONMode()) {
+          printJSON({ id, status: "restarting" });
+        } else {
+          success("Restart started");
+          info(chalk.dim(`  Check status: lizard ps ${id}`));
+        }
+        return;
+      }
+
+      const waitSpinner = ora("Restarting...").start();
+
+      let finalStatus: string | undefined;
+      let domain: string | undefined;
+      for (let i = 0; i < 60; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        try {
+          const app = await api.get<{ status: string; domain?: string }>(
+            `/api/apps/${id}`,
+          );
+          domain = app.domain;
+          if (app.status === "running") {
+            finalStatus = "running";
+            break;
+          }
+          if (app.status === "failed" || app.status === "error") {
+            finalStatus = app.status;
+            break;
+          }
+        } catch {}
+      }
+
+      waitSpinner.stop();
+
+      if (finalStatus === "running") {
+        success(`Restarted! ${domain ? chalk.cyan(`https://${domain}`) : ""}`);
+      } else if (finalStatus) {
+        error("Restart failed");
       } else {
-        success(`Restarting`);
+        info(chalk.dim("Still restarting — check status with: lizard ps " + id));
       }
     });
 }

@@ -20,7 +20,7 @@ export function registerServiceShow(svc: Command) {
     .option("-s, --service <name>", "Limit output to one service")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (opts) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
 
       if (opts.service) {
         const svcInfo = await resolveService(projectId, opts.service);

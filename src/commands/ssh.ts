@@ -20,7 +20,7 @@ Examples:
   lizard ssh -s my-app -- printenv
   lizard ssh -s my-app -- bash -c "ps aux | head"`)
     .action(async (cmdArgs: string[], opts) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
       let serviceId = opts.service as string | undefined;
 
       // Resolve service interactively if not given

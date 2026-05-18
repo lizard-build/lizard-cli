@@ -10,12 +10,8 @@ interface Region {
 }
 
 export function registerRegions(program: Command) {
-  const region = program
-    .command("region")
-    .description("Region management");
-
-  region
-    .command("list")
+  program
+    .command("regions")
     .description("List available regions")
     .action(async () => {
       const regions = await api.get<Region[]>("/api/regions");

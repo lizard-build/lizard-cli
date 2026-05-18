@@ -21,7 +21,7 @@ export function registerScale(program: Command) {
     .option("--cpu <cores>", "CPU cap (cores, supports decimals)", parseFloatOption)
     .option("--memory <mb>", "Memory cap (MB)", parseIntOption)
     .action(async (opts, _cmd) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
       const service = await getActiveService(opts.service, projectId);
 
       const body: Record<string, unknown> = {};

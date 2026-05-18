@@ -19,7 +19,7 @@ export function registerDown(program: Command) {
     .option("-p, --project <id>", "Project name or ID")
     .option("-y, --yes", "Skip confirmation")
     .action(async (id: string | undefined, opts) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
       const yes = opts.yes;
 
       const svc = await getActiveService(id || opts.service, projectId);

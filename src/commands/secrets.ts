@@ -29,7 +29,7 @@ async function resolveScope(
   serviceFlag: string | undefined,
   global: boolean,
 ): Promise<Scope> {
-  const projectId = resolveProjectId(projectFlag);
+  const projectId = await resolveProjectId(projectFlag);
 
   if (global) {
     return { path: `/api/projects/${projectId}/secrets`, label: "project", projectId };

@@ -68,7 +68,7 @@ export function registerService(program: Command) {
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (opts) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
       const target = opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
@@ -101,7 +101,7 @@ export function registerService(program: Command) {
     .option("-p, --project <id>", "Project name or ID")
     .option("-y, --yes", "Skip confirmation")
     .action(async (opts) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
       const target = opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
@@ -140,7 +140,7 @@ export function registerService(program: Command) {
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (opts) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
       const target = opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
@@ -158,7 +158,7 @@ export function registerService(program: Command) {
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (opts) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
       const target = opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
@@ -178,7 +178,7 @@ export function registerService(program: Command) {
     .option("--replicas <n>", "Number of replicas", parseIntOption)
     .option("--region <code>", "Region code")
     .action(async (opts) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
       const target = opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
@@ -213,7 +213,7 @@ export function registerService(program: Command) {
     .action(async (newName: string, opts) => {
       const nameErr = validateName(newName);
       if (nameErr) throw new Error(`Invalid name: ${nameErr}`);
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
       const target = opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
@@ -247,7 +247,7 @@ export function registerService(program: Command) {
     .option("-p, --project <id>", "Project name or ID")
     .option("--build", "Show build logs instead of runtime")
     .action(async (opts) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
       const target = opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
@@ -278,7 +278,7 @@ export function registerService(program: Command) {
 
   // Helpers in scope of registerService
   async function linkByName(_cmd: Command, name: string) {
-    const projectId = resolveProjectId(undefined);
+    const projectId = await resolveProjectId(undefined);
     const svcInfo = await resolveService(projectId, name);
     updateProjectLink({ serviceId: svcInfo.id, serviceName: svcInfo.name });
     if (isJSONMode()) {
@@ -289,7 +289,7 @@ export function registerService(program: Command) {
   }
 
   async function linkInteractive(_cmd: Command) {
-    const projectId = resolveProjectId(undefined);
+    const projectId = await resolveProjectId(undefined);
     const data = await api.get<ServicesResponse>(
       `/api/projects/${projectId}/services`,
     );

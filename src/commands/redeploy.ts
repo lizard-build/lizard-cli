@@ -17,7 +17,7 @@ export function registerRedeploy(program: Command) {
       if (!id) {
         if (!isTTY()) throw new Error("Provide an app ID or run interactively");
 
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         const data = await api.get<{ apps: any[] }>(`/api/projects/${projectId}/services`);
         const apps = data.apps || [];
 
@@ -81,7 +81,9 @@ export function registerRedeploy(program: Command) {
           }
           try {
             const parsed = JSON.parse(data);
-            process.stdout.write((parsed.line || data) + "\n");
+            const line =
+              typeof parsed === "string" ? parsed : (parsed.line ?? data);
+            process.stdout.write(line + "\n");
           } catch {
             process.stdout.write(data + "\n");
           }

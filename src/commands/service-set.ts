@@ -49,7 +49,7 @@ export function registerServiceSet(svc: Command) {
     .option("--stage", "Stage changes without committing")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (serviceArg: string | undefined, opts) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
 
       const patch = await buildPatch(serviceArg, opts, projectId);
       if (!patch || isEmpty(patch)) {

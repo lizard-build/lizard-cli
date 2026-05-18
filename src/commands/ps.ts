@@ -10,7 +10,7 @@ export function registerPs(program: Command) {
     .description("List all services in the project")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (opts) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
       const data = await api.get<{ apps: any[]; addons: any[] }>(
         `/api/projects/${projectId}/services`,
       );

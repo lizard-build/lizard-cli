@@ -18,7 +18,7 @@ export function registerPort(program: Command) {
     .option("-s, --service <name>", "Service name or ID")
     .option("--project <id>", "Project name or ID")
     .action(async (portArg: string | undefined, opts) => {
-      const projectId = resolveProjectId(opts.project);
+      const projectId = await resolveProjectId(opts.project);
       const service = await getActiveService(opts.service, projectId);
 
       if (portArg === undefined) {
