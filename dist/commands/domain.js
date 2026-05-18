@@ -20,7 +20,7 @@ export function registerDomain(program) {
         .option("-p, --project <id>", "Project name or ID")
         .option("--port <n>", "Port to expose", parseIntOption)
         .action(async (hostname, opts, _cmd) => {
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         const service = await getActiveService(opts.service, projectId);
         if (!hostname) {
             // Bare `lizard domain` — show or auto-generate.
@@ -100,7 +100,7 @@ export function registerDomain(program) {
         .description("Generate a fresh *.onlizard.com subdomain")
         .action(async (_opts, sub) => {
         const opts = sub.optsWithGlobals();
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         const service = await getActiveService(opts.service, projectId);
         const result = await api
             .post(`/api/apps/${service.id}/domains`, { generate: true })
@@ -125,7 +125,7 @@ export function registerDomain(program) {
         .description("Check the TXT record and activate the domain")
         .action(async (hostname, _opts, sub) => {
         const opts = sub.optsWithGlobals();
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         const service = await getActiveService(opts.service, projectId);
         const result = await api
             .post(`/api/apps/${service.id}/domains/verify`, { hostname })
@@ -156,7 +156,7 @@ export function registerDomain(program) {
         .description("Remove a domain")
         .action(async (hostname, _opts, sub) => {
         const opts = sub.optsWithGlobals();
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         const service = await getActiveService(opts.service, projectId);
         await api
             .delete(`/api/apps/${service.id}/domains/${encodeURIComponent(hostname)}`)

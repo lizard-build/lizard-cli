@@ -16,7 +16,7 @@ export function registerPort(program) {
         .option("-s, --service <name>", "Service name or ID")
         .option("--project <id>", "Project name or ID")
         .action(async (portArg, opts) => {
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         const service = await getActiveService(opts.service, projectId);
         if (portArg === undefined) {
             const app = await api.get(`/api/apps/${service.id}`);

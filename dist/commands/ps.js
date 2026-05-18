@@ -8,7 +8,7 @@ export function registerPs(program) {
         .description("List all services in the project")
         .option("-p, --project <id>", "Project name or ID")
         .action(async (opts) => {
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         const data = await api.get(`/api/projects/${projectId}/services`);
         if (isJSONMode()) {
             printJSON(data);

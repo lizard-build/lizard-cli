@@ -50,7 +50,7 @@ export function registerGit(program) {
         .description("Show GitHub connection and repository status")
         .option("-p, --project <id>", "Project name or ID")
         .action(async (opts) => {
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         const [githubStatus, services] = await Promise.all([
             api.get("/api/github/status"),
             api.get(`/api/projects/${projectId}/services`),

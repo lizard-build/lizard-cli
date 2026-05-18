@@ -4,18 +4,27 @@ import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { api, streamSSE } from "../lib/api.js";
 import { resolveProjectId } from "../lib/config.js";
+import { resolveService } from "../lib/resolve.js";
 import { success, info, error, isJSONMode, printJSON, isTTY } from "../lib/format.js";
 
 export function registerRedeploy(program: Command) {
   program
     .command("redeploy")
-    .argument("[id]", "App ID to redeploy")
+    .argument("[nameOrId]", "App name or ID to redeploy")
     .description("Trigger a fresh build (latest commit / last upload) with current vars")
     .option("--detach", "Run in background")
     .option("-p, --project <id>", "Project name or ID")
-    .action(async (id: string | undefined, opts) => {
-      if (!id) {
-        if (!isTTY()) throw new Error("Provide an app ID or run interactively");
+    .action(async (nameOrId: string | undefined, opts) => {
+      let id: string | undefined;
+      if (nameOrId) {
+        const projectId = await resolveProjectId(opts.project);
+        const resolved = await resolveService(projectId, nameOrId);
+        if (resolved.kind !== "app") {
+          throw new Error(`"${nameOrId}" is not an app`);
+        }
+        id = resolved.id;
+      } else {
+        if (!isTTY()) throw new Error("Provide an app name or ID, or run interactively");
 
         const projectId = await resolveProjectId(opts.project);
         const data = await api.get<{ apps: any[] }>(`/api/projects/${projectId}/services`);

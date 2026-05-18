@@ -21,7 +21,7 @@ export function registerRun(program) {
         .option("-p, --project <id>", "Project ID (defaults to linked)")
         .allowUnknownOption()
         .action(async (args, opts) => {
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         const env = { ...process.env };
         // 1. project secrets
         const projectSecrets = await api.get(`/api/projects/${projectId}/secrets`);

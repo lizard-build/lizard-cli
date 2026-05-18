@@ -40,7 +40,7 @@ export function registerServiceSet(svc) {
         .option("--stage", "Stage changes without committing")
         .option("-p, --project <id>", "Project name or ID")
         .action(async (serviceArg, opts) => {
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         const patch = await buildPatch(serviceArg, opts, projectId);
         if (!patch || isEmpty(patch)) {
             if (isJSONMode()) {

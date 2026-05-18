@@ -8,7 +8,7 @@ export function registerOpen(program) {
         .description("Open project in browser")
         .option("-p, --project <id>", "Project name or ID")
         .action(async (opts) => {
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         const url = `${getBaseURL()}/projects/${projectId}`;
         await open(url);
         success("Opened in browser");

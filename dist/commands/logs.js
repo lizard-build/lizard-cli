@@ -11,7 +11,7 @@ export function registerLogs(program) {
         .option("--service <id>", "Only show logs for a specific service")
         .option("-p, --project <id>", "Project name or ID")
         .action(async (opts) => {
-        const projectId = resolveProjectId(opts.project);
+        const projectId = await resolveProjectId(opts.project);
         if (opts.build) {
             // Show build logs for the latest build
             await showBuildLogs(opts.service, projectId);

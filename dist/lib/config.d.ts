@@ -36,9 +36,8 @@ export declare function setProjectLink(link: ProjectLink, cwd?: string): void;
 export declare function updateProjectLink(patch: Partial<ProjectLink>, cwd?: string): void;
 export declare function clearProjectLink(cwd?: string): void;
 /**
- * Resolve projectId from: --project flag (ID only) → linked cwd → error.
- * For name-based resolution, callers should look up the project list first.
+ * Resolve a project flag (name, slug, or ID) to an actual project ID.
+ * When no flag is given, falls back to the linked cwd. Hits the API only
+ * when a flag is provided so name/slug lookups work as advertised.
  */
-export declare function resolveProjectId(flagValue?: string): string;
-/** Resolve a project flag (name, slug, or ID) to an actual project ID via the API. */
-export declare function resolveProjectIdFromApi(flagValue?: string): Promise<string>;
+export declare function resolveProjectId(flagValue?: string): Promise<string>;

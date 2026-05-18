@@ -4,7 +4,7 @@ import { getProjectLink, resolveProjectId } from "../lib/config.js";
 import { getActiveService } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON, table } from "../lib/format.js";
 async function resolveScope(projectFlag, serviceFlag, global) {
-    const projectId = resolveProjectId(projectFlag);
+    const projectId = await resolveProjectId(projectFlag);
     if (global) {
         return { path: `/api/projects/${projectId}/secrets`, label: "project", projectId };
     }

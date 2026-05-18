@@ -1,11 +1,8 @@
 import { api } from "../lib/api.js";
 import { isJSONMode, printJSON, table } from "../lib/format.js";
 export function registerRegions(program) {
-    const region = program
-        .command("region")
-        .description("Region management");
-    region
-        .command("list")
+    program
+        .command("regions")
         .description("List available regions")
         .action(async () => {
         const regions = await api.get("/api/regions");
