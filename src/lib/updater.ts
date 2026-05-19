@@ -68,24 +68,34 @@ export async function selfUpdate(onProgress?: (msg: string) => void): Promise<bo
   return true;
 }
 
-/** Run silently in background — checks for update and prints a notice after command finishes. */
+/** Check for a newer version and auto-install it in the background.
+ *  Prints a one-line notice on exit — either "Updated to vX.Y.Z" or nothing on failure.
+ *  Never blocks or crashes the current command. */
 export function checkForUpdateInBackground(): void {
-  // Only check in TTY, not in CI or piped output
+  // Only auto-update in TTY; skip CI / piped output
   if (!process.stdout.isTTY) return;
 
-  const promise = getLatestVersion().then((r) => {
+  let updateMessage: string | null = null;
+
+  const promise = getLatestVersion().then(async (r) => {
     if (r.kind !== "ok") return;
     const latest = r.version;
     if (latest === CURRENT_VERSION) return;
-    // Compare semver simply
     const [maj, min, pat] = latest.split(".").map(Number);
     const [cmaj, cmin, cpat] = CURRENT_VERSION.split(".").map(Number);
     const isNewer = maj > cmaj || (maj === cmaj && min > cmin) || (maj === cmaj && min === cmin && pat > cpat);
     if (!isNewer) return;
-    process.on("exit", () => {
-      process.stderr.write(`\n  Update available: v${CURRENT_VERSION} → v${latest}\n  Run: lizard upgrade\n\n`);
-    });
+    try {
+      const ok = await selfUpdate();
+      if (ok) updateMessage = `\n  lizard updated v${CURRENT_VERSION} → v${latest}\n`;
+    } catch {
+      // silent — don't interrupt the current command
+    }
   }).catch(() => {});
+
+  process.on("exit", () => {
+    if (updateMessage) process.stderr.write(updateMessage);
+  });
 
   // Don't block process exit
   if (typeof (promise as any).unref === "function") (promise as any).unref();
