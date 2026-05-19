@@ -54,7 +54,7 @@ export function registerUp(program: Command) {
       const merged = cmd.optsWithGlobals();
       const serviceFlag = merged.service ?? opts.service;
       const projectFlag = merged.project;
-      const region: string = merged.region ?? "eu-west-lim-a";
+      const region: string | undefined = merged.region ?? undefined;
 
       // Run init flow if cwd isn't linked yet
       await ensureLinked({ projectName: projectFlag });
@@ -118,7 +118,7 @@ async function deployFromLocal(args: {
   useGitignore: boolean;
   serviceFlag: string | undefined;
   existingServiceId: string | undefined;
-  region: string;
+  region: string | undefined;
   opts: any;
 }) {
   const defaultName = args.serviceFlag || getDefaultAppName(args.targetPath);
@@ -152,7 +152,7 @@ async function deployFromLocal(args: {
     if (resolvedPort !== undefined) qs.set("port", String(resolvedPort));
     if (!args.existingServiceId) {
       qs.set("name", appName);
-      qs.set("region", args.region);
+      if (args.region) qs.set("region", args.region);
       // New services with no detected port default to 3000
       if (resolvedPort === undefined) qs.set("port", "3000");
     }
