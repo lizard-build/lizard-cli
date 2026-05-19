@@ -12,12 +12,23 @@ export function registerLogs(program: Command) {
     .option("--build", "Show build logs instead of runtime")
     .option("--service <id>", "Only show logs for a specific service")
     .option("-p, --project <id>", "Project name or ID")
+    .option("--tail <n>", "Print last N log lines and exit (no follow)")
     .action(async (opts) => {
       const projectId = await resolveProjectId(opts.project);
 
+      const tailN = opts.tail !== undefined ? parseTail(opts.tail) : undefined;
+
       if (opts.build) {
-        // Show build logs for the latest build
-        await showBuildLogs(opts.service, projectId);
+        await showBuildLogs(opts.service, projectId, tailN);
+        return;
+      }
+
+      // --tail: fetch historical logs and exit
+      if (tailN !== undefined) {
+        const params = new URLSearchParams({ limit: String(tailN) });
+        if (opts.service) params.set("service", opts.service);
+        const entries = await api.get<any[]>(`/api/projects/${projectId}/logs?${params}`);
+        for (const e of entries) printLogEntry(e);
         return;
       }
 
@@ -73,6 +84,28 @@ export function registerLogs(program: Command) {
     });
 }
 
+function parseTail(raw: string): number {
+  const n = parseInt(raw, 10);
+  if (isNaN(n) || n < 1) {
+    error("--tail must be a positive integer");
+    process.exit(1);
+  }
+  if (n > 1000) {
+    info(chalk.yellow("--tail capped at 1000 (server limit)"));
+    return 1000;
+  }
+  return n;
+}
+
+function printLogEntry(e: any) {
+  if (e.service && e.message) {
+    const prefix = chalk.cyan(`[${e.service}]`);
+    process.stdout.write(`${prefix} ${e.message}\n`);
+  } else if (e.message) {
+    process.stdout.write(e.message + "\n");
+  }
+}
+
 function printLogLine(data: string) {
   try {
     const parsed = JSON.parse(data);
@@ -93,7 +126,7 @@ function printLogLine(data: string) {
   }
 }
 
-async function showBuildLogs(serviceId: string | undefined, projectId: string) {
+async function showBuildLogs(serviceId: string | undefined, projectId: string, tailN?: number) {
   let appId = serviceId;
 
   if (!appId) {
@@ -117,6 +150,17 @@ async function showBuildLogs(serviceId: string | undefined, projectId: string) {
 
   const buildId = app.builds[0].id;
   info(chalk.dim(`Build ${buildId}\n`));
+
+  if (tailN !== undefined) {
+    const lines: string[] = [];
+    await streamSSE(`/api/builds/${buildId}/logs`, (event, data) => {
+      if (event === "done" || event === "error") return false;
+      lines.push(data);
+      return true;
+    });
+    for (const line of lines.slice(-tailN)) printLogLine(line);
+    return;
+  }
 
   await streamSSE(`/api/builds/${buildId}/logs`, (event, data) => {
     if (event === "done" || event === "error") {
