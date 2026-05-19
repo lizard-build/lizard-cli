@@ -116,11 +116,9 @@ function printLogLine(data: string) {
   try {
     const parsed = JSON.parse(data);
     const rep = replicaPrefix(parsed);
-    if (parsed.service && parsed.line) {
+    if (parsed.service && parsed.message) {
       const prefix = chalk.cyan(`[${parsed.service}]`);
-      process.stdout.write(`${prefix} ${rep}${parsed.line}\n`);
-    } else if (parsed.line) {
-      process.stdout.write(`${rep}${parsed.line}\n`);
+      process.stdout.write(`${prefix} ${rep}${parsed.message}\n`);
     } else if (parsed.message) {
       process.stdout.write(`${rep}${parsed.message}\n`);
     } else if (typeof parsed === "string") {
