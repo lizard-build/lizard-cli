@@ -2,7 +2,7 @@ import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { api } from "../lib/api.js";
-import { getProjectLink, updateProjectLink } from "../lib/config.js";
+import { getProjectLink, updateProjectLink, DEFAULT_REGION } from "../lib/config.js";
 import {
   success,
   info,
@@ -135,7 +135,7 @@ export function registerAdd(program: Command) {
     .action(async (types: string[], opts, command) => {
       const merged = command.optsWithGlobals();
       const projectFlag = merged.project;
-      const region = merged.region;
+      const region = merged.region ?? DEFAULT_REGION;
 
       // ── --list: show DB catalog and exit ──────────────────────────────
       if (opts.list || (!types.length && !opts.addon && !opts.service && !opts.repo && !isTTY())) {

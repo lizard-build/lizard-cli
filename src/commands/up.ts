@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import { api, streamSSE, getBaseURL } from "../lib/api.js";
-import { updateProjectLink } from "../lib/config.js";
+import { updateProjectLink, DEFAULT_REGION } from "../lib/config.js";
 import { resolveContext } from "../lib/resolve.js";
 import { ensureLinked } from "./init.js";
 import {
@@ -54,6 +54,7 @@ export function registerUp(program: Command) {
       const merged = cmd.optsWithGlobals();
       const serviceFlag = merged.service ?? opts.service;
       const projectFlag = merged.project;
+      const region: string = merged.region ?? DEFAULT_REGION;
 
       // Run init flow if cwd isn't linked yet
       await ensureLinked({ projectName: projectFlag });
@@ -77,6 +78,7 @@ export function registerUp(program: Command) {
         useGitignore: opts.gitignore !== false,
         serviceFlag,
         existingServiceId: ctx.service?.id,
+        region,
         buildCommand: opts.buildCommand,
         startCommand: opts.startCommand,
         preDeployCommand: opts.preDeployCommand,
@@ -116,6 +118,7 @@ async function deployFromLocal(args: {
   useGitignore: boolean;
   serviceFlag: string | undefined;
   existingServiceId: string | undefined;
+  region: string;
   opts: any;
 }) {
   const defaultName = args.serviceFlag || getDefaultAppName(args.targetPath);
@@ -149,6 +152,7 @@ async function deployFromLocal(args: {
     if (resolvedPort !== undefined) qs.set("port", String(resolvedPort));
     if (!args.existingServiceId) {
       qs.set("name", appName);
+      qs.set("region", args.region);
       // New services with no detected port default to 3000
       if (resolvedPort === undefined) qs.set("port", "3000");
     }

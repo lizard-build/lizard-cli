@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { api } from "../lib/api.js";
-import { getProjectLink, updateProjectLink } from "../lib/config.js";
+import { getProjectLink, updateProjectLink, DEFAULT_REGION } from "../lib/config.js";
 import { success, info, isJSONMode, printJSON, isTTY, table, } from "../lib/format.js";
 import { validateName, addonRefName } from "../lib/name.js";
 const CATALOG = [
@@ -99,7 +99,7 @@ export function registerAdd(program) {
         .action(async (types, opts, command) => {
         const merged = command.optsWithGlobals();
         const projectFlag = merged.project;
-        const region = merged.region;
+        const region = merged.region ?? DEFAULT_REGION;
         // ── --list: show DB catalog and exit ──────────────────────────────
         if (opts.list || (!types.length && !opts.addon && !opts.service && !opts.repo && !isTTY())) {
             if (isJSONMode()) {
