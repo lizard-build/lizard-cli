@@ -19,17 +19,27 @@ function getBinaryName(): string | null {
   return null;
 }
 
-export async function getLatestVersion(): Promise<string | null> {
+export type LatestVersionResult =
+  | { kind: "ok"; version: string }
+  | { kind: "rate-limited"; resetAt: number }
+  | { kind: "error" };
+
+export async function getLatestVersion(): Promise<LatestVersionResult> {
   try {
     const res = await fetch(RELEASES_API, {
       headers: { "User-Agent": "lizard-cli" },
       signal: AbortSignal.timeout(5000),
     });
-    if (!res.ok) return null;
-    const data = await res.json() as { tag_name: string };
-    return data.tag_name?.replace(/^v/, "") ?? null;
+    if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") {
+      const reset = Number(res.headers.get("x-ratelimit-reset"));
+      return { kind: "rate-limited", resetAt: Number.isFinite(reset) ? reset : 0 };
+    }
+    if (!res.ok) return { kind: "error" };
+    const data = (await res.json()) as { tag_name?: string };
+    const version = data.tag_name?.replace(/^v/, "");
+    return version ? { kind: "ok", version } : { kind: "error" };
   } catch {
-    return null;
+    return { kind: "error" };
   }
 }
 
@@ -63,15 +73,17 @@ export function checkForUpdateInBackground(): void {
   // Only check in TTY, not in CI or piped output
   if (!process.stdout.isTTY) return;
 
-  const promise = getLatestVersion().then((latest) => {
-    if (!latest || latest === CURRENT_VERSION) return;
+  const promise = getLatestVersion().then((r) => {
+    if (r.kind !== "ok") return;
+    const latest = r.version;
+    if (latest === CURRENT_VERSION) return;
     // Compare semver simply
     const [maj, min, pat] = latest.split(".").map(Number);
     const [cmaj, cmin, cpat] = CURRENT_VERSION.split(".").map(Number);
     const isNewer = maj > cmaj || (maj === cmaj && min > cmin) || (maj === cmaj && min === cmin && pat > cpat);
     if (!isNewer) return;
     process.on("exit", () => {
-      process.stderr.write(`\n  Update available: v${CURRENT_VERSION} → v${latest}\n  Run: lizard update\n\n`);
+      process.stderr.write(`\n  Update available: v${CURRENT_VERSION} → v${latest}\n  Run: lizard upgrade\n\n`);
     });
   }).catch(() => {});
 

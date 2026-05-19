@@ -43,7 +43,7 @@ import { registerService } from "./commands/service.js";
 import { registerSSH } from "./commands/ssh.js";
 import { registerUnlink } from "./commands/unlink.js";
 import { registerUp } from "./commands/up.js";
-import { registerUpdate } from "./commands/update.js";
+import { registerUpgrade } from "./commands/upgrade.js";
 import { registerWhoami } from "./commands/whoami.js";
 const program = new Command();
 program
@@ -64,7 +64,7 @@ program
     .hook("preAction", async (thisCommand, actionCommand) => {
     const opts = thisCommand.opts();
     // Check for updates silently in background (shows notice after command)
-    if (actionCommand.name() !== "update") {
+    if (actionCommand.name() !== "upgrade") {
         checkForUpdateInBackground();
     }
     // JSON mode: explicit flag or non-TTY stdout
@@ -80,7 +80,7 @@ program
         setBaseURL(process.env.LIZARD_API_URL);
     }
     // Commands that don't need auth
-    const noAuth = new Set(["login", "logout", "update", "help", "docs"]);
+    const noAuth = new Set(["login", "logout", "upgrade", "help", "docs"]);
     if (noAuth.has(actionCommand.name()))
         return;
     // Require auth — auto-triggers login flow if not logged in
@@ -113,7 +113,7 @@ registerService(program);
 registerSSH(program);
 registerUnlink(program);
 registerUp(program);
-registerUpdate(program);
+registerUpgrade(program);
 registerWhoami(program);
 // Error handling
 program.exitOverride();

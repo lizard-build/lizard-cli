@@ -3,7 +3,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-export const CURRENT_VERSION = "0.2.53";
+export const CURRENT_VERSION = "0.2.56";
 const RELEASES_API = "https://api.github.com/repos/lizard-build/lizard-cli/releases/latest";
 const RELEASE_BASE = "https://github.com/lizard-build/lizard-cli/releases/latest/download";
 function getBinaryName() {
@@ -25,13 +25,18 @@ export async function getLatestVersion() {
             headers: { "User-Agent": "lizard-cli" },
             signal: AbortSignal.timeout(5000),
         });
+        if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") {
+            const reset = Number(res.headers.get("x-ratelimit-reset"));
+            return { kind: "rate-limited", resetAt: Number.isFinite(reset) ? reset : 0 };
+        }
         if (!res.ok)
-            return null;
-        const data = await res.json();
-        return data.tag_name?.replace(/^v/, "") ?? null;
+            return { kind: "error" };
+        const data = (await res.json());
+        const version = data.tag_name?.replace(/^v/, "");
+        return version ? { kind: "ok", version } : { kind: "error" };
     }
     catch {
-        return null;
+        return { kind: "error" };
     }
 }
 export async function selfUpdate(onProgress) {
@@ -60,8 +65,11 @@ export function checkForUpdateInBackground() {
     // Only check in TTY, not in CI or piped output
     if (!process.stdout.isTTY)
         return;
-    const promise = getLatestVersion().then((latest) => {
-        if (!latest || latest === CURRENT_VERSION)
+    const promise = getLatestVersion().then((r) => {
+        if (r.kind !== "ok")
+            return;
+        const latest = r.version;
+        if (latest === CURRENT_VERSION)
             return;
         // Compare semver simply
         const [maj, min, pat] = latest.split(".").map(Number);
@@ -70,7 +78,7 @@ export function checkForUpdateInBackground() {
         if (!isNewer)
             return;
         process.on("exit", () => {
-            process.stderr.write(`\n  Update available: v${CURRENT_VERSION} → v${latest}\n  Run: lizard update\n\n`);
+            process.stderr.write(`\n  Update available: v${CURRENT_VERSION} → v${latest}\n  Run: lizard upgrade\n\n`);
         });
     }).catch(() => { });
     // Don't block process exit
