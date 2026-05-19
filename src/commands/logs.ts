@@ -97,25 +97,32 @@ function parseTail(raw: string): number {
   return n;
 }
 
+function replicaPrefix(e: any): string {
+  if (!e.replica) return "";
+  return chalk.magenta(`[${e.replica}]`) + " ";
+}
+
 function printLogEntry(e: any) {
+  const rep = replicaPrefix(e);
   if (e.service && e.message) {
     const prefix = chalk.cyan(`[${e.service}]`);
-    process.stdout.write(`${prefix} ${e.message}\n`);
+    process.stdout.write(`${prefix} ${rep}${e.message}\n`);
   } else if (e.message) {
-    process.stdout.write(e.message + "\n");
+    process.stdout.write(`${rep}${e.message}\n`);
   }
 }
 
 function printLogLine(data: string) {
   try {
     const parsed = JSON.parse(data);
+    const rep = replicaPrefix(parsed);
     if (parsed.service && parsed.line) {
       const prefix = chalk.cyan(`[${parsed.service}]`);
-      process.stdout.write(`${prefix} ${parsed.line}\n`);
+      process.stdout.write(`${prefix} ${rep}${parsed.line}\n`);
     } else if (parsed.line) {
-      process.stdout.write(parsed.line + "\n");
+      process.stdout.write(`${rep}${parsed.line}\n`);
     } else if (parsed.message) {
-      process.stdout.write(parsed.message + "\n");
+      process.stdout.write(`${rep}${parsed.message}\n`);
     } else if (typeof parsed === "string") {
       process.stdout.write(parsed + "\n");
     } else {
