@@ -54,7 +54,7 @@ export function registerUp(program: Command) {
       const merged = cmd.optsWithGlobals();
       const serviceFlag = merged.service ?? opts.service;
       const projectFlag = merged.project;
-      const region: string = merged.region ?? DEFAULT_REGION;
+      const region: string = merged.region ?? "eu-west-lim-a";
 
       // Run init flow if cwd isn't linked yet
       await ensureLinked({ projectName: projectFlag });

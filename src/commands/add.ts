@@ -135,7 +135,7 @@ export function registerAdd(program: Command) {
     .action(async (types: string[], opts, command) => {
       const merged = command.optsWithGlobals();
       const projectFlag = merged.project;
-      const region = merged.region ?? DEFAULT_REGION;
+      const region = merged.region ?? undefined;
 
       // ── --list: show DB catalog and exit ──────────────────────────────
       if (opts.list || (!types.length && !opts.addon && !opts.service && !opts.repo && !isTTY())) {
