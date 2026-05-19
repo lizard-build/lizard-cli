@@ -5,7 +5,7 @@ import { setJSONMode, isJSONMode, error } from "./lib/format.js";
 import { setTokenOverride, requireAuth } from "./lib/auth.js";
 import { setBaseURL, setAccessToken } from "./lib/api.js";
 import { checkForUpdateInBackground, CURRENT_VERSION } from "./lib/updater.js";
-const BANNER_LINES = [
+const BANNER = chalk.rgb(16, 185, 129)([
     "╔═══════════════════════════════════════════════════╗",
     "║                                                   ║",
     "║    ██╗     ██╗███████╗ █████╗ ██████╗ ██████╗     ║",
@@ -16,29 +16,7 @@ const BANNER_LINES = [
     "║    ╚══════╝╚═╝╚══════╝╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝     ║",
     "║                                                   ║",
     "╚═══════════════════════════════════════════════════╝",
-];
-const GRADIENT_STOPS = [
-    [16, 185, 129], // #10B981
-    [212, 165, 116], // #D4A574
-];
-function gradientLine(line, width) {
-    let out = "";
-    for (let i = 0; i < line.length; i++) {
-        const t = width > 1 ? i / (width - 1) : 0;
-        const scaled = t * (GRADIENT_STOPS.length - 1);
-        const idx = Math.min(Math.floor(scaled), GRADIENT_STOPS.length - 2);
-        const k = scaled - idx;
-        const a = GRADIENT_STOPS[idx];
-        const b = GRADIENT_STOPS[idx + 1];
-        const r = Math.round(a[0] + (b[0] - a[0]) * k);
-        const g = Math.round(a[1] + (b[1] - a[1]) * k);
-        const bl = Math.round(a[2] + (b[2] - a[2]) * k);
-        out += chalk.rgb(r, g, bl)(line[i]);
-    }
-    return out;
-}
-const BANNER_WIDTH = Math.max(...BANNER_LINES.map((l) => l.length));
-const BANNER = BANNER_LINES.map((l) => gradientLine(l, BANNER_WIDTH)).join("\n");
+].join("\n"));
 // Commands (alphabetical by command name)
 import { registerAdd } from "./commands/add.js";
 import { registerDocs } from "./commands/docs.js";
