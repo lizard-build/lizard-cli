@@ -59,43 +59,22 @@ export function registerGit(program: Command) {
       }
     });
 
-  // lizard git checkout <branch> [service] — switch branch and redeploy
+  // lizard git checkout <service> <branch> — switch branch and redeploy
   git
     .command("checkout")
     .description("Switch a service to a different branch and redeploy")
+    .argument("<service>", "Service name (as shown in the project)")
     .argument("<branch>", "Branch name to switch to")
-    .argument("[service]", "Service name or ID (prompted if omitted)")
     .option("--detach", "Start redeploy and exit without streaming logs")
     .option("-p, --project <id>", "Project name or ID")
-    .action(async (branch: string, serviceArg: string | undefined, opts) => {
+    .action(async (serviceArg: string, branch: string, opts) => {
       const projectId = await resolveProjectId(opts.project);
 
-      // Resolve service — prompt if not given
-      let serviceId: string;
-      let serviceName: string;
-      if (serviceArg) {
-        const svc = await resolveService(projectId, serviceArg);
-        if (svc.kind !== "app") throw new Error(`"${serviceArg}" is not an app`);
-        serviceId = svc.id;
-        serviceName = svc.name ?? serviceArg;
-      } else {
-        if (!isTTY()) throw new Error("Provide a service name or run interactively");
-        const data = await api.get<{ apps: any[] }>(`/api/projects/${projectId}/services`);
-        const apps = (data.apps || []);
-        if (apps.length === 0) throw new Error("No apps in project");
-        if (apps.length === 1) {
-          serviceId = apps[0].id;
-          serviceName = apps[0].name;
-        } else {
-          const selected = await p.select({
-            message: "Switch branch on which service?",
-            options: apps.map((a: any) => ({ value: a.id, label: a.name, hint: a.branch || "main" })),
-          });
-          if (p.isCancel(selected)) process.exit(5);
-          serviceId = selected as string;
-          serviceName = apps.find((a: any) => a.id === serviceId)?.name ?? serviceId;
-        }
-      }
+      // Resolve service by name
+      const svc = await resolveService(projectId, serviceArg);
+      if (svc.kind !== "app") throw new Error(`"${serviceArg}" is not an app`);
+      const serviceId = svc.id;
+      const serviceName = svc.name ?? serviceArg;
 
       // Patch the branch
       const spinner = ora(`Switching ${chalk.bold(serviceName)} to branch ${chalk.cyan(branch)}...`).start();
