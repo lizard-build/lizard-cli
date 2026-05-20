@@ -24,32 +24,41 @@ export function registerScale(program: Command) {
       const projectId = await resolveProjectId(opts.project);
       const service = await getActiveService(opts.service, projectId);
 
-      const body: Record<string, unknown> = {};
-      if (opts.replicas !== undefined) body.replicas = opts.replicas;
-      if (opts.cpu !== undefined) body.cpuLimit = opts.cpu;
-      if (opts.memory !== undefined) body.memoryLimit = opts.memory;
-
-      if (Object.keys(body).length === 0) {
-        throw new Error(
-          "Pass at least one of: --replicas, --cpu, --memory.",
-        );
+      if (opts.replicas === undefined && opts.cpu === undefined && opts.memory === undefined) {
+        throw new Error("Pass at least one of: --replicas, --cpu, --memory.");
       }
 
-      const result = await api
-        .patch(`/api/apps/${service.id}/scale`, body)
-        .catch((err: any) => {
-          if (err?.status === 404) {
-            throw new Error(
-              "Scale endpoint not yet implemented. The API needs " +
-                "`PATCH /api/apps/{id}/scale` with body { replicas?, region?, cpuLimit?, memoryLimit? }.",
-            );
-          }
-          throw err;
-        });
+      // Replicas go to /scale; cpu/memory go to the general app PATCH (which triggers VM resize).
+      const resizeBody: Record<string, unknown> = {};
+      if (opts.cpu !== undefined) resizeBody.cpuLimit = cpuCoresToQuantity(opts.cpu);
+      if (opts.memory !== undefined) resizeBody.memoryLimit = `${opts.memory}Mi`;
 
-      if (isJSONMode()) printJSON(result || { id: service.id, ...body });
-      else success(`Scaled ${chalk.bold(service.name)}`);
+      const calls: Promise<unknown>[] = [];
+      if (opts.replicas !== undefined) {
+        calls.push(api.patch(`/api/apps/${service.id}/scale`, { replicas: opts.replicas }));
+      }
+      if (Object.keys(resizeBody).length > 0) {
+        calls.push(api.patch(`/api/apps/${service.id}`, resizeBody));
+      }
+
+      const results = await Promise.all(calls);
+
+      if (isJSONMode()) {
+        printJSON({
+          id: service.id,
+          ...(opts.replicas !== undefined ? { replicas: opts.replicas } : {}),
+          ...resizeBody,
+          results,
+        });
+      } else {
+        success(`Scaled ${chalk.bold(service.name)}`);
+      }
     });
+}
+
+/** Convert decimal CPU cores to Kubernetes-style quantity string ("0.5" -> "500m", "2" -> "2000m"). */
+function cpuCoresToQuantity(cores: number): string {
+  return `${Math.round(cores * 1000)}m`;
 }
 
 function parseIntOption(v: string): number {
