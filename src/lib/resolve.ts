@@ -96,6 +96,45 @@ export async function getActiveService(
 }
 
 /**
+ * Same as `getActiveService`, but also returns whether the target is an app
+ * or an addon. Costs one extra `/services` lookup when the service is taken
+ * from the cwd link (which otherwise resolves locally), so use this only when
+ * the caller branches on kind (e.g. `lizard scale`).
+ */
+export async function getActiveServiceWithKind(
+  serviceFlag: string | undefined,
+  projectId: string,
+): Promise<{ id: string; name: string; kind: "app" | "addon" }> {
+  if (serviceFlag) {
+    return resolveService(projectId, serviceFlag);
+  }
+
+  const link = getProjectLink();
+  if (link?.serviceId) {
+    const data = await api.get<ServicesResponse>(
+      `/api/projects/${projectId}/services`,
+    );
+    const app = data.apps?.find((a) => a.id === link.serviceId);
+    if (app) return { id: app.id, name: app.name, kind: "app" };
+    const addon = data.addons?.find((a) => a.id === link.serviceId);
+    if (addon) {
+      return {
+        id: addon.id,
+        name: addon.name || addon.addonType || link.serviceName || link.serviceId,
+        kind: "addon",
+      };
+    }
+    throw new Error(
+      `Linked service "${link.serviceName || link.serviceId}" no longer exists in this project.`,
+    );
+  }
+
+  throw new Error(
+    "No service specified. Pass --service <name> or run `lizard service link <name>`.",
+  );
+}
+
+/**
  * Resolve an environment within a project. Match by ID or name. If the API
  * does not have environments yet, returns null silently.
  */
