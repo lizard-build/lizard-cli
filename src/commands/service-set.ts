@@ -374,6 +374,7 @@ async function interactivePatch(projectId: string): Promise<any> {
         { value: "build.dockerfilePath", label: "Dockerfile path" },
         { value: "deploy.healthcheckPath", label: "Healthcheck path" },
         { value: "deploy.restartPolicyType", label: "Restart policy" },
+        { value: "source.branch", label: "Branch" },
         { value: "source.rootDirectory", label: "Root directory" },
         { value: "source.repoUrl", label: "GitHub repo" },
       ],
