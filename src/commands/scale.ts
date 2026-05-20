@@ -5,11 +5,12 @@ import { resolveProjectId } from "../lib/config.js";
 import { getActiveServiceWithKind } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON } from "../lib/format.js";
 
-// Discrete sizes the platform actually supports. The node-agent silently
-// clamps VMs to 1-4 CPU and 512-4096 MB — anything over that is accepted at
-// the API layer but the running VM lands at the clamp. Reject on the client
-// so the user sees the limit instead of a fake success.
-const ALLOWED_CPU_CORES = [1, 2, 3, 4] as const;
+// Discrete tiers the dashboard slider exposes (CPU_OPTIONS / MEMORY_OPTIONS in
+// lizard-client). The API and node-agent accept other values, but anything off
+// the tier list lands in DB as a string the UI slider can't snap to — the row
+// shows raw "3000m" and the slider falls to index 0. Mirror the UI tiers so the
+// CLI and dashboard stay in lockstep.
+const ALLOWED_CPU_CORES = [1, 2, 4] as const;
 const ALLOWED_MEMORY_MB = [512, 1024, 2048, 4096] as const;
 // Storage tiers match the addon size selector on the dashboard. Addon-only —
 // apps don't have a resizable data volume on this path.
@@ -18,7 +19,7 @@ const ALLOWED_STORAGE_MB = [512, 1024, 2048, 4096, 8192, 16384] as const;
 /**
  * `lizard scale` — service scaling.
  *   --replicas <n>     change replica count (1-10) — apps only
- *   --cpu <cores>      CPU cap; allowed: 1, 2, 3, 4
+ *   --cpu <cores>      CPU cap; allowed: 1, 2, 4
  *   --memory <mb>      memory cap; allowed: 512, 1024, 2048, 4096
  *   --storage <mb>     data volume size; addons only, grow-only;
  *                      allowed: 512, 1024, 2048, 4096, 8192, 16384
@@ -79,9 +80,12 @@ export function registerScale(program: Command) {
 
       // App path: replicas go to /scale; cpu/memory go to the general app PATCH
       // (which triggers VM resize via resizeAppOnNode).
+      // cpuLimit/memoryLimit are stored verbatim and the dashboard slider snaps
+      // by exact string match against ['1000m','2000m','4000m'] / ['512Mi','1Gi','2Gi','4Gi'].
+      // Send the same k8s strings the UI writes, or the slider falls to index 0.
       const resizeBody: Record<string, unknown> = {};
-      if (opts.cpu !== undefined) resizeBody.cpuLimit = `${opts.cpu}`;
-      if (opts.memory !== undefined) resizeBody.memoryLimit = `${opts.memory}Mi`;
+      if (opts.cpu !== undefined) resizeBody.cpuLimit = `${opts.cpu * 1000}m`;
+      if (opts.memory !== undefined) resizeBody.memoryLimit = mbToK8s(opts.memory);
 
       const calls: Promise<unknown>[] = [];
       if (opts.replicas !== undefined) {
@@ -156,7 +160,7 @@ async function scaleAddon(
         `--storage ${storageMb} MB is not larger than current ${currentMb} MB. Storage is grow-only.`,
       );
     }
-    const storageSize = storageMbToK8s(storageMb);
+    const storageSize = mbToK8s(storageMb);
     summary.resize = await api.post(
       `/api/projects/${projectId}/addons/${service.id}/resize`,
       { storageSize },
@@ -171,12 +175,12 @@ async function scaleAddon(
   }
 }
 
-/** 1024 → "1Gi", 512 → "512Mi". Matches the addon size selector on the dashboard. */
-function storageMbToK8s(mb: number): string {
+/** 1024 → "1Gi", 512 → "512Mi". Matches the dashboard size tiers (memory + addon storage). */
+function mbToK8s(mb: number): string {
   return mb % 1024 === 0 ? `${mb / 1024}Gi` : `${mb}Mi`;
 }
 
-/** Inverse of storageMbToK8s for grow-only comparison; supports Gi/Mi/Ti. */
+/** Inverse of mbToK8s for grow-only comparison; supports Gi/Mi/Ti. */
 function parseStorageToMb(size: string): number {
   if (size.endsWith("Gi")) return parseFloat(size) * 1024;
   if (size.endsWith("Mi")) return parseFloat(size);
