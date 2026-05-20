@@ -34,29 +34,37 @@ export function info(msg: string) {
   process.stderr.write(msg + "\n");
 }
 
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+function visibleLength(s: string): number {
+  return s.replace(ANSI_RE, "").length;
+}
+function padVisible(s: string, width: number): string {
+  return s + " ".repeat(Math.max(0, width - visibleLength(s)));
+}
+
 export function table(
   headers: string[],
   rows: string[][],
 ) {
   if (rows.length === 0) return;
 
-  const widths = headers.map((h) => h.length);
+  const widths = headers.map((h) => visibleLength(h));
   for (const row of rows) {
     for (let i = 0; i < row.length; i++) {
       if (i < widths.length) {
-        widths[i] = Math.max(widths[i], (row[i] || "").length);
+        widths[i] = Math.max(widths[i], visibleLength(row[i] || ""));
       }
     }
   }
 
   const header = headers
-    .map((h, i) => h.toUpperCase().padEnd(widths[i]))
+    .map((h, i) => padVisible(h.toUpperCase(), widths[i]))
     .join("  ");
   console.log(chalk.dim(header));
 
   for (const row of rows) {
     const line = headers
-      .map((_, i) => (row[i] || "").padEnd(widths[i]))
+      .map((_, i) => padVisible(row[i] || "", widths[i]))
       .join("  ");
     console.log(line);
   }
