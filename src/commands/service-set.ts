@@ -45,8 +45,6 @@ export function registerServiceSet(svc: Command) {
       [] as string[],
     )
     .option("-f, --file <path>", "JSON config file to apply")
-    .option("-m, --message <text>", "Commit message for the changes")
-    .option("--stage", "Stage changes without committing")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (serviceArg: string | undefined, opts) => {
       const projectId = await resolveProjectId(opts.project);
@@ -92,15 +90,11 @@ export function registerServiceSet(svc: Command) {
           revision: result?.revision,
           services: result?.services,
           addons: result?.addons,
-          message: opts.message,
         });
         return;
       }
 
-      success(
-        `Service configuration applied` +
-          (opts.message ? chalk.dim(` (${opts.message})`) : ""),
-      );
+      success(`Service configuration applied`);
     });
 }
 
