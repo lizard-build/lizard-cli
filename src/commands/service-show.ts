@@ -17,13 +17,15 @@ export function registerServiceShow(svc: Command) {
   svc
     .command("show")
     .description("Show the current service configuration as JSON")
+    .argument("[service]", "Service name or ID (omit for whole project)")
     .option("-s, --service <name>", "Limit output to one service")
     .option("-p, --project <id>", "Project name or ID")
-    .action(async (opts) => {
+    .action(async (serviceArg: string | undefined, opts) => {
       const projectId = await resolveProjectId(opts.project);
 
-      if (opts.service) {
-        const svcInfo = await resolveService(projectId, opts.service);
+      const ref = serviceArg || opts.service;
+      if (ref) {
+        const svcInfo = await resolveService(projectId, ref);
         const detail = await api
           .get<unknown>(`/api/apps/${svcInfo.id}/config`)
           .catch((err: any) => {

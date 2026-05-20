@@ -15,14 +15,15 @@ export function registerScale(program: Command) {
   program
     .command("scale")
     .description("Scale a service (replicas / CPU / memory)")
+    .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
     .option("--replicas <n>", "Number of replicas", parseIntOption)
     .option("--cpu <cores>", "CPU cap (cores, supports decimals)", parseFloatOption)
     .option("--memory <mb>", "Memory cap (MB)", parseIntOption)
-    .action(async (opts, _cmd) => {
+    .action(async (serviceArg: string | undefined, opts, _cmd) => {
       const projectId = await resolveProjectId(opts.project);
-      const service = await getActiveService(opts.service, projectId);
+      const service = await getActiveService(serviceArg || opts.service, projectId);
 
       if (opts.replicas === undefined && opts.cpu === undefined && opts.memory === undefined) {
         throw new Error("Pass at least one of: --replicas, --cpu, --memory.");

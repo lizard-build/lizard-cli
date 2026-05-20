@@ -65,11 +65,12 @@ export function registerService(program: Command) {
   svc
     .command("status")
     .description("Show status of the linked or specified service")
+    .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
-    .action(async (opts) => {
+    .action(async (serviceArg: string | undefined, opts) => {
       const projectId = await resolveProjectId(opts.project);
-      const target = opts.service || getProjectLink()?.serviceId;
+      const target = serviceArg || opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
 
@@ -97,12 +98,13 @@ export function registerService(program: Command) {
     .command("delete")
     .alias("rm")
     .description("Delete a service")
+    .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
     .option("-y, --yes", "Skip confirmation")
-    .action(async (opts) => {
+    .action(async (serviceArg: string | undefined, opts) => {
       const projectId = await resolveProjectId(opts.project);
-      const target = opts.service || getProjectLink()?.serviceId;
+      const target = serviceArg || opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
 
@@ -137,11 +139,12 @@ export function registerService(program: Command) {
   svc
     .command("redeploy")
     .description("Redeploy the latest build of a service")
+    .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
-    .action(async (opts) => {
+    .action(async (serviceArg: string | undefined, opts) => {
       const projectId = await resolveProjectId(opts.project);
-      const target = opts.service || getProjectLink()?.serviceId;
+      const target = serviceArg || opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
       await api.post(`/api/apps/${svcInfo.id}/redeploy`);
@@ -155,11 +158,12 @@ export function registerService(program: Command) {
   svc
     .command("restart")
     .description("Restart a service")
+    .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
-    .action(async (opts) => {
+    .action(async (serviceArg: string | undefined, opts) => {
       const projectId = await resolveProjectId(opts.project);
-      const target = opts.service || getProjectLink()?.serviceId;
+      const target = serviceArg || opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
       await api.post(`/api/apps/${svcInfo.id}/restart`);
@@ -173,13 +177,14 @@ export function registerService(program: Command) {
   svc
     .command("scale")
     .description("Scale a service across regions")
+    .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
     .option("--replicas <n>", "Number of replicas", parseIntOption)
     .option("--region <code>", "Region code")
-    .action(async (opts) => {
+    .action(async (serviceArg: string | undefined, opts) => {
       const projectId = await resolveProjectId(opts.project);
-      const target = opts.service || getProjectLink()?.serviceId;
+      const target = serviceArg || opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
 
@@ -243,14 +248,15 @@ export function registerService(program: Command) {
   svc
     .command("logs")
     .description("Stream logs of a service")
+    .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
     .option("--build", "Show build logs instead of runtime")
     .option("-n, --tail <n>", "Print last N lines and exit (no follow); use --tail all for full history")
     .option("--page <n>", "Page of historical logs (1=most recent, 2=older, …); implies --tail 200")
-    .action(async (opts) => {
+    .action(async (serviceArg: string | undefined, opts) => {
       const projectId = await resolveProjectId(opts.project);
-      const target = opts.service || getProjectLink()?.serviceId;
+      const target = serviceArg || opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
 

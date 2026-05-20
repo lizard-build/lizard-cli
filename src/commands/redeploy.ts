@@ -13,14 +13,16 @@ export function registerRedeploy(program: Command) {
     .argument("[nameOrId]", "App name or ID to redeploy")
     .description("Trigger a fresh build (latest commit / last upload) with current vars")
     .option("--detach", "Run in background")
+    .option("-s, --service <name>", "App name or ID (alias for positional)")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (nameOrId: string | undefined, opts) => {
+      const ref = nameOrId || opts.service;
       let id: string | undefined;
-      if (nameOrId) {
+      if (ref) {
         const projectId = await resolveProjectId(opts.project);
-        const resolved = await resolveService(projectId, nameOrId);
+        const resolved = await resolveService(projectId, ref);
         if (resolved.kind !== "app") {
-          throw new Error(`"${nameOrId}" is not an app`);
+          throw new Error(`"${ref}" is not an app`);
         }
         id = resolved.id;
       } else {

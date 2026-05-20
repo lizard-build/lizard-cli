@@ -45,11 +45,12 @@ export function registerServiceSet(svc: Command) {
       [] as string[],
     )
     .option("-f, --file <path>", "JSON config file to apply")
+    .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (serviceArg: string | undefined, opts) => {
       const projectId = await resolveProjectId(opts.project);
 
-      const patch = await buildPatch(serviceArg, opts, projectId);
+      const patch = await buildPatch(serviceArg || opts.service, opts, projectId);
       if (!patch || isEmpty(patch)) {
         if (isJSONMode()) {
           printJSON({ staged: false, committed: false, message: "No changes" });
@@ -212,7 +213,7 @@ async function buildPatch(
   // 1. <service> --set <path>=<value> (repeatable)
   if (opts.set?.length) {
     if (!serviceArg) {
-      throw new Error("Service name is required when using --set. Usage: lizard service set <service> --set <path>=<value>");
+      throw new Error("Service name is required when using --set. Usage: lizard service set <service> --set <path>=<value>  (or -s <service>)");
     }
     if (opts.file) {
       throw new Error("Cannot combine --set with --file. Use one input mode.");
