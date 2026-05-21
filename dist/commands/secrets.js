@@ -15,6 +15,7 @@ async function resolveScope(projectFlag, serviceFlag, global) {
             label: "service",
             projectId,
             serviceId: svc.id,
+            serviceName: svc.name,
         };
     }
     const link = getProjectLink();
@@ -26,22 +27,14 @@ async function resolveScope(projectFlag, serviceFlag, global) {
         label: "service",
         projectId,
         serviceId: link.serviceId,
+        serviceName: link.serviceName || link.serviceId,
     };
 }
-/**
- * Apply secrets. Values are stored verbatim — including ${{name.KEY}} templates.
- * The platform's deployer expands templates against the project context at
- * deploy time. No client-side resolver needed.
- *
- * Merges with existing values; only keys in `newSecrets` are touched.
- */
-async function applySecrets(scope, newSecrets, noRedeploy) {
-    const existing = await api.get(scope.path);
-    const map = new Map(existing.map((s) => [s.key, s.value]));
-    for (const [k, v] of Object.entries(newSecrets))
-        map.set(k, v);
-    const merged = Array.from(map.entries()).map(([key, value]) => ({ key, value }));
-    await api.put(scope.path, { secrets: merged, noRedeploy });
+async function configApplySecrets(scope, secrets) {
+    const payload = scope.label === "project"
+        ? { secrets: { shared: secrets } }
+        : { secrets: { services: { [scope.serviceName]: secrets } } };
+    await api.post(`/api/projects/${scope.projectId}/config:apply`, payload);
 }
 function parsePairs(pairs) {
     const out = {};
@@ -130,7 +123,7 @@ export function registerSecrets(program) {
         const inherited = sub.parent?.opts() || {};
         const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global || inherited.global);
         const newSecrets = parsePairs(pairs);
-        await applySecrets(scope, newSecrets, opts.redeploy === false);
+        await configApplySecrets(scope, newSecrets);
         if (isJSONMode()) {
             printJSON({ updated: Object.keys(newSecrets), scope: scope.label });
         }
@@ -149,15 +142,14 @@ export function registerSecrets(program) {
         const inherited = sub.parent?.opts() || {};
         const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global || inherited.global);
         const existing = await api.get(scope.path);
-        const set = new Set(keys);
-        const filtered = existing.filter((s) => !set.has(s.key));
-        if (filtered.length === existing.length) {
-            throw new Error(`Secret(s) not found: ${keys.join(", ")}`);
+        const existingKeys = new Set(existing.map((s) => s.key));
+        const notFound = keys.filter((k) => !existingKeys.has(k));
+        if (notFound.length > 0) {
+            throw new Error(`Secret(s) not found: ${notFound.join(", ")}`);
         }
-        await api.put(scope.path, {
-            secrets: filtered,
-            noRedeploy: opts.redeploy === false,
-        });
+        const deletePayload = {};
+        keys.forEach((k) => { deletePayload[k] = null; });
+        await configApplySecrets(scope, deletePayload);
         if (isJSONMode()) {
             printJSON({ deleted: keys, scope: scope.label });
         }
@@ -190,15 +182,7 @@ export function registerSecrets(program) {
         if (!Object.keys(newSecrets).length) {
             throw new Error("No valid KEY=value pairs in input");
         }
-        const existing = await api.get(scope.path);
-        const map = new Map(existing.map((s) => [s.key, s.value]));
-        for (const [k, v] of Object.entries(newSecrets))
-            map.set(k, v);
-        const merged = Array.from(map.entries()).map(([key, value]) => ({ key, value }));
-        await api.put(scope.path, {
-            secrets: merged,
-            noRedeploy: opts.redeploy === false,
-        });
+        await configApplySecrets(scope, newSecrets);
         if (isJSONMode()) {
             printJSON({ imported: Object.keys(newSecrets), scope: scope.label });
         }
