@@ -18,6 +18,17 @@ export declare function getActiveService(serviceFlag: string | undefined, projec
     name: string;
 }>;
 /**
+ * Same as `getActiveService`, but also returns whether the target is an app
+ * or an addon. Costs one extra `/services` lookup when the service is taken
+ * from the cwd link (which otherwise resolves locally), so use this only when
+ * the caller branches on kind (e.g. `lizard scale`).
+ */
+export declare function getActiveServiceWithKind(serviceFlag: string | undefined, projectId: string): Promise<{
+    id: string;
+    name: string;
+    kind: "app" | "addon";
+}>;
+/**
  * Resolve an environment within a project. Match by ID or name. If the API
  * does not have environments yet, returns null silently.
  */

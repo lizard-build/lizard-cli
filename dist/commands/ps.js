@@ -38,25 +38,6 @@ export function registerPs(program) {
                 statusColor(a.status),
                 a.hostname ? chalk.dim(a.hostname) : chalk.dim("—"),
             ]));
-            const withConn = addons.filter((a) => a.connection && (a.connection.internalUrl || a.connection.externalUrl || a.connection.endpoint));
-            if (withConn.length > 0) {
-                for (const a of withConn) {
-                    console.log();
-                    console.log(`  ${chalk.bold(a.name || a.type)} ${chalk.dim(`(${a.type})`)}`);
-                    const c = a.connection;
-                    if (c.internalUrl) {
-                        console.log(`    ${chalk.dim("private:")} ${chalk.cyan(c.internalUrl)}`);
-                    }
-                    if (c.externalUrl) {
-                        console.log(`    ${chalk.dim("public: ")} ${chalk.cyan(c.externalUrl)}`);
-                    }
-                    if (c.endpoint) {
-                        console.log(`    ${chalk.dim("endpoint:")} ${chalk.cyan(c.endpoint)}`);
-                        if (c.accessKeyId)
-                            console.log(`    ${chalk.dim("key:     ")} ${chalk.dim(c.accessKeyId)}`);
-                    }
-                }
-            }
         }
     });
 }

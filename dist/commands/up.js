@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import { api, streamSSE, getBaseURL } from "../lib/api.js";
-import { updateProjectLink, DEFAULT_REGION } from "../lib/config.js";
+import { updateProjectLink } from "../lib/config.js";
 import { resolveContext } from "../lib/resolve.js";
 import { ensureLinked } from "./init.js";
 import { success, info, error, isJSONMode, printJSON, statusColor, } from "../lib/format.js";
@@ -34,7 +34,7 @@ export function registerUp(program) {
         const merged = cmd.optsWithGlobals();
         const serviceFlag = merged.service ?? opts.service;
         const projectFlag = merged.project;
-        const region = merged.region ?? DEFAULT_REGION;
+        const region = merged.region ?? undefined;
         // Run init flow if cwd isn't linked yet
         await ensureLinked({ projectName: projectFlag });
         // Resolve target service: --service flag → linked → first-in-project → prompt-or-fail
@@ -109,7 +109,8 @@ async function deployFromLocal(args) {
             qs.set("port", String(resolvedPort));
         if (!args.existingServiceId) {
             qs.set("name", appName);
-            qs.set("region", args.region);
+            if (args.region)
+                qs.set("region", args.region);
             // New services with no detected port default to 3000
             if (resolvedPort === undefined)
                 qs.set("port", "3000");

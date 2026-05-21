@@ -8,7 +8,7 @@ export function registerLogs(program) {
         .command("logs")
         .description("Stream runtime logs")
         .option("--build", "Show build logs instead of runtime")
-        .option("--service <id>", "Only show logs for a specific service")
+        .option("-s, --service <id>", "Only show logs for a specific service")
         .option("-p, --project <id>", "Project name or ID")
         .option("--tail <n>", "Print last N log lines and exit (no follow)")
         .action(async (opts) => {

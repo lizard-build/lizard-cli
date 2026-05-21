@@ -11,14 +11,16 @@ export function registerRestart(program) {
         .argument("[nameOrId]", "App name or ID to restart")
         .description("Restart an app")
         .option("--detach", "Run in background")
+        .option("-s, --service <name>", "App name or ID (alias for positional)")
         .option("-p, --project <id>", "Project name or ID")
         .action(async (nameOrId, opts) => {
+        const ref = nameOrId || opts.service;
         let id;
-        if (nameOrId) {
+        if (ref) {
             const projectId = await resolveProjectId(opts.project);
-            const resolved = await resolveService(projectId, nameOrId);
+            const resolved = await resolveService(projectId, ref);
             if (resolved.kind !== "app") {
-                throw new Error(`"${nameOrId}" is not an app`);
+                throw new Error(`"${ref}" is not an app`);
             }
             id = resolved.id;
         }

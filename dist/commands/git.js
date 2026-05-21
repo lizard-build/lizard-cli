@@ -1,9 +1,10 @@
 import chalk from "chalk";
 import ora from "ora";
 import * as readline from "node:readline";
-import { api, getBaseURL } from "../lib/api.js";
+import { api, getBaseURL, streamSSE } from "../lib/api.js";
 import { openURL } from "../lib/auth.js";
 import { resolveProjectId } from "../lib/config.js";
+import { resolveService } from "../lib/resolve.js";
 import { success, error, info, isJSONMode, printJSON } from "../lib/format.js";
 export function registerGit(program) {
     const git = program
@@ -42,6 +43,79 @@ export function registerGit(program) {
         else {
             error("GitHub App not detected. Please try again or connect via the dashboard.");
             process.exit(1);
+        }
+    });
+    // lizard git checkout <service> <branch> — switch branch and redeploy
+    git
+        .command("checkout")
+        .description("Switch a service to a different branch and redeploy")
+        .argument("<service>", "Service name (as shown in the project)")
+        .argument("<branch>", "Branch name to switch to")
+        .option("--detach", "Start redeploy and exit without streaming logs")
+        .option("-p, --project <id>", "Project name or ID")
+        .action(async (serviceArg, branch, opts) => {
+        const projectId = await resolveProjectId(opts.project);
+        // Resolve service by name
+        const svc = await resolveService(projectId, serviceArg);
+        if (svc.kind !== "app")
+            throw new Error(`"${serviceArg}" is not an app`);
+        const serviceId = svc.id;
+        const serviceName = svc.name ?? serviceArg;
+        // Patch the branch
+        const spinner = ora(`Switching ${chalk.bold(serviceName)} to branch ${chalk.cyan(branch)}...`).start();
+        await api.post(`/api/projects/${projectId}/config:apply`, {
+            services: [{ name: serviceName, branch }],
+        });
+        spinner.succeed(`Branch set to ${chalk.cyan(branch)}`);
+        // Trigger redeploy
+        const deploySpinner = ora("Starting redeploy...").start();
+        await api.post(`/api/apps/${serviceId}/redeploy`);
+        deploySpinner.stop();
+        if (opts.detach || isJSONMode()) {
+            if (isJSONMode())
+                printJSON({ id: serviceId, branch, status: "deploying" });
+            else
+                success(`Redeploy started on branch ${chalk.cyan(branch)}`);
+            return;
+        }
+        info(`Redeploying ${chalk.bold(serviceName)} on ${chalk.cyan(branch)}...`);
+        // Wait for build to appear
+        let buildId = null;
+        for (let i = 0; i < 30; i++) {
+            await new Promise((r) => setTimeout(r, 2000));
+            try {
+                const app = await api.get(`/api/apps/${serviceId}`);
+                const latest = app.builds?.[0];
+                if (latest && ["building", "deploying", "running", "failed"].includes(latest.status)) {
+                    buildId = latest.id;
+                    break;
+                }
+            }
+            catch { }
+        }
+        if (buildId) {
+            await streamSSE(`/api/builds/${buildId}/logs`, (event, data) => {
+                if (event === "done" || event === "error") {
+                    if (event === "error")
+                        error(`Build failed: ${data}`);
+                    return false;
+                }
+                try {
+                    const parsed = JSON.parse(data);
+                    process.stdout.write((typeof parsed === "string" ? parsed : (parsed.line ?? data)) + "\n");
+                }
+                catch {
+                    process.stdout.write(data + "\n");
+                }
+                return true;
+            });
+        }
+        const app = await api.get(`/api/apps/${serviceId}`);
+        if (app.status === "running") {
+            success(`Deployed! ${app.domain ? chalk.cyan(`https://${app.domain}`) : ""}`);
+        }
+        else {
+            error("Deploy failed");
         }
     });
     // lizard git status

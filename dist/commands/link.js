@@ -12,11 +12,12 @@ export function registerLink(program) {
     program
         .command("link")
         .description("Associate the current directory with an existing project")
+        .argument("[service]", "Service name or ID (optional)")
         .option("-p, --project <id>", "Project name or ID")
         .option("-s, --service <name>", "Service name or ID (optional)")
-        .action(async (opts) => {
+        .action(async (serviceArg, opts) => {
         const projectFlag = opts.project;
-        const serviceFlag = opts.service;
+        const serviceFlag = serviceArg || opts.service;
         // 1. Project
         const projects = await api.get("/api/projects");
         if (projects.length === 0) {

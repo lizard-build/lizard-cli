@@ -1,4 +1,4 @@
-export declare const DEFAULT_REGION = "us-east";
+export declare const DEFAULT_REGION = "us-east-1";
 export interface Credentials {
     accessToken: string;
     refreshToken?: string;

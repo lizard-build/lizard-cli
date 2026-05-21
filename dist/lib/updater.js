@@ -3,7 +3,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-export const CURRENT_VERSION = "0.2.55";
+export const CURRENT_VERSION = "0.2.71";
 const RELEASES_API = "https://api.github.com/repos/lizard-build/lizard-cli/releases/latest";
 const RELEASE_BASE = "https://github.com/lizard-build/lizard-cli/releases/latest/download";
 function getBinaryName() {
@@ -25,13 +25,18 @@ export async function getLatestVersion() {
             headers: { "User-Agent": "lizard-cli" },
             signal: AbortSignal.timeout(5000),
         });
+        if (res.status === 403 && res.headers.get("x-ratelimit-remaining") === "0") {
+            const reset = Number(res.headers.get("x-ratelimit-reset"));
+            return { kind: "rate-limited", resetAt: Number.isFinite(reset) ? reset : 0 };
+        }
         if (!res.ok)
-            return null;
-        const data = await res.json();
-        return data.tag_name?.replace(/^v/, "") ?? null;
+            return { kind: "error" };
+        const data = (await res.json());
+        const version = data.tag_name?.replace(/^v/, "");
+        return version ? { kind: "ok", version } : { kind: "error" };
     }
     catch {
-        return null;
+        return { kind: "error" };
     }
 }
 export async function selfUpdate(onProgress) {
@@ -55,24 +60,38 @@ export async function selfUpdate(onProgress) {
     renameSync(tmp, currentBin);
     return true;
 }
-/** Run silently in background — checks for update and prints a notice after command finishes. */
+/** Check for a newer version and auto-install it in the background.
+ *  Prints a one-line notice on exit — either "Updated to vX.Y.Z" or nothing on failure.
+ *  Never blocks or crashes the current command. */
 export function checkForUpdateInBackground() {
-    // Only check in TTY, not in CI or piped output
+    // Only auto-update in TTY; skip CI / piped output
     if (!process.stdout.isTTY)
         return;
-    const promise = getLatestVersion().then((latest) => {
-        if (!latest || latest === CURRENT_VERSION)
+    let updateMessage = null;
+    const promise = getLatestVersion().then(async (r) => {
+        if (r.kind !== "ok")
             return;
-        // Compare semver simply
+        const latest = r.version;
+        if (latest === CURRENT_VERSION)
+            return;
         const [maj, min, pat] = latest.split(".").map(Number);
         const [cmaj, cmin, cpat] = CURRENT_VERSION.split(".").map(Number);
         const isNewer = maj > cmaj || (maj === cmaj && min > cmin) || (maj === cmaj && min === cmin && pat > cpat);
         if (!isNewer)
             return;
-        process.on("exit", () => {
-            process.stderr.write(`\n  Update available: v${CURRENT_VERSION} → v${latest}\n  Run: lizard update\n\n`);
-        });
+        try {
+            const ok = await selfUpdate();
+            if (ok)
+                updateMessage = `\n  lizard updated v${CURRENT_VERSION} → v${latest}\n`;
+        }
+        catch {
+            // silent — don't interrupt the current command
+        }
     }).catch(() => { });
+    process.on("exit", () => {
+        if (updateMessage)
+            process.stderr.write(updateMessage);
+    });
     // Don't block process exit
     if (typeof promise.unref === "function")
         promise.unref();

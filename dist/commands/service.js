@@ -46,11 +46,12 @@ export function registerService(program) {
     svc
         .command("status")
         .description("Show status of the linked or specified service")
+        .argument("[service]", "Service name or ID (defaults to linked)")
         .option("-s, --service <name>", "Service name or ID")
         .option("-p, --project <id>", "Project name or ID")
-        .action(async (opts) => {
+        .action(async (serviceArg, opts) => {
         const projectId = await resolveProjectId(opts.project);
-        const target = opts.service || getProjectLink()?.serviceId;
+        const target = serviceArg || opts.service || getProjectLink()?.serviceId;
         if (!target)
             throw new Error("No service specified or linked.");
         const svcInfo = await resolveService(projectId, target);
@@ -75,12 +76,13 @@ export function registerService(program) {
         .command("delete")
         .alias("rm")
         .description("Delete a service")
+        .argument("[service]", "Service name or ID (defaults to linked)")
         .option("-s, --service <name>", "Service name or ID")
         .option("-p, --project <id>", "Project name or ID")
         .option("-y, --yes", "Skip confirmation")
-        .action(async (opts) => {
+        .action(async (serviceArg, opts) => {
         const projectId = await resolveProjectId(opts.project);
-        const target = opts.service || getProjectLink()?.serviceId;
+        const target = serviceArg || opts.service || getProjectLink()?.serviceId;
         if (!target)
             throw new Error("No service specified or linked.");
         const svcInfo = await resolveService(projectId, target);
@@ -115,11 +117,12 @@ export function registerService(program) {
     svc
         .command("redeploy")
         .description("Redeploy the latest build of a service")
+        .argument("[service]", "Service name or ID (defaults to linked)")
         .option("-s, --service <name>", "Service name or ID")
         .option("-p, --project <id>", "Project name or ID")
-        .action(async (opts) => {
+        .action(async (serviceArg, opts) => {
         const projectId = await resolveProjectId(opts.project);
-        const target = opts.service || getProjectLink()?.serviceId;
+        const target = serviceArg || opts.service || getProjectLink()?.serviceId;
         if (!target)
             throw new Error("No service specified or linked.");
         const svcInfo = await resolveService(projectId, target);
@@ -134,11 +137,12 @@ export function registerService(program) {
     svc
         .command("restart")
         .description("Restart a service")
+        .argument("[service]", "Service name or ID (defaults to linked)")
         .option("-s, --service <name>", "Service name or ID")
         .option("-p, --project <id>", "Project name or ID")
-        .action(async (opts) => {
+        .action(async (serviceArg, opts) => {
         const projectId = await resolveProjectId(opts.project);
-        const target = opts.service || getProjectLink()?.serviceId;
+        const target = serviceArg || opts.service || getProjectLink()?.serviceId;
         if (!target)
             throw new Error("No service specified or linked.");
         const svcInfo = await resolveService(projectId, target);
@@ -153,13 +157,14 @@ export function registerService(program) {
     svc
         .command("scale")
         .description("Scale a service across regions")
+        .argument("[service]", "Service name or ID (defaults to linked)")
         .option("-s, --service <name>", "Service name or ID")
         .option("-p, --project <id>", "Project name or ID")
         .option("--replicas <n>", "Number of replicas", parseIntOption)
         .option("--region <code>", "Region code")
-        .action(async (opts) => {
+        .action(async (serviceArg, opts) => {
         const projectId = await resolveProjectId(opts.project);
-        const target = opts.service || getProjectLink()?.serviceId;
+        const target = serviceArg || opts.service || getProjectLink()?.serviceId;
         if (!target)
             throw new Error("No service specified or linked.");
         const svcInfo = await resolveService(projectId, target);
@@ -220,12 +225,15 @@ export function registerService(program) {
     svc
         .command("logs")
         .description("Stream logs of a service")
+        .argument("[service]", "Service name or ID (defaults to linked)")
         .option("-s, --service <name>", "Service name or ID")
         .option("-p, --project <id>", "Project name or ID")
         .option("--build", "Show build logs instead of runtime")
-        .action(async (opts) => {
+        .option("-n, --tail <n>", "Print last N lines and exit (no follow); use --tail all for full history")
+        .option("--page <n>", "Page of historical logs (1=most recent, 2=older, …); implies --tail 200")
+        .action(async (serviceArg, opts) => {
         const projectId = await resolveProjectId(opts.project);
-        const target = opts.service || getProjectLink()?.serviceId;
+        const target = serviceArg || opts.service || getProjectLink()?.serviceId;
         if (!target)
             throw new Error("No service specified or linked.");
         const svcInfo = await resolveService(projectId, target);
@@ -243,8 +251,52 @@ export function registerService(program) {
             });
             return;
         }
+        // --page: paginate through historical logs without streaming
+        if (opts.page !== undefined) {
+            const pageSize = 200;
+            const pageNum = Math.max(1, parseInt(opts.page, 10) || 1);
+            // Fetch pages iteratively: page 1 = most recent, page 2 = one step older, etc.
+            let before;
+            for (let p = 1; p <= pageNum; p++) {
+                const params = new URLSearchParams({ limit: String(pageSize) });
+                if (before)
+                    params.set("before", before);
+                const result = await api.get(`/api/apps/${svcInfo.id}/logs/history?${params}`);
+                if (p === pageNum) {
+                    if (!result.entries.length) {
+                        info(chalk.dim("No more logs."));
+                    }
+                    else {
+                        info(chalk.dim(`Page ${pageNum} (${result.entries.length} lines):\n`));
+                        for (const e of result.entries)
+                            process.stdout.write(safeLogLine(JSON.stringify(e)) + "\n");
+                        if (result.oldest)
+                            info(chalk.dim(`\n  --page ${pageNum + 1}  for older logs`));
+                    }
+                }
+                else {
+                    if (!result.entries.length || !result.entries[0])
+                        break;
+                    before = result.entries[0].id; // oldest entry of this page → upper bound for next
+                }
+            }
+            return;
+        }
+        // --tail N: fetch N historical lines and exit (no follow)
+        if (opts.tail !== undefined) {
+            const rawTail = String(opts.tail);
+            const limit = rawTail === "all" ? 2000 : Math.min(Math.max(1, parseInt(rawTail, 10) || 200), 2000);
+            const params = new URLSearchParams({ limit: String(limit) });
+            const result = await api.get(`/api/apps/${svcInfo.id}/logs/history?${params}`);
+            for (const e of result.entries)
+                process.stdout.write(safeLogLine(JSON.stringify(e)) + "\n");
+            if (result.oldest && result.entries.length === limit) {
+                info(chalk.dim(`\n  Showing last ${limit} lines. Use --tail all or --page 2 to see older logs.`));
+            }
+            return;
+        }
         info(chalk.dim(`Streaming logs for ${svcInfo.name}... (Ctrl+C to stop)\n`));
-        await streamSSE(`/api/apps/${svcInfo.id}/logs`, (event, data) => {
+        await streamSSE(`/api/apps/${svcInfo.id}/logs?limit=500`, (event, data) => {
             if (event === "error")
                 return false;
             process.stdout.write(safeLogLine(data) + "\n");

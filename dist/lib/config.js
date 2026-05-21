@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-export const DEFAULT_REGION = "us-east";
+export const DEFAULT_REGION = "us-east-1";
 const CONFIG_DIR = path.join(os.homedir(), ".lizard");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 export function loadConfig() {

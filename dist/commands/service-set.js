@@ -36,12 +36,11 @@ export function registerServiceSet(svc) {
         .argument("[service]", "Service name or ID (required when using --set)")
         .option("--set <pair>", "Set a field: <path>=<value>. Repeatable.", (val, prev) => [...prev, val], [])
         .option("-f, --file <path>", "JSON config file to apply")
-        .option("-m, --message <text>", "Commit message for the changes")
-        .option("--stage", "Stage changes without committing")
+        .option("-s, --service <name>", "Service name or ID")
         .option("-p, --project <id>", "Project name or ID")
         .action(async (serviceArg, opts) => {
         const projectId = await resolveProjectId(opts.project);
-        const patch = await buildPatch(serviceArg, opts, projectId);
+        const patch = await buildPatch(serviceArg || opts.service, opts, projectId);
         if (!patch || isEmpty(patch)) {
             if (isJSONMode()) {
                 printJSON({ staged: false, committed: false, message: "No changes" });
@@ -74,12 +73,10 @@ export function registerServiceSet(svc) {
                 revision: result?.revision,
                 services: result?.services,
                 addons: result?.addons,
-                message: opts.message,
             });
             return;
         }
-        success(`Service configuration applied` +
-            (opts.message ? chalk.dim(` (${opts.message})`) : ""));
+        success(`Service configuration applied`);
     });
 }
 /**
@@ -179,7 +176,7 @@ async function buildPatch(serviceArg, opts, projectId) {
     // 1. <service> --set <path>=<value> (repeatable)
     if (opts.set?.length) {
         if (!serviceArg) {
-            throw new Error("Service name is required when using --set. Usage: lizard service set <service> --set <path>=<value>");
+            throw new Error("Service name is required when using --set. Usage: lizard service set <service> --set <path>=<value>  (or -s <service>)");
         }
         if (opts.file) {
             throw new Error("Cannot combine --set with --file. Use one input mode.");
@@ -314,6 +311,7 @@ async function interactivePatch(projectId) {
                 { value: "build.dockerfilePath", label: "Dockerfile path" },
                 { value: "deploy.healthcheckPath", label: "Healthcheck path" },
                 { value: "deploy.restartPolicyType", label: "Restart policy" },
+                { value: "source.branch", label: "Branch" },
                 { value: "source.rootDirectory", label: "Root directory" },
                 { value: "source.repoUrl", label: "GitHub repo" },
             ],
