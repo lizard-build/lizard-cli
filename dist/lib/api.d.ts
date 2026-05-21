@@ -10,7 +10,7 @@ export declare function isNotFound(err: unknown): boolean;
 export declare function isAuthError(err: unknown): boolean;
 export declare const api: {
     get: <T = any>(path: string) => Promise<T>;
-    post: <T = any>(path: string, body?: unknown) => Promise<T>;
+    post: <T = any>(path: string, body?: unknown, headers?: Record<string, string>) => Promise<T>;
     put: <T = any>(path: string, body?: unknown) => Promise<T>;
     patch: <T = any>(path: string, body?: unknown) => Promise<T>;
     delete: <T = any>(path: string) => Promise<T>;

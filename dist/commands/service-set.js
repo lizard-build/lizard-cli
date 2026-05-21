@@ -38,6 +38,7 @@ export function registerServiceSet(svc) {
         .option("-f, --file <path>", "JSON config file to apply")
         .option("-s, --service <name>", "Service name or ID")
         .option("-p, --project <id>", "Project name or ID")
+        .option("--force", "Overwrite even if the config was changed remotely")
         .action(async (serviceArg, opts) => {
         const projectId = await resolveProjectId(opts.project);
         const patch = await buildPatch(serviceArg || opts.service, opts, projectId);
@@ -51,7 +52,7 @@ export function registerServiceSet(svc) {
             return;
         }
         // The backend `/api/projects/:id/config:apply` schema expects:
-        //   { services: [{ name, buildCommand?, startCommand?, ... }],
+        //   { services: [{ id, name, buildCommand?, startCommand?, ... }],
         //     addons:   [...],
         //     secrets:  { shared?, services? } }
         // The internal `patch.services` we built is keyed by service id with a
@@ -60,10 +61,16 @@ export function registerServiceSet(svc) {
         const result = await api
             .post(`/api/projects/${projectId}/config:apply`, body)
             .catch((err) => {
-            if (err?.status === 404) {
-                throw new Error("Config-apply endpoint not yet implemented. The API needs " +
-                    "`POST /api/projects/{id}/config:apply` with body { services, addons, secrets }, " +
-                    "or `PATCH /api/apps/{id}` per service.");
+            if (err?.status === 409) {
+                throw new Error(`${err.message}\nUse --force to overwrite.`);
+            }
+            if (err?.status === 400) {
+                const msg = err.message ?? String(err);
+                const svcName = msg.match(/Service not found: (\S+)/)?.[1];
+                if (svcName) {
+                    throw new Error(`Service '${svcName}' not found in project. To create it, use 'lizard up --service ${svcName}'.`);
+                }
+                throw new Error(msg);
             }
             throw err;
         });
@@ -106,7 +113,7 @@ async function flattenPatch(patch, projectId) {
         if (!name) {
             throw new Error(`Service ${id} no longer exists in the project.`);
         }
-        const flat = { name };
+        const flat = { id, name };
         // Source group
         if (cfg.source?.repoUrl !== undefined)
             flat.repoUrl = cfg.source.repoUrl;

@@ -23,11 +23,12 @@ export function isNotFound(err) {
 export function isAuthError(err) {
     return err instanceof APIError && (err.status === 401 || err.status === 403);
 }
-async function request(method, path, body) {
+async function request(method, path, body, extraHeaders = {}) {
     const url = baseURL + path;
     const token = _accessToken || getToken();
     const headers = {
         "User-Agent": USER_AGENT,
+        ...extraHeaders,
     };
     if (token) {
         headers["Authorization"] = `Bearer ${token}`;
@@ -58,7 +59,7 @@ async function request(method, path, body) {
 }
 export const api = {
     get: (path) => request("GET", path),
-    post: (path, body) => request("POST", path, body),
+    post: (path, body, headers) => request("POST", path, body, headers),
     put: (path, body) => request("PUT", path, body),
     patch: (path, body) => request("PATCH", path, body),
     delete: (path) => request("DELETE", path),
