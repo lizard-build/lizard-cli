@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { Command } from "commander";
+import { Command, Option } from "commander";
 import { api } from "../lib/api.js";
 import { getProjectLink, resolveProjectId } from "../lib/config.js";
 import { getActiveService } from "../lib/resolve.js";
@@ -90,15 +90,16 @@ export function registerSecrets(program: Command) {
     .description("Manage secrets (default scope: service; use --global for project)")
     .option("--global", "Target the whole project")
     .option("--show", "Reveal values")
-    .option("--refs", "List reference templates available in this scope")
+    .option("--ref", "List reference templates available in this scope")
+    .addOption(new Option("--refs").hideHelp().implies({ ref: true }))
     .option("--no-redeploy", "Don't trigger redeploy on set/delete")
     .option("-s, --service <name>", "Service to scope to (overrides linked)")
     .option("-p, --project <id>", "Project to scope to")
     .action(async (opts) => {
       const scope = await resolveScope(opts.project, opts.service, opts.global);
 
-      // --refs → list reference templates exposed by the platform
-      if (opts.refs) {
+      // --ref → list reference templates exposed by the platform
+      if (opts.ref) {
         await printRefs(scope);
         return;
       }
@@ -137,7 +138,8 @@ export function registerSecrets(program: Command) {
     .description("List secrets")
     .option("--global", "Target the whole project")
     .option("--show", "Reveal values")
-    .option("--refs", "List reference templates available in this scope")
+    .option("--ref", "List reference templates available in this scope")
+    .addOption(new Option("--refs").hideHelp().implies({ ref: true }))
     .action(async (opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
@@ -146,7 +148,7 @@ export function registerSecrets(program: Command) {
         opts.global || inherited.global,
       );
 
-      if (opts.refs) {
+      if (opts.ref) {
         await printRefs(scope);
         return;
       }
