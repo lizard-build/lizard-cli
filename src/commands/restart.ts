@@ -51,7 +51,7 @@ export function registerRestart(program: Command) {
       }
 
       const spinner = ora("Starting restart...").start();
-      await api.post(`/api/apps/${id}/restart`);
+      await api.post(`/api/apps/${id}/restart`, undefined, { "X-Deploy-Source": "cli" });
       spinner.stop();
 
       if (opts.detach || isJSONMode()) {

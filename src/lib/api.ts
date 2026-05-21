@@ -34,12 +34,14 @@ async function request<T = any>(
   method: string,
   path: string,
   body?: unknown,
+  extraHeaders: Record<string, string> = {},
 ): Promise<T> {
   const url = baseURL + path;
   const token = _accessToken || getToken();
 
   const headers: Record<string, string> = {
     "User-Agent": USER_AGENT,
+    ...extraHeaders,
   };
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
@@ -72,8 +74,8 @@ async function request<T = any>(
 
 export const api = {
   get: <T = any>(path: string) => request<T>("GET", path),
-  post: <T = any>(path: string, body?: unknown) =>
-    request<T>("POST", path, body),
+  post: <T = any>(path: string, body?: unknown, headers?: Record<string, string>) =>
+    request<T>("POST", path, body, headers),
   put: <T = any>(path: string, body?: unknown) =>
     request<T>("PUT", path, body),
   patch: <T = any>(path: string, body?: unknown) =>
