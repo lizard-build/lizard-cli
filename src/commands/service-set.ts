@@ -68,6 +68,21 @@ export function registerServiceSet(svc: Command) {
       // The internal `patch.services` we built is keyed by service id with a
       // nested {build,deploy,source,variables} layout — flatten it before send.
       const body = await flattenPatch(patch, projectId);
+
+      // Fetch current configRevision for CAS — skipped when --force is set.
+      if (!opts.force) {
+        try {
+          const proj = await api.get<{ configRevision?: number | null }>(
+            `/api/projects/${projectId}`,
+          );
+          if (proj?.configRevision != null) {
+            (body as any).revision = proj.configRevision;
+          }
+        } catch {
+          // Non-fatal — proceed without CAS if project fetch fails
+        }
+      }
+
       const result = await api
         .post<{
           ok?: boolean;
