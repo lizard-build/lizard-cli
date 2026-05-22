@@ -3,7 +3,7 @@ import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-export const CURRENT_VERSION = "0.2.73";
+export const CURRENT_VERSION = "0.2.77";
 const RELEASES_API = "https://api.github.com/repos/lizard-build/lizard-cli/releases/latest";
 const RELEASE_BASE = "https://github.com/lizard-build/lizard-cli/releases/latest/download";
 function getBinaryName() {
@@ -80,9 +80,10 @@ export function checkForUpdateInBackground() {
         if (!isNewer)
             return;
         try {
+            process.stderr.write(`\n  Updating lizard v${CURRENT_VERSION} → v${latest}...\n`);
             const ok = await selfUpdate();
             if (ok)
-                updateMessage = `\n  lizard updated v${CURRENT_VERSION} → v${latest}\n`;
+                updateMessage = `  lizard updated to v${latest} — restart for the new version\n`;
         }
         catch {
             // silent — don't interrupt the current command
