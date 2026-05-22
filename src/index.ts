@@ -24,6 +24,7 @@ const BANNER = chalk.rgb(16, 185, 129)(
 
 // Commands (alphabetical by command name)
 import { registerAdd } from "./commands/add.js";
+import { registerConfig } from "./commands/config.js";
 import { registerDocs } from "./commands/docs.js";
 import { registerDomain } from "./commands/domain.js";
 import { registerDown } from "./commands/down.js";
@@ -102,6 +103,7 @@ program
 
 // Register all commands (alphabetical)
 registerAdd(program);
+registerConfig(program);
 registerDocs(program);
 registerDomain(program);
 registerDown(program);
