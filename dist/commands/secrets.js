@@ -1,22 +1,28 @@
 import chalk from "chalk";
 import { Option } from "commander";
-import { api } from "../lib/api.js";
-import { getProjectLink, resolveProjectId } from "../lib/config.js";
-import { getActiveService } from "../lib/resolve.js";
+import { api, withScope } from "../lib/api.js";
+import { getProjectLink } from "../lib/config.js";
+import { getActiveService, resolveProjectScope } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON, table } from "../lib/format.js";
 async function resolveScope(projectFlag, serviceFlag, global) {
-    const projectId = await resolveProjectId(projectFlag);
+    const { projectId, scope: rs } = await resolveProjectScope(projectFlag);
     if (global) {
-        return { path: `/api/projects/${projectId}/secrets`, label: "project", projectId };
+        return {
+            path: withScope(`/api/projects/${projectId}/secrets`, rs),
+            label: "project",
+            projectId,
+            scope: rs,
+        };
     }
     if (serviceFlag) {
         const svc = await getActiveService(serviceFlag, projectId);
         return {
-            path: `/api/apps/${svc.id}/secrets`,
+            path: withScope(`/api/apps/${svc.id}/secrets`, rs),
             label: "service",
             projectId,
             serviceId: svc.id,
             serviceName: svc.name,
+            scope: rs,
         };
     }
     const link = getProjectLink();
@@ -24,18 +30,19 @@ async function resolveScope(projectFlag, serviceFlag, global) {
         throw new Error("No service linked. Pass --service <name>, run `lizard service link <name>`, or use --global.");
     }
     return {
-        path: `/api/apps/${link.serviceId}/secrets`,
+        path: withScope(`/api/apps/${link.serviceId}/secrets`, rs),
         label: "service",
         projectId,
         serviceId: link.serviceId,
         serviceName: link.serviceName || link.serviceId,
+        scope: rs,
     };
 }
 async function configApplySecrets(scope, secrets) {
     const payload = scope.label === "project"
         ? { secrets: { shared: secrets } }
         : { secrets: { services: { [scope.serviceName]: secrets } } };
-    await api.post(`/api/projects/${scope.projectId}/config:apply`, payload);
+    await api.post(withScope(`/api/projects/${scope.projectId}/config:apply`, scope.scope), payload);
 }
 function parsePairs(pairs) {
     const out = {};
@@ -205,8 +212,8 @@ export function registerSecrets(program) {
  */
 async function printRefs(scope) {
     const endpoint = scope.label === "service" && scope.serviceId
-        ? `/api/apps/${scope.serviceId}/variables:refs`
-        : `/api/projects/${scope.projectId}/variables:refs`;
+        ? withScope(`/api/apps/${scope.serviceId}/variables:refs`, scope.scope)
+        : withScope(`/api/projects/${scope.projectId}/variables:refs`, scope.scope);
     const refs = await api.get(endpoint);
     if (isJSONMode()) {
         printJSON(refs);

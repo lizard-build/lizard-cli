@@ -1,9 +1,8 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
 import * as fs from "node:fs";
-import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
-import { resolveService } from "../lib/resolve.js";
+import { api, withScope } from "../lib/api.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { success, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
 /**
  * `lizard service set` — atomic patch of per-service configuration.
@@ -40,8 +39,8 @@ export function registerServiceSet(svc) {
         .option("-p, --project <id>", "Project name or ID")
         .option("--force", "Overwrite even if the config was changed remotely")
         .action(async (serviceArg, opts) => {
-        const projectId = await resolveProjectId(opts.project);
-        const patch = await buildPatch(serviceArg || opts.service, opts, projectId);
+        const { projectId, scope } = await resolveProjectScope(opts.project);
+        const patch = await buildPatch(serviceArg || opts.service, opts, projectId, scope);
         if (!patch || isEmpty(patch)) {
             if (isJSONMode()) {
                 printJSON({ staged: false, committed: false, message: "No changes" });
@@ -57,11 +56,11 @@ export function registerServiceSet(svc) {
         //     secrets:  { shared?, services? } }
         // The internal `patch.services` we built is keyed by service id with a
         // nested {build,deploy,source,variables} layout — flatten it before send.
-        const body = await flattenPatch(patch, projectId);
+        const body = await flattenPatch(patch, projectId, scope);
         // Fetch current configRevision for CAS — skipped when --force is set.
         if (!opts.force) {
             try {
-                const proj = await api.get(`/api/projects/${projectId}`);
+                const proj = await api.get(withScope(`/api/projects/${projectId}`, scope));
                 if (proj?.configRevision != null) {
                     body.revision = proj.configRevision;
                 }
@@ -71,7 +70,7 @@ export function registerServiceSet(svc) {
             }
         }
         const result = await api
-            .post(`/api/projects/${projectId}/config:apply`, body)
+            .post(withScope(`/api/projects/${projectId}/config:apply`, scope), body)
             .catch((err) => {
             if (err?.status === 409) {
                 throw new Error(`${err.message}\nUse --force to overwrite.`);
@@ -106,7 +105,7 @@ export function registerServiceSet(svc) {
  * Dot-path mapping: build.X / deploy.X / source.X all collapse to the matching
  * top-level field on the service. `variables.<KEY>.value` becomes envVars[KEY].
  */
-async function flattenPatch(patch, projectId) {
+async function flattenPatch(patch, projectId, scope) {
     const out = { services: [] };
     if (!patch || typeof patch !== "object")
         return out;
@@ -115,7 +114,7 @@ async function flattenPatch(patch, projectId) {
     // Need each service's name (server keys upserts by name, not id)
     let nameById = new Map();
     if (idsInPatch.length > 0) {
-        const data = await api.get(`/api/projects/${projectId}/services`);
+        const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
         const all = [...(data.apps || []), ...(data.addons || [])];
         nameById = new Map(all.map((s) => [s.id, s.name]));
     }
@@ -191,7 +190,7 @@ async function flattenPatch(patch, projectId) {
     return out;
 }
 // ── input handling ──────────────────────────────────────────────────────────
-async function buildPatch(serviceArg, opts, projectId) {
+async function buildPatch(serviceArg, opts, projectId, scope) {
     // 1. <service> --set <path>=<value> (repeatable)
     if (opts.set?.length) {
         if (!serviceArg) {
@@ -220,7 +219,7 @@ async function buildPatch(serviceArg, opts, projectId) {
     }
     // 4. Interactive
     if (isTTY()) {
-        return await interactivePatch(projectId);
+        return await interactivePatch(projectId, scope);
     }
     return null;
 }
@@ -300,8 +299,8 @@ async function setPairsToPatch(serviceRef, pairs, projectId) {
     return { services: { [svc.id]: cfg } };
 }
 /** Interactive prompt loop. Pick service → pick field → enter value. */
-async function interactivePatch(projectId) {
-    const data = await api.get(`/api/projects/${projectId}/services`);
+async function interactivePatch(projectId, scope) {
+    const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
     const services = [...(data.apps || []), ...(data.addons || [])];
     if (services.length === 0) {
         throw new Error("No services in project. Use `lizard add` first.");

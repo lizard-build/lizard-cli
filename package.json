@@ -1,6 +1,6 @@
 {
   "name": "@lizard-build/cli",
-  "version": "0.2.80",
+  "version": "0.3.0",
   "description": "Lizard CLI — deploy and manage apps on Lizard",
   "type": "module",
   "bin": {
@@ -10,7 +10,8 @@
     "dev": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "vitest run test/cli.test.ts"
+    "test": "vitest run test/cli.test.ts",
+    "test:unit": "vitest run test/unit"
   },
   "keywords": [
     "cli",

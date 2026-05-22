@@ -1,8 +1,8 @@
 import chalk from "chalk";
 import { Command, Option } from "commander";
-import { api } from "../lib/api.js";
-import { getProjectLink, resolveProjectId } from "../lib/config.js";
-import { getActiveService } from "../lib/resolve.js";
+import { api, withScope, type ResourceScope } from "../lib/api.js";
+import { getProjectLink } from "../lib/config.js";
+import { getActiveService, resolveProjectScope } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON, table } from "../lib/format.js";
 
 interface Secret {
@@ -23,6 +23,7 @@ interface Scope {
   projectId: string;
   serviceId?: string;
   serviceName?: string;
+  scope: ResourceScope;
 }
 
 async function resolveScope(
@@ -30,20 +31,26 @@ async function resolveScope(
   serviceFlag: string | undefined,
   global: boolean,
 ): Promise<Scope> {
-  const projectId = await resolveProjectId(projectFlag);
+  const { projectId, scope: rs } = await resolveProjectScope(projectFlag);
 
   if (global) {
-    return { path: `/api/projects/${projectId}/secrets`, label: "project", projectId };
+    return {
+      path: withScope(`/api/projects/${projectId}/secrets`, rs),
+      label: "project",
+      projectId,
+      scope: rs,
+    };
   }
 
   if (serviceFlag) {
     const svc = await getActiveService(serviceFlag, projectId);
     return {
-      path: `/api/apps/${svc.id}/secrets`,
+      path: withScope(`/api/apps/${svc.id}/secrets`, rs),
       label: "service",
       projectId,
       serviceId: svc.id,
       serviceName: svc.name,
+      scope: rs,
     };
   }
 
@@ -54,11 +61,12 @@ async function resolveScope(
     );
   }
   return {
-    path: `/api/apps/${link.serviceId}/secrets`,
+    path: withScope(`/api/apps/${link.serviceId}/secrets`, rs),
     label: "service",
     projectId,
     serviceId: link.serviceId,
     serviceName: link.serviceName || link.serviceId,
+    scope: rs,
   };
 }
 
@@ -70,7 +78,10 @@ async function configApplySecrets(
     scope.label === "project"
       ? { secrets: { shared: secrets } }
       : { secrets: { services: { [scope.serviceName!]: secrets } } };
-  await api.post(`/api/projects/${scope.projectId}/config:apply`, payload);
+  await api.post(
+    withScope(`/api/projects/${scope.projectId}/config:apply`, scope.scope),
+    payload,
+  );
 }
 
 function parsePairs(pairs: string[]): Record<string, string> {
@@ -292,8 +303,8 @@ interface VarRef {
 async function printRefs(scope: Scope): Promise<void> {
   const endpoint =
     scope.label === "service" && scope.serviceId
-      ? `/api/apps/${scope.serviceId}/variables:refs`
-      : `/api/projects/${scope.projectId}/variables:refs`;
+      ? withScope(`/api/apps/${scope.serviceId}/variables:refs`, scope.scope)
+      : withScope(`/api/projects/${scope.projectId}/variables:refs`, scope.scope);
 
   const refs = await api.get<VarRef[]>(endpoint);
 

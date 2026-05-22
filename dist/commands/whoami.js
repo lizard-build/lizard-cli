@@ -5,12 +5,17 @@ import { isJSONMode, printJSON } from "../lib/format.js";
 export function registerWhoami(program) {
     program
         .command("whoami")
-        .description("Show current user and linked project")
+        .description("Show current user, active workspace, and linked project")
         .action(async () => {
         const user = await api.get("/api/auth/me");
         const link = getProjectLink();
         const project = link
-            ? { id: link.projectId, name: link.projectName }
+            ? {
+                id: link.projectId,
+                name: link.projectName,
+                workspaceId: link.workspaceId ?? null,
+                workspaceName: link.workspaceName ?? null,
+            }
             : null;
         if (isJSONMode()) {
             printJSON({ ...user, project });
@@ -20,9 +25,13 @@ export function registerWhoami(program) {
         if (user.hasGithubApp) {
             console.log(chalk.dim("GitHub App: connected"));
         }
+        if (user.activeWorkspaceName) {
+            console.log(chalk.dim("Workspace: ") + user.activeWorkspaceName);
+        }
         if (project) {
             const label = project.name || project.id;
-            console.log(chalk.dim("Project: ") + label + chalk.dim(" (linked here)"));
+            const wsTag = project.workspaceName ? chalk.dim(` (${project.workspaceName})`) : "";
+            console.log(chalk.dim("Project: ") + label + wsTag + chalk.dim(" (linked here)"));
         }
         else {
             console.log(chalk.dim("Project: none — run `lizard init` in a project directory"));

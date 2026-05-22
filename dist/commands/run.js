@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
-import { api } from "../lib/api.js";
-import { resolveProjectId, getProjectLink } from "../lib/config.js";
-import { resolveService } from "../lib/resolve.js";
+import { api, withScope } from "../lib/api.js";
+import { getProjectLink } from "../lib/config.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 /**
  * `lizard run <command...>` — run a local command with platform secrets in
  * the environment. Project-scope secrets are loaded first, then the linked
@@ -21,10 +21,10 @@ export function registerRun(program) {
         .option("-p, --project <id>", "Project ID (defaults to linked)")
         .allowUnknownOption()
         .action(async (args, opts) => {
-        const projectId = await resolveProjectId(opts.project);
+        const { projectId, scope } = await resolveProjectScope(opts.project);
         const env = { ...process.env };
         // 1. project secrets
-        const projectSecrets = await api.get(`/api/projects/${projectId}/secrets`);
+        const projectSecrets = await api.get(withScope(`/api/projects/${projectId}/secrets`, scope));
         for (const s of projectSecrets)
             env[s.key] = s.value;
         // 2. service / addon secrets (override project)
@@ -33,8 +33,8 @@ export function registerRun(program) {
             if (serviceRef) {
                 const svc = await resolveService(projectId, serviceRef);
                 const path = svc.kind === "app"
-                    ? `/api/apps/${svc.id}/secrets`
-                    : `/api/projects/${projectId}/addons/${svc.id}/secrets`;
+                    ? withScope(`/api/apps/${svc.id}/secrets`, scope)
+                    : withScope(`/api/projects/${projectId}/addons/${svc.id}/secrets`, scope);
                 const serviceSecrets = await api.get(path).catch((err) => {
                     if (err?.status === 404) {
                         if (svc.kind === "addon") {

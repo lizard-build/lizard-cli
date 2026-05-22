@@ -12,6 +12,49 @@ export function setBaseURL(url: string) { baseURL = url; }
 export function getBaseURL() { return baseURL; }
 export function setAccessToken(token: string) { _accessToken = token; }
 
+// ── Scoping ───────────────────────────────────────────────────────────
+//
+// Every project-scoped endpoint takes `?workspaceId=…&environment=…` —
+// mirrors lizard-client's `withScope` so server-side state is shared
+// across CLI and browser. Build URLs through these helpers, never by hand.
+
+export interface ResourceScope {
+  workspaceId?: string | null;
+  environmentName?: string | null;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  slug: string;
+  role: "owner" | "member";
+  isPersonal?: boolean;
+  projectCount?: number;
+  createdAt?: number;
+}
+
+export function withQuery(
+  path: string,
+  params: Record<string, string | number | boolean | null | undefined>,
+): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined || value === "") continue;
+    search.set(key, String(value));
+  }
+  const query = search.toString();
+  if (!query) return path;
+  return `${path}${path.includes("?") ? "&" : "?"}${query}`;
+}
+
+export function withScope(path: string, scope?: ResourceScope): string {
+  if (!scope) return path;
+  return withQuery(path, {
+    workspaceId: scope.workspaceId,
+    environment: scope.environmentName,
+  });
+}
+
 export class APIError extends Error {
   status: number;
   code: string;

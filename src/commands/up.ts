@@ -5,9 +5,9 @@ import { execSync, spawn } from "child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
-import { api, streamSSE, getBaseURL } from "../lib/api.js";
+import { api, streamSSE, getBaseURL, type ResourceScope } from "../lib/api.js";
 import { updateProjectLink, DEFAULT_REGION } from "../lib/config.js";
-import { resolveContext } from "../lib/resolve.js";
+import { resolveContext, getScope } from "../lib/resolve.js";
 import { ensureLinked } from "./init.js";
 import {
   success,
@@ -65,6 +65,7 @@ export function registerUp(program: Command) {
         serviceFlag,
       });
       const projectId = ctx.projectId;
+      const scope = getScope(ctx);
 
       const targetPath = pathArg ? path.resolve(pathArg) : process.cwd();
       const archiveRoot = opts.pathAsRoot ? targetPath : process.cwd();
@@ -73,6 +74,7 @@ export function registerUp(program: Command) {
       // build without re-uploading, use `lizard redeploy`.
       await deployFromLocal({
         projectId,
+        scope,
         targetPath,
         archiveRoot,
         useGitignore: opts.gitignore !== false,
@@ -109,6 +111,7 @@ export function registerUp(program: Command) {
 
 async function deployFromLocal(args: {
   projectId: string;
+  scope: ResourceScope;
   targetPath: string;
   buildCommand?: string;
   startCommand?: string;
@@ -160,6 +163,8 @@ async function deployFromLocal(args: {
     if (args.buildCommand) qs.set("buildCommand", args.buildCommand);
     if (args.startCommand) qs.set("startCommand", args.startCommand);
     if (args.preDeployCommand) qs.set("preDeployCommand", args.preDeployCommand);
+    if (args.scope.workspaceId) qs.set("workspaceId", args.scope.workspaceId);
+    if (args.scope.environmentName) qs.set("environment", args.scope.environmentName);
 
     const url = `${getBaseURL()}/api/projects/${args.projectId}/apps/upload?${qs.toString()}`;
     const res = await fetch(url, {

@@ -3,8 +3,8 @@ import path from "node:path";
 import chalk from "chalk";
 import ora from "ora";
 import { Command } from "commander";
-import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
+import { api, withScope } from "../lib/api.js";
+import { resolveProjectScope } from "../lib/resolve.js";
 import { success, error, isJSONMode, printJSON } from "../lib/format.js";
 
 export function registerConfig(program: Command) {
@@ -34,7 +34,7 @@ export function registerConfig(program: Command) {
         process.exit(1);
       }
 
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
 
       if (opts.dryRun) {
         printJSON({ dryRun: true, projectId, config });
@@ -44,7 +44,7 @@ export function registerConfig(program: Command) {
       const spinner = ora("Applying config...").start();
       try {
         const result = await api.post<{ services: any[]; addons: any[]; revision: number }>(
-          `/api/projects/${projectId}/config:apply`,
+          withScope(`/api/projects/${projectId}/config:apply`, scope),
           config,
         );
         spinner.stop();

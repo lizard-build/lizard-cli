@@ -1,7 +1,6 @@
 import { Command } from "commander";
-import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
-import { resolveService } from "../lib/resolve.js";
+import { api, withScope } from "../lib/api.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { printJSON } from "../lib/format.js";
 
 /**
@@ -21,13 +20,13 @@ export function registerServiceShow(svc: Command) {
     .option("-s, --service <name>", "Limit output to one service")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (serviceArg: string | undefined, opts) => {
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
 
       const ref = serviceArg || opts.service;
       if (ref) {
         const svcInfo = await resolveService(projectId, ref);
         const detail = await api
-          .get<unknown>(`/api/apps/${svcInfo.id}/config`)
+          .get<unknown>(withScope(`/api/apps/${svcInfo.id}/config`, scope))
           .catch((err: any) => {
             if (err?.status === 404) {
               throw new Error(
@@ -42,7 +41,7 @@ export function registerServiceShow(svc: Command) {
       }
 
       const config = await api
-        .get<unknown>(`/api/projects/${projectId}/config`)
+        .get<unknown>(withScope(`/api/projects/${projectId}/config`, scope))
         .catch((err: any) => {
           if (err?.status === 404) {
             throw new Error(

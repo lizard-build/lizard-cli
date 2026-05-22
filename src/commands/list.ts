@@ -1,7 +1,8 @@
 import chalk from "chalk";
 import { Command } from "commander";
-import { api } from "../lib/api.js";
+import { api, withQuery } from "../lib/api.js";
 import { isJSONMode, printJSON, table } from "../lib/format.js";
+import { resolveWorkspace } from "../lib/picker.js";
 
 interface Project {
   id: string;
@@ -9,6 +10,8 @@ interface Project {
   slug: string;
   role?: string;
   memberCount?: number;
+  workspaceId?: string | null;
+  workspaceName?: string | null;
   createdAt?: number;
 }
 
@@ -20,8 +23,15 @@ export function registerList(program: Command) {
     .command("list")
     .alias("ls")
     .description("List all projects")
-    .action(async () => {
-      const projects = await api.get<Project[]>("/api/projects");
+    .option("-w, --workspace <ws>", "Filter by workspace id, slug, or name")
+    .action(async (opts) => {
+      let workspaceId: string | undefined;
+      if (opts.workspace) {
+        workspaceId = (await resolveWorkspace(opts.workspace)).id;
+      }
+      const projects = await api.get<Project[]>(
+        withQuery("/api/projects", { workspaceId }),
+      );
 
       if (isJSONMode()) {
         printJSON(projects);
@@ -34,9 +44,10 @@ export function registerList(program: Command) {
       }
 
       table(
-        ["Name", "ID", "Role", "Members"],
+        ["Name", "Workspace", "ID", "Role", "Members"],
         projects.map((p) => [
           p.name,
+          p.workspaceName || chalk.dim("—"),
           p.id,
           p.role || "owner",
           String(p.memberCount || 1),
