@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
-import { api, getBaseURL } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
+import { api, getBaseURL, withScope } from "../lib/api.js";
+import { resolveProjectScope } from "../lib/resolve.js";
 import { error, isTTY } from "../lib/format.js";
 import { getToken } from "../lib/auth.js";
 import * as https from "node:https";
@@ -18,11 +18,11 @@ Examples:
   lizard ssh -s my-app -- printenv
   lizard ssh -s my-app -- bash -c "ps aux | head"`)
         .action(async (cmdArgs, opts) => {
-        const projectId = await resolveProjectId(opts.project);
+        const { projectId, scope } = await resolveProjectScope(opts.project);
         let serviceId = opts.service;
         // Resolve service interactively if not given
         if (!serviceId) {
-            const data = await api.get(`/api/projects/${projectId}/services`);
+            const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
             const running = (data.apps || []).filter((a) => a.status === "running");
             if (running.length === 0) {
                 error("No running services in this project.");
@@ -47,7 +47,7 @@ Examples:
         }
         // Resolve service ID if a name was given (lookup by name)
         if (serviceId && !serviceId.match(/^[A-Za-z0-9_-]{20,}$/)) {
-            const data = await api.get(`/api/projects/${projectId}/services`);
+            const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
             const match = (data.apps || []).find((a) => a.name === serviceId || a.serviceName === serviceId || a.id === serviceId);
             if (match)
                 serviceId = match.id;

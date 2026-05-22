@@ -1,12 +1,15 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
-import { api } from "../lib/api.js";
+import { api, withQuery, withScope } from "../lib/api.js";
 import { setProjectLink } from "../lib/config.js";
 import { isJSONMode, printJSON, isTTY, success } from "../lib/format.js";
+import { fetchWorkspaces, pickWorkspace } from "../lib/picker.js";
 /**
  * `lizard link` — associates the current directory with an existing
  * project + environment + (optional) service. Each piece can be passed
  * via flags or selected interactively.
+ *
+ * Order matches Railway's wizard: workspace → project → environment → service.
  */
 export function registerLink(program) {
     program
@@ -14,23 +17,32 @@ export function registerLink(program) {
         .description("Associate the current directory with an existing project")
         .argument("[service]", "Service name or ID (optional)")
         .option("-p, --project <id>", "Project name or ID")
+        .option("-w, --workspace <ws>", "Workspace id, slug, or name")
         .option("-s, --service <name>", "Service name or ID (optional)")
         .action(async (serviceArg, opts) => {
         const projectFlag = opts.project;
         const serviceFlag = serviceArg || opts.service;
-        // 1. Project
-        const projects = await api.get("/api/projects");
+        // 1. Workspace
+        const workspaces = await fetchWorkspaces();
+        const workspace = await pickWorkspace({
+            flag: opts.workspace,
+            projectNameHint: projectFlag,
+            workspaces,
+        });
+        // 2. Project (within workspace)
+        const projects = await api.get(withQuery("/api/projects", { workspaceId: workspace.id }));
         if (projects.length === 0) {
-            throw new Error("No projects available. Run `lizard init` to create one.");
+            throw new Error(`No projects in ${workspace.name}. Run \`lizard init\` to create one.`);
         }
         let project;
         if (projectFlag) {
             const lower = projectFlag.toLowerCase();
-            const match = projects.find((p) => p.id.toLowerCase() === lower ||
-                p.slug?.toLowerCase() === lower ||
-                p.name.toLowerCase() === lower);
-            if (!match)
-                throw new Error(`Project "${projectFlag}" not found`);
+            const match = projects.find((pr) => pr.id.toLowerCase() === lower ||
+                pr.slug?.toLowerCase() === lower ||
+                pr.name.toLowerCase() === lower);
+            if (!match) {
+                throw new Error(`Project "${projectFlag}" not found in ${workspace.name}. Available: ${projects.map((pr) => pr.name).join(", ")}`);
+            }
             project = match;
         }
         else if (projects.length === 1) {
@@ -40,17 +52,20 @@ export function registerLink(program) {
             if (!isTTY())
                 throw new Error("--project required in non-interactive mode");
             const sel = await p.select({
-                message: "Select a project",
-                options: projects.map((p) => ({ value: p.id, label: p.name, hint: p.id })),
+                message: `Select a project in ${workspace.name}`,
+                options: projects.map((pr) => ({ value: pr.id, label: pr.name, hint: pr.id })),
             });
             if (p.isCancel(sel))
                 process.exit(5);
             project = projects.find((pr) => pr.id === sel);
         }
-        // 2. Environment (optional — silently skip if API has no envs)
+        // 3. Environment (optional — silently skip if API has no envs)
         let environment = null;
         try {
-            const envs = await api.get(`/api/projects/${project.id}/environments`);
+            const envs = await api.get(withScope(`/api/projects/${project.id}/environments`, {
+                workspaceId: workspace.id,
+                environmentName: null,
+            }));
             if (envs?.length) {
                 if (envs.length === 1) {
                     environment = envs[0];
@@ -72,9 +87,12 @@ export function registerLink(program) {
         catch {
             // API does not have environments yet — fine
         }
-        // 3. Service (optional)
+        // 4. Service (optional)
         const services = await api
-            .get(`/api/projects/${project.id}/services`)
+            .get(withQuery(`/api/projects/${project.id}/services`, {
+            workspaceId: workspace.id,
+            environment: environment?.name,
+        }))
             .catch(() => ({ apps: [], addons: [] }));
         const allServices = [
             ...(services.apps || []),
@@ -107,6 +125,8 @@ export function registerLink(program) {
         const link = {
             projectId: project.id,
             projectName: project.name,
+            workspaceId: workspace.id,
+            workspaceName: workspace.name,
             environmentId: environment?.id,
             environmentName: environment?.name,
             serviceId: service?.id,
@@ -117,6 +137,8 @@ export function registerLink(program) {
             printJSON({
                 projectId: link.projectId,
                 projectName: link.projectName,
+                workspaceId: link.workspaceId,
+                workspaceName: link.workspaceName,
                 environmentId: link.environmentId,
                 environmentName: link.environmentName,
                 serviceId: link.serviceId,
@@ -124,7 +146,8 @@ export function registerLink(program) {
             });
         }
         else {
-            success(`Linked to ${chalk.bold(project.name)}${service ? ` / ${chalk.bold(service.name)}` : ""}`);
+            const wsLabel = link.workspaceName ? chalk.dim(` (${link.workspaceName})`) : "";
+            success(`Linked to ${chalk.bold(project.name)}${service ? ` / ${chalk.bold(service.name)}` : ""}${wsLabel}`);
         }
     });
 }

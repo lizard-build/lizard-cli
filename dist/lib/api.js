@@ -8,6 +8,26 @@ let _accessToken = null;
 export function setBaseURL(url) { baseURL = url; }
 export function getBaseURL() { return baseURL; }
 export function setAccessToken(token) { _accessToken = token; }
+export function withQuery(path, params) {
+    const search = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+        if (value === null || value === undefined || value === "")
+            continue;
+        search.set(key, String(value));
+    }
+    const query = search.toString();
+    if (!query)
+        return path;
+    return `${path}${path.includes("?") ? "&" : "?"}${query}`;
+}
+export function withScope(path, scope) {
+    if (!scope)
+        return path;
+    return withQuery(path, {
+        workspaceId: scope.workspaceId,
+        environment: scope.environmentName,
+    });
+}
 export class APIError extends Error {
     status;
     code;

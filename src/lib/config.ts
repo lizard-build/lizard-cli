@@ -4,8 +4,17 @@ import os from "node:os";
 
 export const DEFAULT_REGION = "us-east-1";
 
-const CONFIG_DIR = path.join(os.homedir(), ".lizard");
-const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
+// Resolve at every call so tests (and exotic shells that mutate HOME) get a
+// fresh path. Cost is negligible — we hit disk anyway. LIZARD_HOME lets tests
+// (and power users) point the config dir somewhere other than ~/.lizard.
+function configDir(): string {
+  return process.env.LIZARD_HOME
+    ? path.join(process.env.LIZARD_HOME, ".lizard")
+    : path.join(os.homedir(), ".lizard");
+}
+function configFile(): string {
+  return path.join(configDir(), "config.json");
+}
 
 export interface Credentials {
   accessToken: string;
@@ -20,6 +29,9 @@ export interface Credentials {
 export interface ProjectLink {
   projectId: string;
   projectName?: string;
+  /** Workspace the project belongs to. Lazy-filled for legacy links. */
+  workspaceId?: string;
+  workspaceName?: string;
   /** Active environment for this cwd */
   environmentId?: string;
   environmentName?: string;
@@ -39,15 +51,15 @@ export interface Config {
 
 export function loadConfig(): Config {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8")) as Config;
+    return JSON.parse(fs.readFileSync(configFile(), "utf-8")) as Config;
   } catch {
     return {};
   }
 }
 
 export function saveConfig(config: Config) {
-  fs.mkdirSync(CONFIG_DIR, { recursive: true });
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), {
+  fs.mkdirSync(configDir(), { recursive: true });
+  fs.writeFileSync(configFile(), JSON.stringify(config, null, 2), {
     mode: 0o600,
   });
 }

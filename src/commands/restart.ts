@@ -2,9 +2,8 @@ import chalk from "chalk";
 import ora from "ora";
 import * as p from "@clack/prompts";
 import { Command } from "commander";
-import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
-import { resolveService } from "../lib/resolve.js";
+import { api, withScope } from "../lib/api.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { success, info, error, isJSONMode, printJSON, isTTY } from "../lib/format.js";
 
 export function registerRestart(program: Command) {
@@ -19,7 +18,7 @@ export function registerRestart(program: Command) {
       const ref = nameOrId || opts.service;
       let id: string | undefined;
       if (ref) {
-        const projectId = await resolveProjectId(opts.project);
+        const { projectId } = await resolveProjectScope(opts.project);
         const resolved = await resolveService(projectId, ref);
         if (resolved.kind !== "app") {
           throw new Error(`"${ref}" is not an app`);
@@ -28,8 +27,8 @@ export function registerRestart(program: Command) {
       } else {
         if (!isTTY()) throw new Error("Provide an app name or ID, or run interactively");
 
-        const projectId = await resolveProjectId(opts.project);
-        const data = await api.get<{ apps: any[] }>(`/api/projects/${projectId}/services`);
+        const { projectId, scope } = await resolveProjectScope(opts.project);
+        const data = await api.get<{ apps: any[] }>(withScope(`/api/projects/${projectId}/services`, scope));
         const apps = data.apps || [];
 
         if (apps.length === 0) throw new Error("No apps in project");

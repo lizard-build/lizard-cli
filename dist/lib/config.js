@@ -2,19 +2,28 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 export const DEFAULT_REGION = "us-east-1";
-const CONFIG_DIR = path.join(os.homedir(), ".lizard");
-const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
+// Resolve at every call so tests (and exotic shells that mutate HOME) get a
+// fresh path. Cost is negligible — we hit disk anyway. LIZARD_HOME lets tests
+// (and power users) point the config dir somewhere other than ~/.lizard.
+function configDir() {
+    return process.env.LIZARD_HOME
+        ? path.join(process.env.LIZARD_HOME, ".lizard")
+        : path.join(os.homedir(), ".lizard");
+}
+function configFile() {
+    return path.join(configDir(), "config.json");
+}
 export function loadConfig() {
     try {
-        return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
+        return JSON.parse(fs.readFileSync(configFile(), "utf-8"));
     }
     catch {
         return {};
     }
 }
 export function saveConfig(config) {
-    fs.mkdirSync(CONFIG_DIR, { recursive: true });
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), {
+    fs.mkdirSync(configDir(), { recursive: true });
+    fs.writeFileSync(configFile(), JSON.stringify(config, null, 2), {
         mode: 0o600,
     });
 }

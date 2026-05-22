@@ -1,6 +1,7 @@
 import chalk from "chalk";
-import { api } from "../lib/api.js";
+import { api, withQuery } from "../lib/api.js";
 import { success, isJSONMode, printJSON, table } from "../lib/format.js";
+import { pickWorkspace, resolveWorkspace } from "../lib/picker.js";
 export function registerProjects(program) {
     const proj = program
         .command("project")
@@ -8,8 +9,13 @@ export function registerProjects(program) {
     proj
         .command("list")
         .description("List all projects")
-        .action(async () => {
-        const projects = await api.get("/api/projects");
+        .option("-w, --workspace <ws>", "Filter by workspace id, slug, or name")
+        .action(async (opts) => {
+        let workspaceId;
+        if (opts.workspace) {
+            workspaceId = (await resolveWorkspace(opts.workspace)).id;
+        }
+        const projects = await api.get(withQuery("/api/projects", { workspaceId }));
         if (isJSONMode()) {
             printJSON(projects);
             return;
@@ -18,8 +24,9 @@ export function registerProjects(program) {
             console.log("No projects. Run `lizard init` to create one.");
             return;
         }
-        table(["Name", "ID", "Role", "Members"], projects.map((p) => [
+        table(["Name", "Workspace", "ID", "Role", "Members"], projects.map((p) => [
             p.name,
+            p.workspaceName || chalk.dim("—"),
             p.id,
             p.role || "owner",
             String(p.memberCount || 1),
@@ -29,13 +36,22 @@ export function registerProjects(program) {
         .command("create")
         .argument("<name>", "Project name")
         .description("Create a new project without linking it to this directory")
-        .action(async (name) => {
-        const project = await api.post("/api/projects", { name });
+        .option("-w, --workspace <ws>", "Workspace to create the project in")
+        .action(async (name, opts) => {
+        const workspace = await pickWorkspace({ flag: opts.workspace });
+        const project = await api.post("/api/projects", {
+            name,
+            workspaceId: workspace.id,
+        });
         if (isJSONMode()) {
-            printJSON(project);
+            printJSON({
+                ...project,
+                workspaceId: project.workspaceId ?? workspace.id,
+                workspaceName: project.workspaceName ?? workspace.name,
+            });
         }
         else {
-            success(`Project ${chalk.bold(project.name)} created`);
+            success(`Project ${chalk.bold(project.name)} created in ${chalk.bold(workspace.name)}`);
         }
     });
 }

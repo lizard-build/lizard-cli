@@ -6,7 +6,7 @@ import * as path from "node:path";
 import * as readline from "node:readline";
 import { api, streamSSE, getBaseURL } from "../lib/api.js";
 import { updateProjectLink } from "../lib/config.js";
-import { resolveContext } from "../lib/resolve.js";
+import { resolveContext, getScope } from "../lib/resolve.js";
 import { ensureLinked } from "./init.js";
 import { success, info, error, isJSONMode, printJSON, statusColor, } from "../lib/format.js";
 /**
@@ -43,12 +43,14 @@ export function registerUp(program) {
             serviceFlag,
         });
         const projectId = ctx.projectId;
+        const scope = getScope(ctx);
         const targetPath = pathArg ? path.resolve(pathArg) : process.cwd();
         const archiveRoot = opts.pathAsRoot ? targetPath : process.cwd();
         // `up` always uploads a local tarball. For redeploy of an existing
         // build without re-uploading, use `lizard redeploy`.
         await deployFromLocal({
             projectId,
+            scope,
             targetPath,
             archiveRoot,
             useGitignore: opts.gitignore !== false,
@@ -123,6 +125,10 @@ async function deployFromLocal(args) {
             qs.set("startCommand", args.startCommand);
         if (args.preDeployCommand)
             qs.set("preDeployCommand", args.preDeployCommand);
+        if (args.scope.workspaceId)
+            qs.set("workspaceId", args.scope.workspaceId);
+        if (args.scope.environmentName)
+            qs.set("environment", args.scope.environmentName);
         const url = `${getBaseURL()}/api/projects/${args.projectId}/apps/upload?${qs.toString()}`;
         const res = await fetch(url, {
             method: "POST",

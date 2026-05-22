@@ -1,10 +1,9 @@
 import chalk from "chalk";
 import ora from "ora";
 import * as readline from "node:readline";
-import { api, getBaseURL, streamSSE } from "../lib/api.js";
+import { api, getBaseURL, streamSSE, withScope } from "../lib/api.js";
 import { openURL } from "../lib/auth.js";
-import { resolveProjectId } from "../lib/config.js";
-import { resolveService } from "../lib/resolve.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { success, error, info, isJSONMode, printJSON } from "../lib/format.js";
 export function registerGit(program) {
     const git = program
@@ -54,7 +53,7 @@ export function registerGit(program) {
         .option("--detach", "Start redeploy and exit without streaming logs")
         .option("-p, --project <id>", "Project name or ID")
         .action(async (serviceArg, branch, opts) => {
-        const projectId = await resolveProjectId(opts.project);
+        const { projectId, scope } = await resolveProjectScope(opts.project);
         // Resolve service by name
         const svc = await resolveService(projectId, serviceArg);
         if (svc.kind !== "app")
@@ -63,13 +62,13 @@ export function registerGit(program) {
         const serviceName = svc.name ?? serviceArg;
         // Patch the branch
         const spinner = ora(`Switching ${chalk.bold(serviceName)} to branch ${chalk.cyan(branch)}...`).start();
-        await api.post(`/api/projects/${projectId}/config:apply`, {
+        await api.post(withScope(`/api/projects/${projectId}/config:apply`, scope), {
             services: [{ name: serviceName, branch }],
         });
         spinner.succeed(`Branch set to ${chalk.cyan(branch)}`);
         // Trigger redeploy
         const deploySpinner = ora("Starting redeploy...").start();
-        await api.post(`/api/apps/${serviceId}/redeploy`);
+        await api.post(withScope(`/api/apps/${serviceId}/redeploy`, scope));
         deploySpinner.stop();
         if (opts.detach || isJSONMode()) {
             if (isJSONMode())
@@ -124,10 +123,10 @@ export function registerGit(program) {
         .description("Show GitHub connection and repository status")
         .option("-p, --project <id>", "Project name or ID")
         .action(async (opts) => {
-        const projectId = await resolveProjectId(opts.project);
+        const { projectId, scope } = await resolveProjectScope(opts.project);
         const [githubStatus, services] = await Promise.all([
             api.get("/api/github/status"),
-            api.get(`/api/projects/${projectId}/services`),
+            api.get(withScope(`/api/projects/${projectId}/services`, scope)),
         ]);
         const appsWithRepo = (services.apps || []).filter((a) => a.repo || a.repoUrl);
         if (isJSONMode()) {
