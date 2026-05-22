@@ -9,9 +9,19 @@ import { resolveProjectId } from "../lib/config.js";
 import { resolveService } from "../lib/resolve.js";
 import { success, error, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
 
+interface GitHubInstallation {
+  id: number;
+  account: { login: string; type: string };
+  htmlUrl: string;
+  repoCount: number | null;
+  privateCount: number | null;
+}
+
 interface GitHubStatus {
   installed: boolean;
   installationId: number | null;
+  installations?: GitHubInstallation[];
+  error?: string;
 }
 
 export function registerGit(program: Command) {
@@ -154,6 +164,7 @@ export function registerGit(program: Command) {
           github: {
             installed: githubStatus.installed,
             installationId: githubStatus.installationId,
+            installations: githubStatus.installations ?? [],
           },
           apps: appsWithRepo.map((a: any) => ({
             name: a.name,
@@ -167,8 +178,20 @@ export function registerGit(program: Command) {
       // GitHub App status
       if (githubStatus.installed) {
         info(`GitHub App: ${chalk.green("connected")}`);
+        const installs = githubStatus.installations ?? [];
+        for (const inst of installs) {
+          const typeLabel = inst.account.type === "Organization" ? "org" : "user";
+          const repoLabel = inst.repoCount !== null
+            ? chalk.dim(`${inst.repoCount} repos${inst.privateCount ? `, ${inst.privateCount} private` : ""}`)
+            : "";
+          info(`  ${chalk.bold(inst.account.login)} ${chalk.dim(`(${typeLabel}, installation #${inst.id})`)}  ${repoLabel}`);
+          info(`  ${chalk.dim("Manage: " + inst.htmlUrl)}`);
+        }
       } else {
         info(`GitHub App: ${chalk.yellow("not connected")}  ${chalk.dim("→ run `lizard git connect`")}`);
+        if (githubStatus.error) {
+          info(chalk.dim(`  (${githubStatus.error})`));
+        }
       }
 
       // Connected repos
