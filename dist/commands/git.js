@@ -134,6 +134,7 @@ export function registerGit(program) {
                 github: {
                     installed: githubStatus.installed,
                     installationId: githubStatus.installationId,
+                    installations: githubStatus.installations ?? [],
                 },
                 apps: appsWithRepo.map((a) => ({
                     name: a.name,
@@ -146,9 +147,21 @@ export function registerGit(program) {
         // GitHub App status
         if (githubStatus.installed) {
             info(`GitHub App: ${chalk.green("connected")}`);
+            const installs = githubStatus.installations ?? [];
+            for (const inst of installs) {
+                const typeLabel = inst.account.type === "Organization" ? "org" : "user";
+                const repoLabel = inst.repoCount !== null
+                    ? chalk.dim(`${inst.repoCount} repos${inst.privateCount ? `, ${inst.privateCount} private` : ""}`)
+                    : "";
+                info(`  ${chalk.bold(inst.account.login)} ${chalk.dim(`(${typeLabel}, installation #${inst.id})`)}  ${repoLabel}`);
+                info(`  ${chalk.dim("Manage: " + inst.htmlUrl)}`);
+            }
         }
         else {
             info(`GitHub App: ${chalk.yellow("not connected")}  ${chalk.dim("→ run `lizard git connect`")}`);
+            if (githubStatus.error) {
+                info(chalk.dim(`  (${githubStatus.error})`));
+            }
         }
         // Connected repos
         if (appsWithRepo.length === 0) {
