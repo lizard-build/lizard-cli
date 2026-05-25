@@ -11,6 +11,9 @@ export interface Credentials {
 export interface ProjectLink {
     projectId: string;
     projectName?: string;
+    /** Workspace the project belongs to. Lazy-filled for legacy links. */
+    workspaceId?: string;
+    workspaceName?: string;
     /** Active environment for this cwd */
     environmentId?: string;
     environmentName?: string;

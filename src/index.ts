@@ -47,10 +47,12 @@ import { registerScale } from "./commands/scale.js";
 import { registerSecrets } from "./commands/secrets.js";
 import { registerService } from "./commands/service.js";
 import { registerSSH } from "./commands/ssh.js";
+import { registerStatus } from "./commands/status.js";
 import { registerUnlink } from "./commands/unlink.js";
 import { registerUp } from "./commands/up.js";
 import { registerUpgrade } from "./commands/upgrade.js";
 import { registerWhoami } from "./commands/whoami.js";
+import { registerWorkspace } from "./commands/workspace.js";
 
 const program = new Command();
 
@@ -66,7 +68,6 @@ program
     },
   })
   .option("--json", "Output in JSON format")
-  .option("-w, --workspace <id>", "Workspace name or ID")
   .option("--region <region>", "Region for creating services")
   .option("--token <token>", "API token")
   .hook("preAction", async (thisCommand, actionCommand) => {
@@ -92,8 +93,9 @@ program
       setBaseURL(process.env.LIZARD_API_URL);
     }
 
-    // Commands that don't need auth
-    const noAuth = new Set(["login", "logout", "upgrade", "help", "docs"]);
+    // Commands that don't need auth. `status` prints the local link; the
+    // optional workspace backfill silently no-ops when not authed.
+    const noAuth = new Set(["login", "logout", "upgrade", "help", "docs", "status"]);
     if (noAuth.has(actionCommand.name())) return;
 
     // Require auth — auto-triggers login flow if not logged in
@@ -126,10 +128,12 @@ registerScale(program);
 registerSecrets(program);
 registerService(program);
 registerSSH(program);
+registerStatus(program);
 registerUnlink(program);
 registerUp(program);
 registerUpgrade(program);
 registerWhoami(program);
+registerWorkspace(program);
 
 // Error handling
 program.exitOverride();

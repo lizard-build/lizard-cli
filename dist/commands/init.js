@@ -1,16 +1,24 @@
 import chalk from "chalk";
 import path from "node:path";
 import * as p from "@clack/prompts";
-import { api } from "../lib/api.js";
+import { api, withQuery } from "../lib/api.js";
 import { getProjectLink, setProjectLink, } from "../lib/config.js";
 import { success, info, isJSONMode, printJSON, isTTY, } from "../lib/format.js";
+import { fetchWorkspaces, pickWorkspace } from "../lib/picker.js";
 /**
  * Ensure the current directory is linked to a project. If already linked and
  * `force` is false, returns the existing link. Otherwise runs the
  * create-or-select flow.
  *
- * `projectName` (from --project) takes a name: matches an existing project by
- * name/slug or creates a new one with that name.
+ * Flow (mirrors Railway's `link` wizard):
+ *   1. Workspace — selected by --workspace, single workspace auto-pick,
+ *      or interactive select. Skipped when only one workspace exists.
+ *   2. Project — matched by --name within the workspace, picked from the
+ *      workspace's project list, or created.
+ *
+ * `projectName` (from --name / --project) is matched against existing
+ * projects inside the resolved workspace; if not found, a new project
+ * with that name is created in the resolved workspace.
  */
 export async function ensureLinked(opts = {}) {
     const existing = getProjectLink();
@@ -27,26 +35,39 @@ export async function ensureLinked(opts = {}) {
         if (p.isCancel(proceed) || !proceed)
             return existing;
     }
-    const projects = await api.get("/api/projects");
+    // 1. Workspace
+    const workspaces = await fetchWorkspaces();
+    const workspace = await pickWorkspace({
+        flag: opts.workspaceFlag,
+        projectNameHint: opts.projectName,
+        workspaces,
+    });
+    // 2. Project — pulled from the chosen workspace only
+    const projects = await api.get(withQuery("/api/projects", { workspaceId: workspace.id }));
     let project;
     if (opts.projectName) {
-        const match = projects.find((pr) => pr.name === opts.projectName ||
-            pr.slug === opts.projectName ||
-            pr.id === opts.projectName);
+        const lower = opts.projectName.toLowerCase();
+        const match = projects.find((pr) => pr.name.toLowerCase() === lower ||
+            pr.slug.toLowerCase() === lower ||
+            pr.id.toLowerCase() === lower);
         project =
             match ??
-                (await api.post("/api/projects", { name: opts.projectName }));
+                (await api.post("/api/projects", {
+                    name: opts.projectName,
+                    workspaceId: workspace.id,
+                }));
     }
     else if (!isTTY()) {
         project = await api.post("/api/projects", {
             name: path.basename(process.cwd()),
+            workspaceId: workspace.id,
         });
     }
     else {
         let action = "create";
         if (projects.length > 0) {
             const choice = await p.select({
-                message: "Link a project",
+                message: `Link a project in ${workspace.name}`,
                 options: [
                     { value: "create", label: "Create new project" },
                     { value: "select", label: "Select existing project" },
@@ -66,6 +87,7 @@ export async function ensureLinked(opts = {}) {
                 process.exit(5);
             project = await api.post("/api/projects", {
                 name: nameRes,
+                workspaceId: workspace.id,
             });
         }
         else {
@@ -85,6 +107,8 @@ export async function ensureLinked(opts = {}) {
     const link = {
         projectId: project.id,
         projectName: project.name,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
     };
     setProjectLink(link);
     return link;
@@ -95,19 +119,29 @@ export function registerInit(program) {
         .description("Create or select a project and link it to the current directory")
         .option("-n, --name <name>", "Project name (use existing or create if missing)")
         .option("--project <name>", "Alias for --name (kept for backwards compat)")
+        .option("-w, --workspace <ws>", "Workspace id, slug, or name")
         .option("--force", "Relink even if this directory is already linked")
         .action(async (opts) => {
         const projectName = opts.name || opts.project;
         const link = await ensureLinked({
             projectName,
+            workspaceFlag: opts.workspace,
             force: opts.force,
             relinkPrompt: true,
         });
         if (isJSONMode()) {
-            printJSON({ projectId: link.projectId, name: link.projectName });
+            printJSON({
+                projectId: link.projectId,
+                name: link.projectName,
+                workspaceId: link.workspaceId,
+                workspaceName: link.workspaceName,
+            });
         }
         else {
-            success(`Linked to ${chalk.bold(link.projectName || link.projectId)}`);
+            const wsLabel = link.workspaceName
+                ? chalk.dim(` (${link.workspaceName})`)
+                : "";
+            success(`Linked to ${chalk.bold(link.projectName || link.projectId)}${wsLabel}`);
             info(chalk.dim("  Saved to ~/.lizard/config.json"));
         }
     });

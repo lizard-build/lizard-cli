@@ -1,8 +1,7 @@
 import chalk from "chalk";
 import { Command } from "commander";
-import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
-import { getActiveServiceWithKind } from "../lib/resolve.js";
+import { api, withScope, type ResourceScope } from "../lib/api.js";
+import { getActiveServiceWithKind, resolveProjectScope } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON } from "../lib/format.js";
 
 // Discrete tiers the dashboard slider exposes (CPU_OPTIONS / MEMORY_OPTIONS in
@@ -36,7 +35,7 @@ export function registerScale(program: Command) {
     .option("--memory <mb>", `Memory cap in MB (allowed: ${ALLOWED_MEMORY_MB.join(", ")})`, parseIntOption)
     .option("--storage <mb>", `Data volume size in MB, addons only, grow-only (allowed: ${ALLOWED_STORAGE_MB.join(", ")})`, parseIntOption)
     .action(async (serviceArg: string | undefined, opts, _cmd) => {
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
       const service = await getActiveServiceWithKind(serviceArg || opts.service, projectId);
 
       if (
@@ -71,7 +70,7 @@ export function registerScale(program: Command) {
         if (opts.replicas !== undefined) {
           throw new Error("Addons run as a single VM and don't support --replicas.");
         }
-        return scaleAddon(projectId, service, opts.cpu, opts.memory, opts.storage);
+        return scaleAddon(projectId, scope, service, opts.cpu, opts.memory, opts.storage);
       }
 
       if (opts.storage !== undefined) {
@@ -92,9 +91,10 @@ export function registerScale(program: Command) {
         if (opts.cpu !== undefined) serviceEntry.cpuLimit = `${opts.cpu * 1000}m`;
         if (opts.memory !== undefined) serviceEntry.memoryLimit = mbToK8s(opts.memory);
         calls.push(
-          api.post<ConfigApplyResult>(`/api/projects/${projectId}/config:apply`, {
-            services: [serviceEntry],
-          }).then((r) => { configApplyResult = r; return r; }),
+          api.post<ConfigApplyResult>(
+            withScope(`/api/projects/${projectId}/config:apply`, scope),
+            { services: [serviceEntry] },
+          ).then((r) => { configApplyResult = r; return r; }),
         );
       }
 
@@ -141,6 +141,7 @@ function warnSideEffects(result: ConfigApplyResult): void {
 
 async function scaleAddon(
   projectId: string,
+  scope: ResourceScope,
   service: { id: string; name: string },
   cpu: number | undefined,
   memory: number | undefined,
@@ -150,7 +151,9 @@ async function scaleAddon(
   // grow-only check. cpu/memory go through config:apply which accepts partial
   // deltas, so no pre-fetch is needed for those axes.
   if (storageMb !== undefined) {
-    const addons = await api.get<AddonRecord[]>(`/api/projects/${projectId}/addons`);
+    const addons = await api.get<AddonRecord[]>(
+      withScope(`/api/projects/${projectId}/addons`, scope),
+    );
     const current = addons.find((a) => a.id === service.id);
     if (!current) throw new Error(`Addon "${service.name}" not found in project.`);
     const currentMb = current.config?.storageSize ? parseStorageToMb(current.config.storageSize) : 0;
@@ -174,9 +177,10 @@ async function scaleAddon(
     addonPatch.storageSize = mbToK8s(storageMb);
   }
 
-  const result = await api.post<ConfigApplyResult>(`/api/projects/${projectId}/config:apply`, {
-    addons: [addonPatch],
-  });
+  const result = await api.post<ConfigApplyResult>(
+    withScope(`/api/projects/${projectId}/config:apply`, scope),
+    { addons: [addonPatch] },
+  );
   warnSideEffects(result);
 
   if (isJSONMode()) {

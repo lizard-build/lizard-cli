@@ -3,10 +3,9 @@ import ora from "ora";
 import * as readline from "node:readline";
 import * as p from "@clack/prompts";
 import { Command } from "commander";
-import { api, getBaseURL, streamSSE } from "../lib/api.js";
+import { api, getBaseURL, streamSSE, withScope } from "../lib/api.js";
 import { openURL } from "../lib/auth.js";
-import { resolveProjectId } from "../lib/config.js";
-import { resolveService } from "../lib/resolve.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { success, error, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
 
 interface GitHubInstallation {
@@ -78,7 +77,7 @@ export function registerGit(program: Command) {
     .option("--detach", "Start redeploy and exit without streaming logs")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (serviceArg: string, branch: string, opts) => {
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
 
       // Resolve service by name
       const svc = await resolveService(projectId, serviceArg);
@@ -88,14 +87,14 @@ export function registerGit(program: Command) {
 
       // Patch the branch
       const spinner = ora(`Switching ${chalk.bold(serviceName)} to branch ${chalk.cyan(branch)}...`).start();
-      await api.post(`/api/projects/${projectId}/config:apply`, {
+      await api.post(withScope(`/api/projects/${projectId}/config:apply`, scope), {
         services: [{ name: serviceName, branch }],
       });
       spinner.succeed(`Branch set to ${chalk.cyan(branch)}`);
 
       // Trigger redeploy
       const deploySpinner = ora("Starting redeploy...").start();
-      await api.post(`/api/apps/${serviceId}/redeploy`);
+      await api.post(withScope(`/api/apps/${serviceId}/redeploy`, scope));
       deploySpinner.stop();
 
       if (opts.detach || isJSONMode()) {
@@ -150,11 +149,11 @@ export function registerGit(program: Command) {
     .description("Show GitHub connection and repository status")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (opts) => {
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
 
       const [githubStatus, services] = await Promise.all([
         api.get<GitHubStatus>("/api/github/status"),
-        api.get<{ apps: any[] }>(`/api/projects/${projectId}/services`),
+        api.get<{ apps: any[] }>(withScope(`/api/projects/${projectId}/services`, scope)),
       ]);
 
       const appsWithRepo = (services.apps || []).filter((a: any) => a.repo || a.repoUrl);

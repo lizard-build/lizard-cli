@@ -1,6 +1,7 @@
 import chalk from "chalk";
-import { api } from "../lib/api.js";
-import { getProjectLink, resolveProjectId } from "../lib/config.js";
+import { api, withScope } from "../lib/api.js";
+import { getProjectLink } from "../lib/config.js";
+import { resolveProjectScope } from "../lib/resolve.js";
 import { isJSONMode, printJSON, table, statusColor } from "../lib/format.js";
 export function registerPs(program) {
     program
@@ -8,8 +9,8 @@ export function registerPs(program) {
         .description("List all services in the project")
         .option("-p, --project <id>", "Project name or ID")
         .action(async (opts) => {
-        const projectId = await resolveProjectId(opts.project);
-        const data = await api.get(`/api/projects/${projectId}/services`);
+        const { projectId, scope } = await resolveProjectScope(opts.project);
+        const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
         if (isJSONMode()) {
             printJSON(data);
             return;

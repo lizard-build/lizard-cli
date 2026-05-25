@@ -1,9 +1,9 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { Command } from "commander";
-import { api } from "../lib/api.js";
-import { resolveProjectId, updateProjectLink, getProjectLink } from "../lib/config.js";
-import { resolveService } from "../lib/resolve.js";
+import { api, withScope, withQuery } from "../lib/api.js";
+import { updateProjectLink, getProjectLink } from "../lib/config.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { validateName } from "../lib/name.js";
 import { registerServiceSet } from "./service-set.js";
 import { registerServiceShow } from "./service-show.js";
@@ -69,15 +69,15 @@ export function registerService(program: Command) {
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (serviceArg: string | undefined, opts) => {
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
       const target = serviceArg || opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
 
       const detail = await api.get<any>(
         svcInfo.kind === "app"
-          ? `/api/apps/${svcInfo.id}`
-          : `/api/projects/${projectId}/addons/${svcInfo.id}`,
+          ? withScope(`/api/apps/${svcInfo.id}`, scope)
+          : withScope(`/api/projects/${projectId}/addons/${svcInfo.id}`, scope),
       );
 
       if (isJSONMode()) {
@@ -103,7 +103,7 @@ export function registerService(program: Command) {
     .option("-p, --project <id>", "Project name or ID")
     .option("-y, --yes", "Skip confirmation")
     .action(async (serviceArg: string | undefined, opts) => {
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
       const target = serviceArg || opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
@@ -118,9 +118,9 @@ export function registerService(program: Command) {
       }
 
       if (svcInfo.kind === "app") {
-        await api.delete(`/api/apps/${svcInfo.id}`);
+        await api.delete(withScope(`/api/apps/${svcInfo.id}`, scope));
       } else {
-        await api.delete(`/api/projects/${projectId}/addons/${svcInfo.id}`);
+        await api.delete(withScope(`/api/projects/${projectId}/addons/${svcInfo.id}`, scope));
       }
 
       // Clear link if we just deleted the linked service
@@ -143,11 +143,11 @@ export function registerService(program: Command) {
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (serviceArg: string | undefined, opts) => {
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
       const target = serviceArg || opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
-      await api.post(`/api/apps/${svcInfo.id}/redeploy`);
+      await api.post(withScope(`/api/apps/${svcInfo.id}/redeploy`, scope));
       if (isJSONMode()) {
         printJSON({ id: svcInfo.id, status: "deploying" });
       } else {
@@ -162,11 +162,11 @@ export function registerService(program: Command) {
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name or ID")
     .action(async (serviceArg: string | undefined, opts) => {
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
       const target = serviceArg || opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
-      await api.post(`/api/apps/${svcInfo.id}/restart`);
+      await api.post(withScope(`/api/apps/${svcInfo.id}/restart`, scope));
       if (isJSONMode()) {
         printJSON({ id: svcInfo.id, status: "restarting" });
       } else {
@@ -183,7 +183,7 @@ export function registerService(program: Command) {
     .option("--replicas <n>", "Number of replicas", parseIntOption)
     .option("--region <code>", "Region code")
     .action(async (serviceArg: string | undefined, opts) => {
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
       const target = serviceArg || opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
@@ -195,7 +195,7 @@ export function registerService(program: Command) {
         throw new Error("Pass --replicas <n> or --region <code> (or both).");
       }
 
-      await api.post(`/api/apps/${svcInfo.id}/scale`, body).catch((err: any) => {
+      await api.post(withScope(`/api/apps/${svcInfo.id}/scale`, scope), body).catch((err: any) => {
         if (err?.status === 404) {
           throw new Error("Scaling endpoint not yet implemented on the platform.");
         }
@@ -218,16 +218,16 @@ export function registerService(program: Command) {
     .action(async (newName: string, opts) => {
       const nameErr = validateName(newName);
       if (nameErr) throw new Error(`Invalid name: ${nameErr}`);
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
       const target = opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
 
       if (svcInfo.kind === "app") {
-        await api.patch(`/api/apps/${svcInfo.id}`, { name: newName });
+        await api.patch(withScope(`/api/apps/${svcInfo.id}`, scope), { name: newName });
       } else {
         await api.patch(
-          `/api/projects/${projectId}/addons/${svcInfo.id}`,
+          withScope(`/api/projects/${projectId}/addons/${svcInfo.id}`, scope),
           { name: newName },
         );
       }
@@ -255,7 +255,7 @@ export function registerService(program: Command) {
     .option("-n, --tail <n>", "Print last N lines and exit (no follow); use --tail all for full history")
     .option("--page <n>", "Page of historical logs (1=most recent, 2=older, …); implies --tail 200")
     .action(async (serviceArg: string | undefined, opts) => {
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
       const target = serviceArg || opts.service || getProjectLink()?.serviceId;
       if (!target) throw new Error("No service specified or linked.");
       const svcInfo = await resolveService(projectId, target);
@@ -264,7 +264,7 @@ export function registerService(program: Command) {
 
       if (opts.build) {
         const app = await api.get<{ builds?: Array<{ id: string }> }>(
-          `/api/apps/${svcInfo.id}`,
+          withScope(`/api/apps/${svcInfo.id}`, scope),
         );
         if (!app.builds?.length) throw new Error("No builds found");
         info(chalk.dim(`Streaming build logs for ${svcInfo.name}...\n`));
@@ -283,10 +283,14 @@ export function registerService(program: Command) {
         // Fetch pages iteratively: page 1 = most recent, page 2 = one step older, etc.
         let before: string | undefined;
         for (let p = 1; p <= pageNum; p++) {
-          const params = new URLSearchParams({ limit: String(pageSize) });
-          if (before) params.set("before", before);
           const result = await api.get<{ entries: any[]; oldest: string | null }>(
-            `/api/apps/${svcInfo.id}/logs/history?${params}`,
+            withScope(
+              withQuery(`/api/apps/${svcInfo.id}/logs/history`, {
+                limit: pageSize,
+                before,
+              }),
+              scope,
+            ),
           );
           if (p === pageNum) {
             if (!result.entries.length) {
@@ -308,9 +312,11 @@ export function registerService(program: Command) {
       if (opts.tail !== undefined) {
         const rawTail = String(opts.tail);
         const limit = rawTail === "all" ? 2000 : Math.min(Math.max(1, parseInt(rawTail, 10) || 200), 2000);
-        const params = new URLSearchParams({ limit: String(limit) });
         const result = await api.get<{ entries: any[]; oldest: string | null }>(
-          `/api/apps/${svcInfo.id}/logs/history?${params}`,
+          withScope(
+            withQuery(`/api/apps/${svcInfo.id}/logs/history`, { limit }),
+            scope,
+          ),
         );
         for (const e of result.entries) process.stdout.write(safeLogLine(JSON.stringify(e)) + "\n");
         if (result.oldest && result.entries.length === limit) {
@@ -320,16 +326,22 @@ export function registerService(program: Command) {
       }
 
       info(chalk.dim(`Streaming logs for ${svcInfo.name}... (Ctrl+C to stop)\n`));
-      await streamSSE(`/api/apps/${svcInfo.id}/logs?limit=500`, (event, data) => {
-        if (event === "error") return false;
-        process.stdout.write(safeLogLine(data) + "\n");
-        return true;
-      });
+      await streamSSE(
+        withScope(
+          withQuery(`/api/apps/${svcInfo.id}/logs`, { limit: 500 }),
+          scope,
+        ),
+        (event, data) => {
+          if (event === "error") return false;
+          process.stdout.write(safeLogLine(data) + "\n");
+          return true;
+        },
+      );
     });
 
   // Helpers in scope of registerService
   async function linkByName(_cmd: Command, name: string) {
-    const projectId = await resolveProjectId(undefined);
+    const { projectId } = await resolveProjectScope(undefined);
     const svcInfo = await resolveService(projectId, name);
     updateProjectLink({ serviceId: svcInfo.id, serviceName: svcInfo.name });
     if (isJSONMode()) {
@@ -340,9 +352,9 @@ export function registerService(program: Command) {
   }
 
   async function linkInteractive(_cmd: Command) {
-    const projectId = await resolveProjectId(undefined);
+    const { projectId, scope } = await resolveProjectScope(undefined);
     const data = await api.get<ServicesResponse>(
-      `/api/projects/${projectId}/services`,
+      withScope(`/api/projects/${projectId}/services`, scope),
     );
     const services = [...(data.apps || []), ...(data.addons || [])];
     if (services.length === 0) {

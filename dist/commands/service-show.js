@@ -1,6 +1,5 @@
-import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
-import { resolveService } from "../lib/resolve.js";
+import { api, withScope } from "../lib/api.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { printJSON } from "../lib/format.js";
 /**
  * `lizard service show` — print the current service configuration as JSON.
@@ -19,12 +18,12 @@ export function registerServiceShow(svc) {
         .option("-s, --service <name>", "Limit output to one service")
         .option("-p, --project <id>", "Project name or ID")
         .action(async (serviceArg, opts) => {
-        const projectId = await resolveProjectId(opts.project);
+        const { projectId, scope } = await resolveProjectScope(opts.project);
         const ref = serviceArg || opts.service;
         if (ref) {
             const svcInfo = await resolveService(projectId, ref);
             const detail = await api
-                .get(`/api/apps/${svcInfo.id}/config`)
+                .get(withScope(`/api/apps/${svcInfo.id}/config`, scope))
                 .catch((err) => {
                 if (err?.status === 404) {
                     throw new Error("Service config endpoint not yet implemented. The API needs " +
@@ -36,7 +35,7 @@ export function registerServiceShow(svc) {
             return;
         }
         const config = await api
-            .get(`/api/projects/${projectId}/config`)
+            .get(withScope(`/api/projects/${projectId}/config`, scope))
             .catch((err) => {
             if (err?.status === 404) {
                 throw new Error("Project config endpoint not yet implemented. The API needs " +

@@ -1,6 +1,21 @@
 export declare function setBaseURL(url: string): void;
 export declare function getBaseURL(): string;
 export declare function setAccessToken(token: string): void;
+export interface ResourceScope {
+    workspaceId?: string | null;
+    environmentName?: string | null;
+}
+export interface Workspace {
+    id: string;
+    name: string;
+    slug: string;
+    role: "owner" | "member";
+    isPersonal?: boolean;
+    projectCount?: number;
+    createdAt?: number;
+}
+export declare function withQuery(path: string, params: Record<string, string | number | boolean | null | undefined>): string;
+export declare function withScope(path: string, scope?: ResourceScope): string;
 export declare class APIError extends Error {
     status: number;
     code: string;

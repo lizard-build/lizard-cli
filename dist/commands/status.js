@@ -1,47 +1,64 @@
 import chalk from "chalk";
-import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
-import { isJSONMode, printJSON, statusColor, table } from "../lib/format.js";
+import { getProjectLink, updateProjectLink } from "../lib/config.js";
+import { lookupProjectWorkspace } from "../lib/resolve.js";
+import { isJSONMode, printJSON, info } from "../lib/format.js";
+/**
+ * `lizard status` — print the linked workspace / project / environment /
+ * service for the current working directory. Mirrors `railway status`.
+ *
+ * Lazy-fills workspaceId into the link when missing so legacy configs
+ * surface their workspace too.
+ */
 export function registerStatus(program) {
     program
         .command("status")
-        .description("Show project status")
+        .description("Show linked workspace, project, environment, and service")
         .action(async () => {
-        const projectId = resolveProjectId(program.opts().project);
-        const [project, services] = await Promise.all([
-            api.get(`/api/projects/${projectId}`),
-            api.get(`/api/projects/${projectId}/services`),
-        ]);
+        const link = getProjectLink();
+        if (!link) {
+            if (isJSONMode()) {
+                printJSON({ cwd: process.cwd(), linked: false });
+            }
+            else {
+                info("Not linked. Run `lizard init` to create or link a project.");
+            }
+            return;
+        }
+        // Backfill workspace info for legacy links (saved before workspaces existed)
+        let workspaceName = link.workspaceName;
+        if (!link.workspaceId) {
+            const fetched = await lookupProjectWorkspace(link.projectId);
+            if (fetched?.workspaceId) {
+                workspaceName = fetched.workspaceName ?? undefined;
+                try {
+                    updateProjectLink({
+                        workspaceId: fetched.workspaceId,
+                        workspaceName,
+                    });
+                }
+                catch { }
+            }
+        }
+        const out = {
+            cwd: process.cwd(),
+            linked: true,
+            workspace: workspaceName ?? null,
+            workspaceId: link.workspaceId ?? null,
+            project: link.projectName ?? null,
+            projectId: link.projectId,
+            environment: link.environmentName ?? "production",
+            service: link.serviceName ?? null,
+            serviceId: link.serviceId ?? null,
+        };
         if (isJSONMode()) {
-            printJSON({ project, services });
+            printJSON(out);
             return;
         }
-        console.log(chalk.bold(project.name) + chalk.dim(` (${project.id})`));
-        console.log();
-        const allServices = [
-            ...(services.apps || []).map((a) => ({
-                name: a.name,
-                type: "app",
-                status: a.status,
-                url: a.domain ? `https://${a.domain}` : "",
-            })),
-            ...(services.addons || []).map((a) => ({
-                name: a.name || a.addonType,
-                type: a.addonType || "addon",
-                status: a.status,
-                url: a.hostname || "",
-            })),
-        ];
-        if (allServices.length === 0) {
-            console.log(chalk.dim("No services"));
-            return;
-        }
-        table(["Name", "Type", "Status", "URL"], allServices.map((s) => [
-            s.name,
-            s.type,
-            statusColor(s.status),
-            s.url || chalk.dim("—"),
-        ]));
+        const fmt = (v) => v ?? chalk.dim("—");
+        console.log(`  ${chalk.dim("Workspace:")}    ${fmt(out.workspace)}`);
+        console.log(`  ${chalk.dim("Project:")}      ${chalk.bold(out.project ?? link.projectId)}`);
+        console.log(`  ${chalk.dim("Environment:")}  ${out.environment}`);
+        console.log(`  ${chalk.dim("Service:")}      ${out.service ? chalk.bold(out.service) : chalk.dim("(none — `lizard service link`)")}`);
     });
 }
 //# sourceMappingURL=status.js.map

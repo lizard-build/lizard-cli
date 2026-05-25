@@ -1,8 +1,8 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { Command } from "commander";
-import { streamSSE, api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
+import { streamSSE, api, withScope, withQuery, type ResourceScope } from "../lib/api.js";
+import { resolveProjectScope } from "../lib/resolve.js";
 import { info, error, isTTY } from "../lib/format.js";
 
 export function registerLogs(program: Command) {
@@ -14,20 +14,26 @@ export function registerLogs(program: Command) {
     .option("-p, --project <id>", "Project name or ID")
     .option("--tail <n>", "Print last N log lines and exit (no follow)")
     .action(async (opts) => {
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
 
       const tailN = opts.tail !== undefined ? parseTail(opts.tail) : undefined;
 
       if (opts.build) {
-        await showBuildLogs(opts.service, projectId, tailN);
+        await showBuildLogs(opts.service, projectId, scope, tailN);
         return;
       }
 
       // --tail: fetch historical logs and exit
       if (tailN !== undefined) {
-        const params = new URLSearchParams({ limit: String(tailN) });
-        if (opts.service) params.set("service", opts.service);
-        const entries = await api.get<any[]>(`/api/projects/${projectId}/logs?${params}`);
+        const entries = await api.get<any[]>(
+          withScope(
+            withQuery(`/api/projects/${projectId}/logs`, {
+              limit: tailN,
+              service: opts.service,
+            }),
+            scope,
+          ),
+        );
         for (const e of entries) printLogEntry(e);
         return;
       }
@@ -36,7 +42,9 @@ export function registerLogs(program: Command) {
 
       if (!serviceId && isTTY()) {
         // Offer to pick a specific service or stream all
-        const data = await api.get<{ apps: any[] }>(`/api/projects/${projectId}/services`);
+        const data = await api.get<{ apps: any[] }>(
+          withScope(`/api/projects/${projectId}/services`, scope),
+        );
         const apps = data.apps || [];
 
         if (apps.length > 1) {
@@ -71,7 +79,7 @@ export function registerLogs(program: Command) {
       // Stream all project logs
       info(chalk.dim("Streaming project logs... (Ctrl+C to stop)\n"));
       await streamSSE(
-        `/api/projects/${projectId}/logs/stream`,
+        withScope(`/api/projects/${projectId}/logs/stream`, scope),
         (event, data) => {
           if (event === "error") {
             error(data);
@@ -131,13 +139,18 @@ function printLogLine(data: string) {
   }
 }
 
-async function showBuildLogs(serviceId: string | undefined, projectId: string, tailN?: number) {
+async function showBuildLogs(
+  serviceId: string | undefined,
+  projectId: string,
+  scope: ResourceScope,
+  tailN?: number,
+) {
   let appId = serviceId;
 
   if (!appId) {
     // Get first app in project
     const data = await api.get<{ apps: Array<{ id: string; name: string }> }>(
-      `/api/projects/${projectId}/services`,
+      withScope(`/api/projects/${projectId}/services`, scope),
     );
     if (!data.apps?.length) {
       throw new Error("No apps in project");

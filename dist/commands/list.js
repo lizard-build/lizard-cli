@@ -1,5 +1,7 @@
-import { api } from "../lib/api.js";
+import chalk from "chalk";
+import { api, withQuery } from "../lib/api.js";
 import { isJSONMode, printJSON, table } from "../lib/format.js";
+import { resolveWorkspace } from "../lib/picker.js";
 /**
  * `lizard list` — list all projects. Alias of `lizard project list`.
  */
@@ -8,8 +10,13 @@ export function registerList(program) {
         .command("list")
         .alias("ls")
         .description("List all projects")
-        .action(async () => {
-        const projects = await api.get("/api/projects");
+        .option("-w, --workspace <ws>", "Filter by workspace id, slug, or name")
+        .action(async (opts) => {
+        let workspaceId;
+        if (opts.workspace) {
+            workspaceId = (await resolveWorkspace(opts.workspace)).id;
+        }
+        const projects = await api.get(withQuery("/api/projects", { workspaceId }));
         if (isJSONMode()) {
             printJSON(projects);
             return;
@@ -18,8 +25,9 @@ export function registerList(program) {
             console.log("No projects. Run `lizard init` to create one.");
             return;
         }
-        table(["Name", "ID", "Role", "Members"], projects.map((p) => [
+        table(["Name", "Workspace", "ID", "Role", "Members"], projects.map((p) => [
             p.name,
+            p.workspaceName || chalk.dim("—"),
             p.id,
             p.role || "owner",
             String(p.memberCount || 1),

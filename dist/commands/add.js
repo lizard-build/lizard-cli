@@ -1,7 +1,9 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
-import { api } from "../lib/api.js";
+import { api, withQuery, withScope } from "../lib/api.js";
 import { getProjectLink, updateProjectLink, DEFAULT_REGION } from "../lib/config.js";
+import { lookupProjectWorkspace } from "../lib/resolve.js";
+import { resolveWorkspace } from "../lib/picker.js";
 import { success, info, isJSONMode, printJSON, isTTY, table, } from "../lib/format.js";
 import { validateName, addonRefName } from "../lib/name.js";
 const CATALOG = [
@@ -55,22 +57,54 @@ function normalizeDbName(name) {
  * Resolve a project by name/slug/id. Name-based lookup hits /api/projects and
  * matches against the list. Falls back to the cwd-linked project when no
  * -p/--project is supplied.
+ *
+ * When `workspaceFlag` is provided, the lookup is constrained to that
+ * workspace — useful for disambiguating identically-named projects.
  */
-async function resolveProject(flagValue) {
+async function resolveProject(flagValue, workspaceFlag) {
     if (flagValue) {
-        const projects = await api.get("/api/projects");
-        const match = projects.find((pr) => pr.id === flagValue ||
+        let workspaceId;
+        if (workspaceFlag) {
+            workspaceId = (await resolveWorkspace(workspaceFlag)).id;
+        }
+        const projects = await api.get(withQuery("/api/projects", { workspaceId }));
+        const matches = projects.filter((pr) => pr.id === flagValue ||
             pr.slug === flagValue ||
             pr.name === flagValue);
-        if (!match) {
-            throw new Error(`Project "${flagValue}" not found. Available: ${projects.map((p) => p.name).join(", ") || "(none)"}`);
+        if (matches.length === 0) {
+            throw new Error(`Project "${flagValue}" not found. Available: ${projects.map((pr) => pr.name).join(", ") || "(none)"}`);
         }
-        return match.id;
+        if (matches.length > 1) {
+            const detail = matches
+                .map((m) => `  • ${m.name}  in ${m.workspaceName ?? "(personal)"}`)
+                .join("\n");
+            throw new Error(`Multiple projects named "${flagValue}" found:\n${detail}\nPass --workspace to disambiguate.`);
+        }
+        return matches[0].id;
     }
     const link = getProjectLink();
     if (link?.projectId)
         return link.projectId;
     throw new Error("No project linked to this directory. Pass -p <project-name> or run `lizard init`.");
+}
+/**
+ * Build a ResourceScope for an arbitrary project id. Uses the cwd link when
+ * it matches; otherwise does one lookup so `--project foo` from any cwd still
+ * tags the right workspace on the request.
+ */
+async function scopeForProject(projectId) {
+    const link = getProjectLink();
+    if (link?.projectId === projectId && link.workspaceId) {
+        return {
+            workspaceId: link.workspaceId,
+            environmentName: link.environmentName ?? null,
+        };
+    }
+    const fetched = await lookupProjectWorkspace(projectId);
+    return {
+        workspaceId: fetched?.workspaceId ?? null,
+        environmentName: link?.projectId === projectId ? (link.environmentName ?? null) : null,
+    };
 }
 function parseVariables(pairs) {
     if (!pairs?.length)
@@ -95,10 +129,12 @@ export function registerAdd(program) {
         .option("-v, --variables <kv>", "KEY=value pair to seed the service. Repeat for multiple: -v K1=v1 -v K2=v2. Ignored for managed addons.", (val, prev) => [...prev, val], [])
         .option("-n, --name <name>", "Name used in ${{<name>.KEY}} templates and shown in the dashboard. Renamable; refs stay stable.")
         .option("--instance-name <name>", "(deprecated) alias for --name")
+        .option("-w, --workspace <ws>", "Disambiguate project lookup by workspace")
         .option("--list", "Show available database types")
         .action(async (types, opts, command) => {
         const merged = command.optsWithGlobals();
         const projectFlag = merged.project;
+        const workspaceFlag = opts.workspace;
         const region = merged.region ?? DEFAULT_REGION;
         // ── --list: show DB catalog and exit ──────────────────────────────
         if (opts.list || (!types.length && !opts.addon && !opts.service && !opts.repo && !isTTY())) {
@@ -122,7 +158,8 @@ export function registerAdd(program) {
         }
         // Resolve project up front so we fail before any wizard prompts or
         // API calls instead of after the user has filled out the wizard.
-        const projectId = await resolveProject(projectFlag);
+        const projectId = await resolveProject(projectFlag, workspaceFlag);
+        const scope = await scopeForProject(projectId);
         // ── positional <types...> and/or -a <type...> ────────────────────
         const databases = [];
         const candidates = [...(opts.addon ?? []), ...types];
@@ -145,7 +182,7 @@ export function registerAdd(program) {
             for (const db of databases) {
                 const cat = CATALOG.find((c) => c.name === db);
                 info(`Adding ${chalk.cyan(cat.label)}...`);
-                const addon = await api.post(`/api/projects/${projectId}/addons`, {
+                const addon = await api.post(withScope(`/api/projects/${projectId}/addons`, scope), {
                     type: db,
                     region,
                     ...(opts.name ? { name: opts.name } : {}),
@@ -180,7 +217,7 @@ export function registerAdd(program) {
             const detectedPort = await detectPortFromDockerfile(opts.repo);
             if (detectedPort)
                 info(`Detected port ${chalk.bold(detectedPort)} from Dockerfile`);
-            const app = await api.post(`/api/projects/${projectId}/apps`, {
+            const app = await api.post(withScope(`/api/projects/${projectId}/apps`, scope), {
                 name: serviceName,
                 repoUrl: opts.repo.startsWith("http")
                     ? opts.repo
@@ -206,7 +243,7 @@ export function registerAdd(program) {
         // ── --service <name> (empty service) ──────────────────────────────
         if (opts.service) {
             info(`Creating empty service ${chalk.bold(opts.service)}...`);
-            const app = await api.post(`/api/projects/${projectId}/apps`, {
+            const app = await api.post(withScope(`/api/projects/${projectId}/apps`, scope), {
                 name: opts.service,
                 region,
                 variables,

@@ -2,9 +2,8 @@ import chalk from "chalk";
 import * as p from "@clack/prompts";
 import * as fs from "node:fs";
 import { Command } from "commander";
-import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
-import { resolveService } from "../lib/resolve.js";
+import { api, withScope, type ResourceScope } from "../lib/api.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { success, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
 
 /**
@@ -49,9 +48,9 @@ export function registerServiceSet(svc: Command) {
     .option("-p, --project <id>", "Project name or ID")
     .option("--force", "Overwrite even if the config was changed remotely")
     .action(async (serviceArg: string | undefined, opts) => {
-      const projectId = await resolveProjectId(opts.project);
+      const { projectId, scope } = await resolveProjectScope(opts.project);
 
-      const patch = await buildPatch(serviceArg || opts.service, opts, projectId);
+      const patch = await buildPatch(serviceArg || opts.service, opts, projectId, scope);
       if (!patch || isEmpty(patch)) {
         if (isJSONMode()) {
           printJSON({ staged: false, committed: false, message: "No changes" });
@@ -67,13 +66,13 @@ export function registerServiceSet(svc: Command) {
       //     secrets:  { shared?, services? } }
       // The internal `patch.services` we built is keyed by service id with a
       // nested {build,deploy,source,variables} layout — flatten it before send.
-      const body = await flattenPatch(patch, projectId);
+      const body = await flattenPatch(patch, projectId, scope);
 
       // Fetch current configRevision for CAS — skipped when --force is set.
       if (!opts.force) {
         try {
           const proj = await api.get<{ configRevision?: number | null }>(
-            `/api/projects/${projectId}`,
+            withScope(`/api/projects/${projectId}`, scope),
           );
           if (proj?.configRevision != null) {
             (body as any).revision = proj.configRevision;
@@ -89,7 +88,7 @@ export function registerServiceSet(svc: Command) {
           revision?: number;
           services?: any[];
           addons?: any[];
-        }>(`/api/projects/${projectId}/config:apply`, body)
+        }>(withScope(`/api/projects/${projectId}/config:apply`, scope), body)
         .catch((err: any) => {
           if (err?.status === 409) {
             throw new Error(`${err.message}\nUse --force to overwrite.`);
@@ -132,6 +131,7 @@ export function registerServiceSet(svc: Command) {
 async function flattenPatch(
   patch: any,
   projectId: string,
+  scope: ResourceScope,
 ): Promise<{ services: any[]; secrets?: any }> {
   const out: { services: any[]; secrets?: any } = { services: [] };
   if (!patch || typeof patch !== "object") return out;
@@ -143,7 +143,7 @@ async function flattenPatch(
   let nameById = new Map<string, string>();
   if (idsInPatch.length > 0) {
     const data = await api.get<{ apps?: any[]; addons?: any[] }>(
-      `/api/projects/${projectId}/services`,
+      withScope(`/api/projects/${projectId}/services`, scope),
     );
     const all = [...(data.apps || []), ...(data.addons || [])];
     nameById = new Map(all.map((s: any) => [s.id, s.name]));
@@ -231,6 +231,7 @@ async function buildPatch(
   serviceArg: string | undefined,
   opts: any,
   projectId: string,
+  scope: ResourceScope,
 ): Promise<any> {
   // 1. <service> --set <path>=<value> (repeatable)
   if (opts.set?.length) {
@@ -263,7 +264,7 @@ async function buildPatch(
 
   // 4. Interactive
   if (isTTY()) {
-    return await interactivePatch(projectId);
+    return await interactivePatch(projectId, scope);
   }
 
   return null;
@@ -362,9 +363,9 @@ async function setPairsToPatch(
 }
 
 /** Interactive prompt loop. Pick service → pick field → enter value. */
-async function interactivePatch(projectId: string): Promise<any> {
+async function interactivePatch(projectId: string, scope: ResourceScope): Promise<any> {
   const data = await api.get<{ apps?: any[]; addons?: any[] }>(
-    `/api/projects/${projectId}/services`,
+    withScope(`/api/projects/${projectId}/services`, scope),
   );
   const services = [...(data.apps || []), ...(data.addons || [])];
   if (services.length === 0) {

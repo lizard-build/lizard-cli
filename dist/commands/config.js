@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import chalk from "chalk";
 import ora from "ora";
-import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
+import { api, withScope } from "../lib/api.js";
+import { resolveProjectScope } from "../lib/resolve.js";
 import { success, error, isJSONMode, printJSON } from "../lib/format.js";
 export function registerConfig(program) {
     const config = program.command("config").description("Manage project configuration");
@@ -29,14 +29,14 @@ export function registerConfig(program) {
             error(`Failed to parse config file: ${e.message}`);
             process.exit(1);
         }
-        const projectId = await resolveProjectId(opts.project);
+        const { projectId, scope } = await resolveProjectScope(opts.project);
         if (opts.dryRun) {
             printJSON({ dryRun: true, projectId, config });
             return;
         }
         const spinner = ora("Applying config...").start();
         try {
-            const result = await api.post(`/api/projects/${projectId}/config:apply`, config);
+            const result = await api.post(withScope(`/api/projects/${projectId}/config:apply`, scope), config);
             spinner.stop();
             if (isJSONMode()) {
                 printJSON(result);

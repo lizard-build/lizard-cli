@@ -1,5 +1,22 @@
-import { api } from "./api.js";
-import { getProjectLink, resolveProjectId } from "./config.js";
+import { api, withScope, type ResourceScope } from "./api.js";
+import {
+  getProjectLink,
+  resolveProjectId,
+  updateProjectLink,
+} from "./config.js";
+
+/**
+ * Build a ResourceScope for an arbitrary project. Used by resolve* helpers
+ * to avoid awkward import cycles with the picker.
+ */
+function scopeFromLink(projectId: string): ResourceScope {
+  const link = getProjectLink();
+  if (link?.projectId !== projectId) return { workspaceId: null, environmentName: null };
+  return {
+    workspaceId: link.workspaceId ?? null,
+    environmentName: link.environmentName ?? null,
+  };
+}
 
 interface AppLite {
   id: string;
@@ -33,7 +50,7 @@ export async function resolveService(
   nameOrId: string,
 ): Promise<{ id: string; name: string; kind: "app" | "addon" }> {
   const data = await api.get<ServicesResponse>(
-    `/api/projects/${projectId}/services`,
+    withScope(`/api/projects/${projectId}/services`, scopeFromLink(projectId)),
   );
 
   const apps = data.apps || [];
@@ -112,7 +129,7 @@ export async function getActiveServiceWithKind(
   const link = getProjectLink();
   if (link?.serviceId) {
     const data = await api.get<ServicesResponse>(
-      `/api/projects/${projectId}/services`,
+      withScope(`/api/projects/${projectId}/services`, scopeFromLink(projectId)),
     );
     const app = data.apps?.find((a) => a.id === link.serviceId);
     if (app) return { id: app.id, name: app.name, kind: "app" };
@@ -145,7 +162,7 @@ export async function resolveEnvironment(
   let envs: EnvironmentLite[] = [];
   try {
     envs = await api.get<EnvironmentLite[]>(
-      `/api/projects/${projectId}/environments`,
+      withScope(`/api/projects/${projectId}/environments`, scopeFromLink(projectId)),
     );
   } catch {
     return null;
@@ -179,18 +196,93 @@ export async function resolveEnvironment(
 }
 
 /**
+ * Look up the workspace id for a project. Used to lazy-fill legacy links
+ * that were saved before workspaces existed. Returns null if the project
+ * isn't accessible to the current user.
+ */
+export async function lookupProjectWorkspace(
+  projectId: string,
+): Promise<{ workspaceId?: string | null; workspaceName?: string | null } | null> {
+  try {
+    const proj = await api.get<{
+      workspaceId?: string | null;
+      workspaceName?: string | null;
+    }>(`/api/projects/${projectId}`);
+    return {
+      workspaceId: proj.workspaceId ?? null,
+      workspaceName: proj.workspaceName ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a project flag → `{ projectId, scope }`. Scope carries
+ * workspaceId + environmentName for `withScope(url, scope)` queries.
+ *
+ * Lazy-fills missing workspaceId into the cwd link the same way
+ * `resolveContext` does.
+ */
+export async function resolveProjectScope(
+  projectFlag?: string,
+): Promise<{ projectId: string; scope: ResourceScope }> {
+  const projectId = await resolveProjectId(projectFlag);
+  const link = getProjectLink();
+
+  let workspaceId: string | null | undefined = link?.workspaceId ?? null;
+  let workspaceName: string | undefined = link?.workspaceName;
+
+  if (!workspaceId && link?.projectId === projectId) {
+    const fetched = await lookupProjectWorkspace(projectId);
+    if (fetched?.workspaceId) {
+      workspaceId = fetched.workspaceId;
+      workspaceName = fetched.workspaceName ?? undefined;
+      try {
+        updateProjectLink({ workspaceId, workspaceName });
+      } catch {}
+    }
+  }
+
+  return {
+    projectId,
+    scope: {
+      workspaceId: workspaceId ?? null,
+      environmentName: link?.environmentName ?? null,
+    },
+  };
+}
+
+export interface ResolvedContext {
+  projectId: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  service?: { id: string; name: string };
+  environment?: { id: string; name: string };
+}
+
+/** Build the scope object for `withScope(url, scope)` API calls. */
+export function getScope(ctx: ResolvedContext): ResourceScope {
+  return {
+    workspaceId: ctx.workspaceId ?? null,
+    environmentName: ctx.environment?.name ?? null,
+  };
+}
+
+/**
  * Convenience: resolve project + active service + active environment in one go.
+ *
+ * Lazily backfills `workspaceId` into the cwd link when missing (legacy
+ * configs written before workspaces existed). Once filled, subsequent
+ * commands get the scope param for free.
  */
 export async function resolveContext(opts: {
   projectFlag?: string;
   serviceFlag?: string;
   environmentFlag?: string;
+  workspaceFlag?: string;
   requireService?: boolean;
-}): Promise<{
-  projectId: string;
-  service?: { id: string; name: string };
-  environment?: { id: string; name: string };
-}> {
+}): Promise<ResolvedContext> {
   const projectId = await resolveProjectId(opts.projectFlag);
 
   const environment = await resolveEnvironment(
@@ -199,17 +291,41 @@ export async function resolveContext(opts: {
   ).catch(() => null);
 
   let service: { id: string; name: string } | undefined;
+  const link = getProjectLink();
   if (opts.serviceFlag || opts.requireService) {
     service = await getActiveService(opts.serviceFlag, projectId);
-  } else {
-    const link = getProjectLink();
-    if (link?.serviceId) {
-      service = {
-        id: link.serviceId,
-        name: link.serviceName || link.serviceId,
-      };
+  } else if (link?.serviceId) {
+    service = {
+      id: link.serviceId,
+      name: link.serviceName || link.serviceId,
+    };
+  }
+
+  // Workspace resolution: prefer the link (no extra API call), fall back to
+  // a one-shot lookup which we cache back into the link.
+  let workspaceId = link?.workspaceId;
+  let workspaceName = link?.workspaceName;
+  if (!workspaceId && link?.projectId === projectId) {
+    const fetched = await lookupProjectWorkspace(projectId);
+    if (fetched?.workspaceId) {
+      workspaceId = fetched.workspaceId;
+      workspaceName = fetched.workspaceName ?? undefined;
+      try {
+        updateProjectLink({
+          workspaceId,
+          workspaceName,
+        });
+      } catch {
+        // Non-fatal: link may not exist for this cwd (e.g. --project flag).
+      }
     }
   }
 
-  return { projectId, service, environment: environment || undefined };
+  return {
+    projectId,
+    workspaceId,
+    workspaceName,
+    service,
+    environment: environment || undefined,
+  };
 }
