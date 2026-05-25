@@ -16,6 +16,7 @@ import { Command } from "commander";
  *   deploy.healthcheckPath     string
  *   deploy.healthcheckTimeout  number
  *   deploy.restartPolicyType   "ON_FAILURE" | "ALWAYS" | "NEVER"
+ *   source.type                "github" | "upload" | "docker"
  *   source.repoUrl             string
  *   source.branch              string
  *   source.rootDirectory       string

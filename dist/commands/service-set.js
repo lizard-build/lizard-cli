@@ -21,6 +21,7 @@ import { success, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
  *   deploy.healthcheckPath     string
  *   deploy.healthcheckTimeout  number
  *   deploy.restartPolicyType   "ON_FAILURE" | "ALWAYS" | "NEVER"
+ *   source.type                "github" | "upload" | "docker"
  *   source.repoUrl             string
  *   source.branch              string
  *   source.rootDirectory       string
@@ -126,6 +127,8 @@ async function flattenPatch(patch, projectId, scope) {
         }
         const flat = { id, name };
         // Source group
+        if (cfg.source?.type !== undefined)
+            flat.sourceType = cfg.source.type;
         if (cfg.source?.repoUrl !== undefined)
             flat.repoUrl = cfg.source.repoUrl;
         if (cfg.source?.branch !== undefined)
@@ -329,6 +332,7 @@ async function interactivePatch(projectId, scope) {
                 { value: "build.dockerfilePath", label: "Dockerfile path" },
                 { value: "deploy.healthcheckPath", label: "Healthcheck path" },
                 { value: "deploy.restartPolicyType", label: "Restart policy" },
+                { value: "source.type", label: "Source type (github/upload/docker)" },
                 { value: "source.branch", label: "Branch" },
                 { value: "source.rootDirectory", label: "Root directory" },
                 { value: "source.repoUrl", label: "GitHub repo" },
