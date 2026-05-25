@@ -20,6 +20,7 @@ interface GitHubStatus {
   installed: boolean;
   installationId: number | null;
   installations?: GitHubInstallation[];
+  manageUrl?: string;
   error?: string;
 }
 
@@ -164,6 +165,7 @@ export function registerGit(program: Command) {
             installed: githubStatus.installed,
             installationId: githubStatus.installationId,
             installations: githubStatus.installations ?? [],
+            manageUrl: githubStatus.manageUrl,
           },
           apps: appsWithRepo.map((a: any) => ({
             name: a.name,
@@ -184,8 +186,9 @@ export function registerGit(program: Command) {
             ? chalk.dim(`${inst.repoCount} repos${inst.privateCount ? `, ${inst.privateCount} private` : ""}`)
             : "";
           info(`  ${chalk.bold(inst.account.login)} ${chalk.dim(`(${typeLabel}, installation #${inst.id})`)}  ${repoLabel}`);
-          info(`  ${chalk.dim("Manage: " + inst.htmlUrl)}`);
         }
+        const manageUrl = githubStatus.manageUrl ?? `https://github.com/apps/lizard-app/installations/select_target`;
+        info(chalk.dim(`  Manage: ${manageUrl}`));
       } else {
         info(`GitHub App: ${chalk.yellow("not connected")}  ${chalk.dim("→ run `lizard git connect`")}`);
         if (githubStatus.error) {
