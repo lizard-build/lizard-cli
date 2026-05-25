@@ -3,7 +3,6 @@ export declare function getBaseURL(): string;
 export declare function setAccessToken(token: string): void;
 export interface ResourceScope {
     workspaceId?: string | null;
-    environmentName?: string | null;
 }
 export interface Workspace {
     id: string;

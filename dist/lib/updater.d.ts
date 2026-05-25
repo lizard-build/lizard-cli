@@ -1,4 +1,4 @@
-export declare const CURRENT_VERSION = "0.3.0";
+export declare const CURRENT_VERSION = "0.3.2";
 export type LatestVersionResult = {
     kind: "ok";
     version: string;

@@ -11,7 +11,7 @@ export function registerRedeploy(program) {
         .description("Trigger a fresh build (latest commit / last upload) with current vars")
         .option("--detach", "Run in background")
         .option("-s, --service <name>", "App name or ID (alias for positional)")
-        .option("-p, --project <id>", "Project name or ID")
+        .option("-p, --project <id>", "Project name, slug, or ID")
         .action(async (nameOrId, opts) => {
         const ref = nameOrId || opts.service;
         let id;

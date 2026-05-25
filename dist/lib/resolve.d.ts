@@ -30,14 +30,6 @@ export declare function getActiveServiceWithKind(serviceFlag: string | undefined
     kind: "app" | "addon";
 }>;
 /**
- * Resolve an environment within a project. Match by ID or name. If the API
- * does not have environments yet, returns null silently.
- */
-export declare function resolveEnvironment(projectId: string, nameOrId: string | undefined): Promise<{
-    id: string;
-    name: string;
-} | null>;
-/**
  * Look up the workspace id for a project. Used to lazy-fill legacy links
  * that were saved before workspaces existed. Returns null if the project
  * isn't accessible to the current user.
@@ -48,7 +40,7 @@ export declare function lookupProjectWorkspace(projectId: string): Promise<{
 } | null>;
 /**
  * Resolve a project flag → `{ projectId, scope }`. Scope carries
- * workspaceId + environmentName for `withScope(url, scope)` queries.
+ * workspaceId for `withScope(url, scope)` queries.
  *
  * Lazy-fills missing workspaceId into the cwd link the same way
  * `resolveContext` does.
@@ -65,15 +57,11 @@ export interface ResolvedContext {
         id: string;
         name: string;
     };
-    environment?: {
-        id: string;
-        name: string;
-    };
 }
 /** Build the scope object for `withScope(url, scope)` API calls. */
 export declare function getScope(ctx: ResolvedContext): ResourceScope;
 /**
- * Convenience: resolve project + active service + active environment in one go.
+ * Convenience: resolve project + active service in one go.
  *
  * Lazily backfills `workspaceId` into the cwd link when missing (legacy
  * configs written before workspaces existed). Once filled, subsequent
@@ -82,7 +70,6 @@ export declare function getScope(ctx: ResolvedContext): ResourceScope;
 export declare function resolveContext(opts: {
     projectFlag?: string;
     serviceFlag?: string;
-    environmentFlag?: string;
     workspaceFlag?: string;
     requireService?: boolean;
 }): Promise<ResolvedContext>;

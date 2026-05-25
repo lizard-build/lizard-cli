@@ -127,8 +127,6 @@ async function deployFromLocal(args) {
             qs.set("preDeployCommand", args.preDeployCommand);
         if (args.scope.workspaceId)
             qs.set("workspaceId", args.scope.workspaceId);
-        if (args.scope.environmentName)
-            qs.set("environment", args.scope.environmentName);
         const url = `${getBaseURL()}/api/projects/${args.projectId}/apps/upload?${qs.toString()}`;
         const res = await fetch(url, {
             method: "POST",

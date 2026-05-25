@@ -14,13 +14,12 @@ export function setAccessToken(token: string) { _accessToken = token; }
 
 // ── Scoping ───────────────────────────────────────────────────────────
 //
-// Every project-scoped endpoint takes `?workspaceId=…&environment=…` —
-// mirrors lizard-client's `withScope` so server-side state is shared
-// across CLI and browser. Build URLs through these helpers, never by hand.
+// Every project-scoped endpoint takes `?workspaceId=…` — mirrors
+// lizard-client's `withScope` so server-side state is shared across
+// CLI and browser. Build URLs through these helpers, never by hand.
 
 export interface ResourceScope {
   workspaceId?: string | null;
-  environmentName?: string | null;
 }
 
 export interface Workspace {
@@ -51,7 +50,6 @@ export function withScope(path: string, scope?: ResourceScope): string {
   if (!scope) return path;
   return withQuery(path, {
     workspaceId: scope.workspaceId,
-    environment: scope.environmentName,
   });
 }
 

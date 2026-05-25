@@ -9,7 +9,7 @@ export function registerLogs(program) {
         .description("Stream runtime logs")
         .option("--build", "Show build logs instead of runtime")
         .option("-s, --service <id>", "Only show logs for a specific service")
-        .option("-p, --project <id>", "Project name or ID")
+        .option("-p, --project <id>", "Project name, slug, or ID")
         .option("--tail <n>", "Print last N log lines and exit (no follow)")
         .action(async (opts) => {
         const { projectId, scope } = await resolveProjectScope(opts.project);

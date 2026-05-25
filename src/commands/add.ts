@@ -132,13 +132,11 @@ async function scopeForProject(projectId: string): Promise<ResourceScope> {
   if (link?.projectId === projectId && link.workspaceId) {
     return {
       workspaceId: link.workspaceId,
-      environmentName: link.environmentName ?? null,
     };
   }
   const fetched = await lookupProjectWorkspace(projectId);
   return {
     workspaceId: fetched?.workspaceId ?? null,
-    environmentName: link?.projectId === projectId ? (link.environmentName ?? null) : null,
   };
 }
 

@@ -7,10 +7,9 @@ import { getProjectLink, resolveProjectId, updateProjectLink, } from "./config.j
 function scopeFromLink(projectId) {
     const link = getProjectLink();
     if (link?.projectId !== projectId)
-        return { workspaceId: null, environmentName: null };
+        return { workspaceId: null };
     return {
         workspaceId: link.workspaceId ?? null,
-        environmentName: link.environmentName ?? null,
     };
 }
 /**
@@ -87,38 +86,6 @@ export async function getActiveServiceWithKind(serviceFlag, projectId) {
     throw new Error("No service specified. Pass --service <name> or run `lizard service link <name>`.");
 }
 /**
- * Resolve an environment within a project. Match by ID or name. If the API
- * does not have environments yet, returns null silently.
- */
-export async function resolveEnvironment(projectId, nameOrId) {
-    let envs = [];
-    try {
-        envs = await api.get(withScope(`/api/projects/${projectId}/environments`, scopeFromLink(projectId)));
-    }
-    catch {
-        return null;
-    }
-    if (!envs?.length)
-        return null;
-    if (nameOrId) {
-        const lower = nameOrId.toLowerCase();
-        const match = envs.find((e) => e.id.toLowerCase() === lower || e.name.toLowerCase() === lower);
-        if (!match) {
-            throw new Error(`Environment "${nameOrId}" not found. Available: ${envs.map((e) => e.name).join(", ")}`);
-        }
-        return match;
-    }
-    const link = getProjectLink();
-    if (link?.environmentId) {
-        return {
-            id: link.environmentId,
-            name: link.environmentName || link.environmentId,
-        };
-    }
-    // Default: first env (typically "production")
-    return envs[0];
-}
-/**
  * Look up the workspace id for a project. Used to lazy-fill legacy links
  * that were saved before workspaces existed. Returns null if the project
  * isn't accessible to the current user.
@@ -137,7 +104,7 @@ export async function lookupProjectWorkspace(projectId) {
 }
 /**
  * Resolve a project flag → `{ projectId, scope }`. Scope carries
- * workspaceId + environmentName for `withScope(url, scope)` queries.
+ * workspaceId for `withScope(url, scope)` queries.
  *
  * Lazy-fills missing workspaceId into the cwd link the same way
  * `resolveContext` does.
@@ -162,7 +129,6 @@ export async function resolveProjectScope(projectFlag) {
         projectId,
         scope: {
             workspaceId: workspaceId ?? null,
-            environmentName: link?.environmentName ?? null,
         },
     };
 }
@@ -170,11 +136,10 @@ export async function resolveProjectScope(projectFlag) {
 export function getScope(ctx) {
     return {
         workspaceId: ctx.workspaceId ?? null,
-        environmentName: ctx.environment?.name ?? null,
     };
 }
 /**
- * Convenience: resolve project + active service + active environment in one go.
+ * Convenience: resolve project + active service in one go.
  *
  * Lazily backfills `workspaceId` into the cwd link when missing (legacy
  * configs written before workspaces existed). Once filled, subsequent
@@ -182,7 +147,6 @@ export function getScope(ctx) {
  */
 export async function resolveContext(opts) {
     const projectId = await resolveProjectId(opts.projectFlag);
-    const environment = await resolveEnvironment(projectId, opts.environmentFlag).catch(() => null);
     let service;
     const link = getProjectLink();
     if (opts.serviceFlag || opts.requireService) {
@@ -219,7 +183,6 @@ export async function resolveContext(opts) {
         workspaceId,
         workspaceName,
         service,
-        environment: environment || undefined,
     };
 }
 //# sourceMappingURL=resolve.js.map

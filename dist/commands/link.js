@@ -1,22 +1,22 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
-import { api, withQuery, withScope } from "../lib/api.js";
+import { api, withQuery } from "../lib/api.js";
 import { setProjectLink } from "../lib/config.js";
 import { isJSONMode, printJSON, isTTY, success } from "../lib/format.js";
 import { fetchWorkspaces, pickWorkspace } from "../lib/picker.js";
 /**
  * `lizard link` — associates the current directory with an existing
- * project + environment + (optional) service. Each piece can be passed
- * via flags or selected interactively.
+ * project and (optionally) service. Each piece can be passed via flags
+ * or selected interactively.
  *
- * Order matches Railway's wizard: workspace → project → environment → service.
+ * Order matches Railway's wizard: workspace → project → service.
  */
 export function registerLink(program) {
     program
         .command("link")
         .description("Associate the current directory with an existing project")
         .argument("[service]", "Service name or ID (optional)")
-        .option("-p, --project <id>", "Project name or ID")
+        .option("-p, --project <id>", "Project name, slug, or ID")
         .option("-w, --workspace <ws>", "Workspace id, slug, or name")
         .option("-s, --service <name>", "Service name or ID (optional)")
         .action(async (serviceArg, opts) => {
@@ -59,39 +59,10 @@ export function registerLink(program) {
                 process.exit(5);
             project = projects.find((pr) => pr.id === sel);
         }
-        // 3. Environment (optional — silently skip if API has no envs)
-        let environment = null;
-        try {
-            const envs = await api.get(withScope(`/api/projects/${project.id}/environments`, {
-                workspaceId: workspace.id,
-                environmentName: null,
-            }));
-            if (envs?.length) {
-                if (envs.length === 1) {
-                    environment = envs[0];
-                }
-                else if (isTTY()) {
-                    const sel = await p.select({
-                        message: "Select an environment",
-                        options: envs.map((e) => ({ value: e.id, label: e.name })),
-                    });
-                    if (p.isCancel(sel))
-                        process.exit(5);
-                    environment = envs.find((e) => e.id === sel);
-                }
-                else {
-                    environment = envs[0];
-                }
-            }
-        }
-        catch {
-            // API does not have environments yet — fine
-        }
-        // 4. Service (optional)
+        // 3. Service (optional)
         const services = await api
             .get(withQuery(`/api/projects/${project.id}/services`, {
             workspaceId: workspace.id,
-            environment: environment?.name,
         }))
             .catch(() => ({ apps: [], addons: [] }));
         const allServices = [
@@ -127,8 +98,6 @@ export function registerLink(program) {
             projectName: project.name,
             workspaceId: workspace.id,
             workspaceName: workspace.name,
-            environmentId: environment?.id,
-            environmentName: environment?.name,
             serviceId: service?.id,
             serviceName: service?.name,
         };
@@ -139,8 +108,6 @@ export function registerLink(program) {
                 projectName: link.projectName,
                 workspaceId: link.workspaceId,
                 workspaceName: link.workspaceName,
-                environmentId: link.environmentId,
-                environmentName: link.environmentName,
                 serviceId: link.serviceId,
                 serviceName: link.serviceName,
             });

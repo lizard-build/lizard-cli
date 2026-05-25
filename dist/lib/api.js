@@ -25,7 +25,6 @@ export function withScope(path, scope) {
         return path;
     return withQuery(path, {
         workspaceId: scope.workspaceId,
-        environment: scope.environmentName,
     });
 }
 export class APIError extends Error {

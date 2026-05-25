@@ -14,9 +14,6 @@ export interface ProjectLink {
     /** Workspace the project belongs to. Lazy-filled for legacy links. */
     workspaceId?: string;
     workspaceName?: string;
-    /** Active environment for this cwd */
-    environmentId?: string;
-    environmentName?: string;
     /** Active service for this cwd. `appId/appName` are kept as aliases for backwards compat. */
     serviceId?: string;
     serviceName?: string;

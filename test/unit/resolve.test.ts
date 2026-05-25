@@ -67,7 +67,6 @@ describe("resolveProjectScope", () => {
       projectId: "proj_1",
       workspaceId: "ws_already",
       workspaceName: "team",
-      environmentName: "staging",
     });
 
     const { resolve, calls } = await withMockedApi(() => null);
@@ -75,7 +74,6 @@ describe("resolveProjectScope", () => {
 
     expect(projectId).toBe("proj_1");
     expect(scope.workspaceId).toBe("ws_already");
-    expect(scope.environmentName).toBe("staging");
     // No need to fetch the project — workspaceId was already on disk.
     expect(calls.filter((c) => c.startsWith("/api/projects/proj_1"))).toHaveLength(0);
   });
@@ -117,12 +115,10 @@ describe("getScope", () => {
       getScope({
         projectId: "x",
         workspaceId: "ws_1",
-        environment: { id: "e", name: "production" },
       }),
-    ).toEqual({ workspaceId: "ws_1", environmentName: "production" });
+    ).toEqual({ workspaceId: "ws_1" });
     expect(getScope({ projectId: "x" })).toEqual({
       workspaceId: null,
-      environmentName: null,
     });
   });
 });

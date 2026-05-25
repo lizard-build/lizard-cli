@@ -14,7 +14,7 @@ export function registerPort(program) {
         .argument("[port]", "Port number to set")
         .description("Show or change the container port for a service")
         .option("-s, --service <name>", "Service name or ID")
-        .option("--project <id>", "Project name or ID")
+        .option("--project <id>", "Project name, slug, or ID")
         .action(async (portArg, opts) => {
         const projectId = await resolveProjectId(opts.project);
         const service = await getActiveService(opts.service, projectId);

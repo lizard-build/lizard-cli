@@ -11,10 +11,9 @@ import {
  */
 function scopeFromLink(projectId: string): ResourceScope {
   const link = getProjectLink();
-  if (link?.projectId !== projectId) return { workspaceId: null, environmentName: null };
+  if (link?.projectId !== projectId) return { workspaceId: null };
   return {
     workspaceId: link.workspaceId ?? null,
-    environmentName: link.environmentName ?? null,
   };
 }
 
@@ -34,11 +33,6 @@ interface AddonLite {
 interface ServicesResponse {
   apps?: AppLite[];
   addons?: AddonLite[];
-}
-
-interface EnvironmentLite {
-  id: string;
-  name: string;
 }
 
 /**
@@ -152,50 +146,6 @@ export async function getActiveServiceWithKind(
 }
 
 /**
- * Resolve an environment within a project. Match by ID or name. If the API
- * does not have environments yet, returns null silently.
- */
-export async function resolveEnvironment(
-  projectId: string,
-  nameOrId: string | undefined,
-): Promise<{ id: string; name: string } | null> {
-  let envs: EnvironmentLite[] = [];
-  try {
-    envs = await api.get<EnvironmentLite[]>(
-      withScope(`/api/projects/${projectId}/environments`, scopeFromLink(projectId)),
-    );
-  } catch {
-    return null;
-  }
-
-  if (!envs?.length) return null;
-
-  if (nameOrId) {
-    const lower = nameOrId.toLowerCase();
-    const match = envs.find(
-      (e) => e.id.toLowerCase() === lower || e.name.toLowerCase() === lower,
-    );
-    if (!match) {
-      throw new Error(
-        `Environment "${nameOrId}" not found. Available: ${envs.map((e) => e.name).join(", ")}`,
-      );
-    }
-    return match;
-  }
-
-  const link = getProjectLink();
-  if (link?.environmentId) {
-    return {
-      id: link.environmentId,
-      name: link.environmentName || link.environmentId,
-    };
-  }
-
-  // Default: first env (typically "production")
-  return envs[0];
-}
-
-/**
  * Look up the workspace id for a project. Used to lazy-fill legacy links
  * that were saved before workspaces existed. Returns null if the project
  * isn't accessible to the current user.
@@ -219,7 +169,7 @@ export async function lookupProjectWorkspace(
 
 /**
  * Resolve a project flag → `{ projectId, scope }`. Scope carries
- * workspaceId + environmentName for `withScope(url, scope)` queries.
+ * workspaceId for `withScope(url, scope)` queries.
  *
  * Lazy-fills missing workspaceId into the cwd link the same way
  * `resolveContext` does.
@@ -248,7 +198,6 @@ export async function resolveProjectScope(
     projectId,
     scope: {
       workspaceId: workspaceId ?? null,
-      environmentName: link?.environmentName ?? null,
     },
   };
 }
@@ -258,19 +207,17 @@ export interface ResolvedContext {
   workspaceId?: string;
   workspaceName?: string;
   service?: { id: string; name: string };
-  environment?: { id: string; name: string };
 }
 
 /** Build the scope object for `withScope(url, scope)` API calls. */
 export function getScope(ctx: ResolvedContext): ResourceScope {
   return {
     workspaceId: ctx.workspaceId ?? null,
-    environmentName: ctx.environment?.name ?? null,
   };
 }
 
 /**
- * Convenience: resolve project + active service + active environment in one go.
+ * Convenience: resolve project + active service in one go.
  *
  * Lazily backfills `workspaceId` into the cwd link when missing (legacy
  * configs written before workspaces existed). Once filled, subsequent
@@ -279,16 +226,10 @@ export function getScope(ctx: ResolvedContext): ResourceScope {
 export async function resolveContext(opts: {
   projectFlag?: string;
   serviceFlag?: string;
-  environmentFlag?: string;
   workspaceFlag?: string;
   requireService?: boolean;
 }): Promise<ResolvedContext> {
   const projectId = await resolveProjectId(opts.projectFlag);
-
-  const environment = await resolveEnvironment(
-    projectId,
-    opts.environmentFlag,
-  ).catch(() => null);
 
   let service: { id: string; name: string } | undefined;
   const link = getProjectLink();
@@ -326,6 +267,5 @@ export async function resolveContext(opts: {
     workspaceId,
     workspaceName,
     service,
-    environment: environment || undefined,
   };
 }

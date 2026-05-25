@@ -15,17 +15,17 @@ describe("withQuery", () => {
   test("appends multiple params", () => {
     const url = withQuery("/api/projects", {
       workspaceId: "ws_1",
-      environment: "production",
+      branch: "main",
     });
     expect(url).toContain("workspaceId=ws_1");
-    expect(url).toContain("environment=production");
+    expect(url).toContain("branch=main");
     expect(url.startsWith("/api/projects?")).toBe(true);
   });
 
   test("skips null/undefined/empty values", () => {
     const url = withQuery("/api/projects", {
       workspaceId: "ws_1",
-      environment: null,
+      missing: null,
       branch: undefined,
       empty: "",
     });
@@ -38,8 +38,8 @@ describe("withQuery", () => {
   });
 
   test("URL-encodes special chars", () => {
-    const url = withQuery("/api/projects", { environment: "feat/branch" });
-    expect(url).toBe("/api/projects?environment=feat%2Fbranch");
+    const url = withQuery("/api/projects", { branch: "feat/x" });
+    expect(url).toBe("/api/projects?branch=feat%2Fx");
   });
 });
 
@@ -52,33 +52,15 @@ describe("withScope", () => {
     expect(withScope("/api/projects/X/apps", {})).toBe("/api/projects/X/apps");
   });
 
-  test("adds workspaceId only", () => {
+  test("adds workspaceId", () => {
     expect(
       withScope("/api/projects/X/apps", { workspaceId: "ws_1" }),
     ).toBe("/api/projects/X/apps?workspaceId=ws_1");
   });
 
-  test("adds environment only (mapped from environmentName)", () => {
+  test("treats null workspaceId as missing", () => {
     expect(
-      withScope("/api/projects/X/apps", { environmentName: "staging" }),
-    ).toBe("/api/projects/X/apps?environment=staging");
-  });
-
-  test("adds both workspaceId and environment", () => {
-    const url = withScope("/api/projects/X/apps", {
-      workspaceId: "ws_1",
-      environmentName: "production",
-    });
-    expect(url).toContain("workspaceId=ws_1");
-    expect(url).toContain("environment=production");
-  });
-
-  test("treats null scope values as missing", () => {
-    expect(
-      withScope("/api/projects/X/apps", {
-        workspaceId: null,
-        environmentName: null,
-      }),
+      withScope("/api/projects/X/apps", { workspaceId: null }),
     ).toBe("/api/projects/X/apps");
   });
 });

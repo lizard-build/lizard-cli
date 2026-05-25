@@ -6,7 +6,7 @@ export function registerOpen(program) {
     program
         .command("open")
         .description("Open project in browser")
-        .option("-p, --project <id>", "Project name or ID")
+        .option("-p, --project <id>", "Project name, slug, or ID")
         .action(async (opts) => {
         const projectId = await resolveProjectId(opts.project);
         const url = `${getBaseURL()}/projects/${projectId}`;

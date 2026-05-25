@@ -14,7 +14,7 @@ export function registerDown(program) {
         .argument("[id]", "Service ID or name (defaults to linked)")
         .description("Stop the latest deployment of a service")
         .option("-s, --service <name>", "Service name or ID")
-        .option("-p, --project <id>", "Project name or ID")
+        .option("-p, --project <id>", "Project name, slug, or ID")
         .option("-y, --yes", "Skip confirmation")
         .action(async (id, opts) => {
         const projectId = await resolveProjectId(opts.project);

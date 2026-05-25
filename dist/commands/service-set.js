@@ -36,7 +36,7 @@ export function registerServiceSet(svc) {
         .option("--set <pair>", "Set a field: <path>=<value>. Repeatable.", (val, prev) => [...prev, val], [])
         .option("-f, --file <path>", "JSON config file to apply")
         .option("-s, --service <name>", "Service name or ID")
-        .option("-p, --project <id>", "Project name or ID")
+        .option("-p, --project <id>", "Project name, slug, or ID")
         .option("--force", "Overwrite even if the config was changed remotely")
         .action(async (serviceArg, opts) => {
         const { projectId, scope } = await resolveProjectScope(opts.project);
