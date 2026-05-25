@@ -29,7 +29,7 @@ export function registerScale(program: Command) {
     .description("Scale a service (replicas / CPU / memory / storage)")
     .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .option("--replicas <n>", "Number of replicas (1-10), apps only", parseIntOption)
     .option("--cpu <cores>", `CPU cap, whole cores (allowed: ${ALLOWED_CPU_CORES.join(", ")})`, parseIntOption)
     .option("--memory <mb>", `Memory cap in MB (allowed: ${ALLOWED_MEMORY_MB.join(", ")})`, parseIntOption)

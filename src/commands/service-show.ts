@@ -18,7 +18,7 @@ export function registerServiceShow(svc: Command) {
     .description("Show the current service configuration as JSON")
     .argument("[service]", "Service name or ID (omit for whole project)")
     .option("-s, --service <name>", "Limit output to one service")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (serviceArg: string | undefined, opts) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);
 

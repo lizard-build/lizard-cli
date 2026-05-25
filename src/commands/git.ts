@@ -75,7 +75,7 @@ export function registerGit(program: Command) {
     .argument("<service>", "Service name (as shown in the project)")
     .argument("<branch>", "Branch name to switch to")
     .option("--detach", "Start redeploy and exit without streaming logs")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (serviceArg: string, branch: string, opts) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);
 
@@ -147,7 +147,7 @@ export function registerGit(program: Command) {
   git
     .command("status")
     .description("Show GitHub connection and repository status")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (opts) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);
 

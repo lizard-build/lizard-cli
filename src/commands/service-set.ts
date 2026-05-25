@@ -45,7 +45,7 @@ export function registerServiceSet(svc: Command) {
     )
     .option("-f, --file <path>", "JSON config file to apply")
     .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .option("--force", "Overwrite even if the config was changed remotely")
     .action(async (serviceArg: string | undefined, opts) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);

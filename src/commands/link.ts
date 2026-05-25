@@ -41,7 +41,7 @@ export function registerLink(program: Command) {
     .command("link")
     .description("Associate the current directory with an existing project")
     .argument("[service]", "Service name or ID (optional)")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .option("-w, --workspace <ws>", "Workspace id, slug, or name")
     .option("-s, --service <name>", "Service name or ID (optional)")
     .action(async (serviceArg: string | undefined, opts) => {

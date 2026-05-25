@@ -67,7 +67,7 @@ export function registerService(program: Command) {
     .description("Show status of the linked or specified service")
     .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (serviceArg: string | undefined, opts) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);
       const target = serviceArg || opts.service || getProjectLink()?.serviceId;
@@ -100,7 +100,7 @@ export function registerService(program: Command) {
     .description("Delete a service")
     .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .option("-y, --yes", "Skip confirmation")
     .action(async (serviceArg: string | undefined, opts) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);
@@ -141,7 +141,7 @@ export function registerService(program: Command) {
     .description("Redeploy the latest build of a service")
     .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (serviceArg: string | undefined, opts) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);
       const target = serviceArg || opts.service || getProjectLink()?.serviceId;
@@ -160,7 +160,7 @@ export function registerService(program: Command) {
     .description("Restart a service")
     .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (serviceArg: string | undefined, opts) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);
       const target = serviceArg || opts.service || getProjectLink()?.serviceId;
@@ -179,7 +179,7 @@ export function registerService(program: Command) {
     .description("Scale a service across regions")
     .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .option("--replicas <n>", "Number of replicas", parseIntOption)
     .option("--region <code>", "Region code")
     .action(async (serviceArg: string | undefined, opts) => {
@@ -214,7 +214,7 @@ export function registerService(program: Command) {
     .argument("<new-name>", "New name for the service")
     .description("Rename a service (apps and addons)")
     .option("-s, --service <name>", "Service name or ID (defaults to linked service)")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (newName: string, opts) => {
       const nameErr = validateName(newName);
       if (nameErr) throw new Error(`Invalid name: ${nameErr}`);
@@ -250,7 +250,7 @@ export function registerService(program: Command) {
     .description("Stream logs of a service")
     .argument("[service]", "Service name or ID (defaults to linked)")
     .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .option("--build", "Show build logs instead of runtime")
     .option("-n, --tail <n>", "Print last N lines and exit (no follow); use --tail all for full history")
     .option("--page <n>", "Page of historical logs (1=most recent, 2=older, …); implies --tail 200")

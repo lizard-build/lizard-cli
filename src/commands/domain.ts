@@ -36,7 +36,7 @@ export function registerDomain(program: Command) {
     .argument("[hostname]", "Custom domain to attach (e.g. app.example.com)")
     .description("Manage service domains")
     .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .option("--port <n>", "Port to expose", parseIntOption)
     .action(async (hostname: string | undefined, opts, _cmd) => {
       const projectId = await resolveProjectId(opts.project);

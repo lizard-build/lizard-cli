@@ -13,7 +13,7 @@ export function registerSSH(program: Command) {
     .command("ssh [cmd...]")
     .description("Execute a command inside a running service VM")
     .option("-s, --service <id>", "Service name or ID")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .addHelpText("after", `
 Examples:
   lizard ssh -s my-app -- ls -la /app

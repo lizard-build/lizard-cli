@@ -13,7 +13,7 @@ export function registerConfig(program: Command) {
   config
     .command("apply")
     .description("Apply lizard-config.json to the project")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .option("-f, --file <path>", "Path to config file (default: lizard-config.json)")
     .option("--dry-run", "Show what would change without applying")
     .action(async (opts) => {

@@ -9,7 +9,7 @@ export function registerPs(program: Command) {
   program
     .command("ps")
     .description("List all services in the project")
-    .option("-p, --project <id>", "Project name or ID")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (opts) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);
       const data = await api.get<{ apps: any[]; addons: any[] }>(
