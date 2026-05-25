@@ -4,7 +4,7 @@ import * as readline from "node:readline";
 import { api, getBaseURL, streamSSE, withScope } from "../lib/api.js";
 import { openURL } from "../lib/auth.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
-import { success, error, info, isJSONMode, printJSON } from "../lib/format.js";
+import { success, error, info, isJSONMode, printJSON, link } from "../lib/format.js";
 export function registerGit(program) {
     const git = program
         .command("git")
@@ -135,6 +135,7 @@ export function registerGit(program) {
                     installed: githubStatus.installed,
                     installationId: githubStatus.installationId,
                     installations: githubStatus.installations ?? [],
+                    manageUrl: githubStatus.manageUrl,
                 },
                 apps: appsWithRepo.map((a) => ({
                     name: a.name,
@@ -154,8 +155,9 @@ export function registerGit(program) {
                     ? chalk.dim(`${inst.repoCount} repos${inst.privateCount ? `, ${inst.privateCount} private` : ""}`)
                     : "";
                 info(`  ${chalk.bold(inst.account.login)} ${chalk.dim(`(${typeLabel}, installation #${inst.id})`)}  ${repoLabel}`);
-                info(`  ${chalk.dim("Manage: " + inst.htmlUrl)}`);
             }
+            const manageUrl = githubStatus.manageUrl ?? `https://github.com/apps/lizard-app/installations/select_target`;
+            info(chalk.dim(`  Manage: ${link(manageUrl)}`));
         }
         else {
             info(`GitHub App: ${chalk.yellow("not connected")}  ${chalk.dim("→ run `lizard git connect`")}`);

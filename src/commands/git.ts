@@ -6,7 +6,7 @@ import { Command } from "commander";
 import { api, getBaseURL, streamSSE, withScope } from "../lib/api.js";
 import { openURL } from "../lib/auth.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
-import { success, error, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
+import { success, error, info, isJSONMode, printJSON, isTTY, link } from "../lib/format.js";
 
 interface GitHubInstallation {
   id: number;
@@ -188,7 +188,7 @@ export function registerGit(program: Command) {
           info(`  ${chalk.bold(inst.account.login)} ${chalk.dim(`(${typeLabel}, installation #${inst.id})`)}  ${repoLabel}`);
         }
         const manageUrl = githubStatus.manageUrl ?? `https://github.com/apps/lizard-app/installations/select_target`;
-        info(chalk.dim(`  Manage: ${manageUrl}`));
+        info(chalk.dim(`  Manage: ${link(manageUrl)}`));
       } else {
         info(`GitHub App: ${chalk.yellow("not connected")}  ${chalk.dim("→ run `lizard git connect`")}`);
         if (githubStatus.error) {

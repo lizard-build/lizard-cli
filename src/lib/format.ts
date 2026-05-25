@@ -34,6 +34,12 @@ export function info(msg: string) {
   process.stderr.write(msg + "\n");
 }
 
+export function link(url: string, text?: string): string {
+  const label = text ?? url;
+  if (!isTTY()) return label;
+  return `\x1b]8;;${url}\x1b\\${label}\x1b]8;;\x1b\\`;
+}
+
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 function visibleLength(s: string): number {
   return s.replace(ANSI_RE, "").length;

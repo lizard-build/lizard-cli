@@ -6,6 +6,7 @@ export declare function success(msg: string): void;
 export declare function error(msg: string): void;
 export declare function warn(msg: string): void;
 export declare function info(msg: string): void;
+export declare function link(url: string, text?: string): string;
 export declare function table(headers: string[], rows: string[][]): void;
 export declare function statusColor(status: string): string;
 export declare function timeAgo(ts: number | string): string;
