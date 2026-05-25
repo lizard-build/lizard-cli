@@ -78,36 +78,45 @@ export function registerScale(program: Command) {
         throw new Error("--storage is only supported for addons (postgres, redis, mongo, mysql).");
       }
 
-      // App path: replicas go to /scale; cpu/memory go to the general app PATCH
-      // (which triggers VM resize via resizeAppOnNode).
-      // cpuLimit/memoryLimit are stored verbatim and the dashboard slider snaps
-      // by exact string match against ['1000m','2000m','4000m'] / ['512Mi','1Gi','2Gi','4Gi'].
-      // Send the same k8s strings the UI writes, or the slider falls to index 0.
-      const resizeBody: Record<string, unknown> = {};
-      if (opts.cpu !== undefined) resizeBody.cpuLimit = `${opts.cpu * 1000}m`;
-      if (opts.memory !== undefined) resizeBody.memoryLimit = mbToK8s(opts.memory);
-
+      // App path — replicas go to /scale; cpu/memory go through config:apply
+      // (PATCH /api/apps/:id was retired with 410 in favour of config:apply).
       const calls: Promise<unknown>[] = [];
+
       if (opts.replicas !== undefined) {
         calls.push(api.patch(`/api/apps/${service.id}/scale`, { replicas: opts.replicas }));
       }
-      if (Object.keys(resizeBody).length > 0) {
-        calls.push(api.patch(`/api/apps/${service.id}`, resizeBody));
+
+      let configApplyResult: ConfigApplyResult | undefined;
+      if (opts.cpu !== undefined || opts.memory !== undefined) {
+        const serviceEntry: Record<string, unknown> = { id: service.id, name: service.name };
+        if (opts.cpu !== undefined) serviceEntry.cpuLimit = `${opts.cpu * 1000}m`;
+        if (opts.memory !== undefined) serviceEntry.memoryLimit = mbToK8s(opts.memory);
+        calls.push(
+          api.post<ConfigApplyResult>(`/api/projects/${projectId}/config:apply`, {
+            services: [serviceEntry],
+          }).then((r) => { configApplyResult = r; return r; }),
+        );
       }
 
-      const results = await Promise.all(calls);
+      await Promise.all(calls);
+      if (configApplyResult) warnSideEffects(configApplyResult);
 
       if (isJSONMode()) {
         printJSON({
           id: service.id,
           ...(opts.replicas !== undefined ? { replicas: opts.replicas } : {}),
-          ...resizeBody,
-          results,
+          ...(opts.cpu !== undefined ? { cpuLimit: `${opts.cpu * 1000}m` } : {}),
+          ...(opts.memory !== undefined ? { memoryLimit: mbToK8s(opts.memory) } : {}),
         });
       } else {
         success(`Scaled ${chalk.bold(service.name)}`);
       }
     });
+}
+
+interface ConfigApplyResult {
+  revision?: number;
+  sideEffectFailures?: { op: string; error: string }[];
 }
 
 interface AddonRecord {
@@ -122,6 +131,14 @@ interface AddonRecord {
   };
 }
 
+/** Warn the user about any deferred side-effect failures from a config:apply response. */
+function warnSideEffects(result: ConfigApplyResult): void {
+  if (!result.sideEffectFailures?.length) return;
+  for (const f of result.sideEffectFailures) {
+    process.stderr.write(chalk.yellow(`⚠ Side effect failed (${f.op}): ${f.error}\n`));
+  }
+}
+
 async function scaleAddon(
   projectId: string,
   service: { id: string; name: string },
@@ -129,47 +146,47 @@ async function scaleAddon(
   memory: number | undefined,
   storageMb: number | undefined,
 ): Promise<void> {
-  // /limits requires BOTH vcpu and memoryMb; fetch the current config so partial
-  // flag combos (e.g. --cpu only) don't accidentally wipe the other axis. Also
-  // gives us the current storageSize for the grow-only check below.
-  const addons = await api.get<AddonRecord[]>(`/api/projects/${projectId}/addons`);
-  const current = addons.find((a) => a.id === service.id);
-  if (!current) throw new Error(`Addon "${service.name}" not found in project.`);
-
-  const cfg = current.config ?? {};
-  const summary: Record<string, unknown> = { id: service.id, kind: "addon" };
-
-  if (cpu !== undefined || memory !== undefined) {
-    const currentVcpu = cfg.vcpuLimit ?? cfg.vcpu ?? 1;
-    const currentMemoryMb = cfg.memoryMbLimit ?? cfg.memoryMb ?? 512;
-    const body = {
-      vcpu: cpu ?? currentVcpu,
-      memoryMb: memory ?? currentMemoryMb,
-    };
-    summary.limits = await api.put(
-      `/api/projects/${projectId}/addons/${service.id}/limits`,
-      body,
-    );
-    Object.assign(summary, body);
-  }
-
+  // Only pre-fetch addon list when --storage is passed — needed for the
+  // grow-only check. cpu/memory go through config:apply which accepts partial
+  // deltas, so no pre-fetch is needed for those axes.
   if (storageMb !== undefined) {
-    const currentMb = cfg.storageSize ? parseStorageToMb(cfg.storageSize) : 0;
+    const addons = await api.get<AddonRecord[]>(`/api/projects/${projectId}/addons`);
+    const current = addons.find((a) => a.id === service.id);
+    if (!current) throw new Error(`Addon "${service.name}" not found in project.`);
+    const currentMb = current.config?.storageSize ? parseStorageToMb(current.config.storageSize) : 0;
     if (currentMb > 0 && storageMb <= currentMb) {
       throw new Error(
         `--storage ${storageMb} MB is not larger than current ${currentMb} MB. Storage is grow-only.`,
       );
     }
-    const storageSize = mbToK8s(storageMb);
-    summary.resize = await api.post(
-      `/api/projects/${projectId}/addons/${service.id}/resize`,
-      { storageSize },
-    );
-    summary.storageSize = storageSize;
   }
 
+  // Build the config:apply addon patch. All three axes are optional and can
+  // be combined freely — the server writes only the fields present.
+  const addonPatch: Record<string, unknown> = { id: service.id };
+  if (cpu !== undefined || memory !== undefined) {
+    const limits: Record<string, number> = {};
+    if (cpu !== undefined) limits.vcpu = cpu;
+    if (memory !== undefined) limits.memoryMb = memory;
+    addonPatch.limits = limits;
+  }
+  if (storageMb !== undefined) {
+    addonPatch.storageSize = mbToK8s(storageMb);
+  }
+
+  const result = await api.post<ConfigApplyResult>(`/api/projects/${projectId}/config:apply`, {
+    addons: [addonPatch],
+  });
+  warnSideEffects(result);
+
   if (isJSONMode()) {
-    printJSON(summary);
+    printJSON({
+      id: service.id,
+      kind: "addon",
+      ...(cpu !== undefined ? { vcpu: cpu } : {}),
+      ...(memory !== undefined ? { memoryMb: memory } : {}),
+      ...(storageMb !== undefined ? { storageSize: mbToK8s(storageMb) } : {}),
+    });
   } else {
     success(`Scaled ${chalk.bold(service.name)} (addon)`);
   }
