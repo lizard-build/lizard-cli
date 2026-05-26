@@ -10,7 +10,8 @@ import { success, info, isJSONMode, printJSON, isTTY, statusColor, } from "../li
 /**
  * `lizard service` — service group:
  *   - bare: link a service to cwd
- *   - list / link / status / delete / redeploy / restart / scale / logs
+ *   - list / link / status / delete / redeploy / restart / logs
+ *   (scaling lives on the top-level `lizard scale` command)
  */
 export function registerService(program) {
     const svc = program
@@ -152,41 +153,6 @@ export function registerService(program) {
         }
         else {
             success(`${chalk.bold(svcInfo.name)} restarting`);
-        }
-    });
-    svc
-        .command("scale")
-        .description("Scale a service across regions")
-        .argument("[service]", "Service name or ID (defaults to linked)")
-        .option("-s, --service <name>", "Service name or ID")
-        .option("-p, --project <id>", "Project name, slug, or ID")
-        .option("--replicas <n>", "Number of replicas", parseIntOption)
-        .option("--region <code>", "Region code")
-        .action(async (serviceArg, opts) => {
-        const { projectId, scope } = await resolveProjectScope(opts.project);
-        const target = serviceArg || opts.service || getProjectLink()?.serviceId;
-        if (!target)
-            throw new Error("No service specified or linked.");
-        const svcInfo = await resolveService(projectId, target);
-        const body = {};
-        if (opts.replicas !== undefined)
-            body.replicas = opts.replicas;
-        if (opts.region)
-            body.region = opts.region;
-        if (Object.keys(body).length === 0) {
-            throw new Error("Pass --replicas <n> or --region <code> (or both).");
-        }
-        await api.post(withScope(`/api/apps/${svcInfo.id}/scale`, scope), body).catch((err) => {
-            if (err?.status === 404) {
-                throw new Error("Scaling endpoint not yet implemented on the platform.");
-            }
-            throw err;
-        });
-        if (isJSONMode()) {
-            printJSON({ id: svcInfo.id, ...body });
-        }
-        else {
-            success(`Scaled ${chalk.bold(svcInfo.name)}`);
         }
     });
     svc
@@ -343,12 +309,6 @@ export function registerService(program) {
             success(`Linked service ${chalk.bold(svcInfo.name)}`);
         }
     }
-}
-function parseIntOption(value) {
-    const n = parseInt(value, 10);
-    if (Number.isNaN(n))
-        throw new Error(`Invalid number: ${value}`);
-    return n;
 }
 function safeLogLine(data) {
     try {
