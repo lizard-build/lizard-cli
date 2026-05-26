@@ -60,15 +60,17 @@ export function registerSecrets(program) {
     const cmd = program
         .command("secrets")
         .alias("secret")
-        .description("Manage secrets (default scope: service; use --global for project). " +
-        "Secrets apply live to running VMs; keys with NEXT_PUBLIC_* or VITE_* prefix " +
-        "trigger a redeploy because they're baked into the client bundle.")
+        .description("Manage secrets (default scope: service; --global for project)")
         .option("--global", "Target the whole project")
         .option("--show", "Reveal values")
         .option("--ref", "List reference templates available in this scope")
         .addOption(new Option("--refs").hideHelp().implies({ ref: true }))
         .option("-s, --service <name>", "Service to scope to (overrides linked)")
         .option("-p, --project <id>", "Project to scope to")
+        .addHelpText("after", `
+Notes:
+  Secrets apply live to running VMs. Keys prefixed with NEXT_PUBLIC_* or VITE_*
+  trigger a redeploy because they're baked into the client bundle at build time.`)
         .action(async (opts) => {
         const scope = await resolveScope(opts.project, opts.service, opts.global);
         // --ref → list reference templates exposed by the platform
