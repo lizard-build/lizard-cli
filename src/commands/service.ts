@@ -24,8 +24,8 @@ interface ServicesResponse {
 /**
  * `lizard service` — service group:
  *   - bare: link a service to cwd
- *   - list / link / status / delete / redeploy / restart / logs
- *   (scaling lives on the top-level `lizard scale` command)
+ *   - list / link / status / delete / rename / set / show / logs
+ *   (scale / redeploy / restart live on the top-level commands of the same name)
  */
 export function registerService(program: Command) {
   const svc = program
@@ -138,44 +138,6 @@ export function registerService(program: Command) {
     });
 
   svc
-    .command("redeploy")
-    .description("Redeploy the latest build of a service")
-    .argument("[service]", "Service name or ID (defaults to linked)")
-    .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name, slug, or ID")
-    .action(async (serviceArg: string | undefined, opts) => {
-      const { projectId, scope } = await resolveProjectScope(opts.project);
-      const target = serviceArg || opts.service || getProjectLink()?.serviceId;
-      if (!target) throw new Error("No service specified or linked.");
-      const svcInfo = await resolveService(projectId, target);
-      await api.post(withScope(`/api/apps/${svcInfo.id}/redeploy`, scope));
-      if (isJSONMode()) {
-        printJSON({ id: svcInfo.id, status: "deploying" });
-      } else {
-        success(`Redeploy of ${chalk.bold(svcInfo.name)} started`);
-      }
-    });
-
-  svc
-    .command("restart")
-    .description("Restart a service")
-    .argument("[service]", "Service name or ID (defaults to linked)")
-    .option("-s, --service <name>", "Service name or ID")
-    .option("-p, --project <id>", "Project name, slug, or ID")
-    .action(async (serviceArg: string | undefined, opts) => {
-      const { projectId, scope } = await resolveProjectScope(opts.project);
-      const target = serviceArg || opts.service || getProjectLink()?.serviceId;
-      if (!target) throw new Error("No service specified or linked.");
-      const svcInfo = await resolveService(projectId, target);
-      await api.post(withScope(`/api/apps/${svcInfo.id}/restart`, scope));
-      if (isJSONMode()) {
-        printJSON({ id: svcInfo.id, status: "restarting" });
-      } else {
-        success(`${chalk.bold(svcInfo.name)} restarting`);
-      }
-    });
-
-  svc
     .command("rename")
     .argument("<new-name>", "New name for the service")
     .description("Rename a service (apps and addons)")
@@ -190,7 +152,13 @@ export function registerService(program: Command) {
       const svcInfo = await resolveService(projectId, target);
 
       if (svcInfo.kind === "app") {
-        await api.patch(withScope(`/api/apps/${svcInfo.id}`, scope), { name: newName });
+        // PATCH /api/apps/:id is 410-Gone; renames go through config:apply.
+        // Backend treats name as a rename only when id is also in the patch
+        // (otherwise name is a lookup key).
+        await api.post(
+          withScope(`/api/projects/${projectId}/config:apply`, scope),
+          { services: [{ id: svcInfo.id, name: newName }] },
+        );
       } else {
         await api.patch(
           withScope(`/api/projects/${projectId}/addons/${svcInfo.id}`, scope),
