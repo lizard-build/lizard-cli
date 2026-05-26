@@ -2,7 +2,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
-import { setTokenOverride, requireAuth } from "./lib/auth.js";
+import { requireAuth } from "./lib/auth.js";
 import { setBaseURL, setAccessToken, APIError } from "./lib/api.js";
 import { checkForUpdateInBackground, CURRENT_VERSION } from "./lib/updater.js";
 const BANNER = chalk.rgb(16, 185, 129)([
@@ -60,7 +60,6 @@ program
     },
 })
     .option("--json", "Output in JSON format")
-    .option("--token <token>", "API token")
     .hook("preAction", async (thisCommand, actionCommand) => {
     const opts = thisCommand.opts();
     // Check for updates silently in background (shows notice after command)
@@ -70,10 +69,6 @@ program
     // JSON mode: explicit flag or non-TTY stdout
     if (opts.json || !process.stdout.isTTY) {
         setJSONMode(true);
-    }
-    // Token override
-    if (opts.token) {
-        setTokenOverride(opts.token);
     }
     // API URL override
     if (process.env.LIZARD_API_URL) {

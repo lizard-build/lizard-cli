@@ -7,15 +7,8 @@ import {
 
 export type { Credentials } from "./config.js";
 
-let tokenOverride: string | null = null;
-
-export function setTokenOverride(token: string) {
-  tokenOverride = token;
-}
-
-/** Get the active token in priority order: override → env → file */
+/** Get the active token in priority order: env → file */
 export function getToken(): string | null {
-  if (tokenOverride) return tokenOverride;
   if (process.env.LIZARD_TOKEN) return process.env.LIZARD_TOKEN;
   return loadCredentials()?.accessToken ?? null;
 }
@@ -49,9 +42,9 @@ function isTTY(): boolean {
  * Returns credentials or throws.
  */
 export async function requireAuth(): Promise<Credentials> {
-  if (tokenOverride || process.env.LIZARD_TOKEN) {
+  if (process.env.LIZARD_TOKEN) {
     return {
-      accessToken: (tokenOverride || process.env.LIZARD_TOKEN)!,
+      accessToken: process.env.LIZARD_TOKEN,
       userId: "",
       username: "",
     };

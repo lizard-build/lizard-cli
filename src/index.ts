@@ -3,7 +3,7 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
-import { setTokenOverride, requireAuth, isLoggedIn } from "./lib/auth.js";
+import { requireAuth, isLoggedIn } from "./lib/auth.js";
 import { setBaseURL, setAccessToken, APIError } from "./lib/api.js";
 import { checkForUpdateInBackground, CURRENT_VERSION } from "./lib/updater.js";
 
@@ -67,7 +67,6 @@ program
     },
   })
   .option("--json", "Output in JSON format")
-  .option("--token <token>", "API token")
   .hook("preAction", async (thisCommand, actionCommand) => {
     const opts = thisCommand.opts();
 
@@ -79,11 +78,6 @@ program
     // JSON mode: explicit flag or non-TTY stdout
     if (opts.json || !process.stdout.isTTY) {
       setJSONMode(true);
-    }
-
-    // Token override
-    if (opts.token) {
-      setTokenOverride(opts.token);
     }
 
     // API URL override

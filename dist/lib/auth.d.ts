@@ -1,7 +1,6 @@
 import { type Credentials } from "./config.js";
 export type { Credentials } from "./config.js";
-export declare function setTokenOverride(token: string): void;
-/** Get the active token in priority order: override → env → file */
+/** Get the active token in priority order: env → file */
 export declare function getToken(): string | null;
 export declare function loadCredentials(): Credentials | null;
 export declare function saveCredentials(creds: Credentials): void;

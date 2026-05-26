@@ -1,13 +1,7 @@
 import open from "open";
 import { loadConfig, saveConfig, } from "./config.js";
-let tokenOverride = null;
-export function setTokenOverride(token) {
-    tokenOverride = token;
-}
-/** Get the active token in priority order: override → env → file */
+/** Get the active token in priority order: env → file */
 export function getToken() {
-    if (tokenOverride)
-        return tokenOverride;
     if (process.env.LIZARD_TOKEN)
         return process.env.LIZARD_TOKEN;
     return loadCredentials()?.accessToken ?? null;
@@ -36,9 +30,9 @@ function isTTY() {
  * Returns credentials or throws.
  */
 export async function requireAuth() {
-    if (tokenOverride || process.env.LIZARD_TOKEN) {
+    if (process.env.LIZARD_TOKEN) {
         return {
-            accessToken: (tokenOverride || process.env.LIZARD_TOKEN),
+            accessToken: process.env.LIZARD_TOKEN,
             userId: "",
             username: "",
         };
