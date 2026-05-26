@@ -49,8 +49,9 @@ function parsePairs(pairs) {
     const out = {};
     for (const pair of pairs) {
         const eq = pair.indexOf("=");
-        if (eq < 1)
-            throw new Error(`Invalid format: "${pair}". Use KEY=value`);
+        if (eq < 1) {
+            throw new Error(`Invalid format: "${pair}". Use KEY=value (e.g. \`lizard secrets set DATABASE_URL=postgres://...\`).`);
+        }
         out[pair.slice(0, eq)] = pair.slice(eq + 1);
     }
     return out;

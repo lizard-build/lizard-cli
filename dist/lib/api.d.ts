@@ -18,7 +18,8 @@ export declare function withScope(path: string, scope?: ResourceScope): string;
 export declare class APIError extends Error {
     status: number;
     code: string;
-    constructor(status: number, message: string, code?: string);
+    body: unknown;
+    constructor(status: number, message: string, code?: string, body?: unknown);
 }
 export declare function isNotFound(err: unknown): boolean;
 export declare function isAuthError(err: unknown): boolean;

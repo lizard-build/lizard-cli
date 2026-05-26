@@ -137,14 +137,14 @@ async function showBuildLogs(serviceId, projectId, scope, tailN) {
         // Get first app in project
         const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
         if (!data.apps?.length) {
-            throw new Error("No apps in project");
+            throw new Error("No apps in project. Create one with `lizard up` or `lizard add`.");
         }
         appId = data.apps[0].id;
     }
     // Get latest build
     const app = await api.get(`/api/apps/${appId}`);
     if (!app.builds?.length) {
-        throw new Error("No builds found");
+        throw new Error("No builds for this app yet. Trigger one with `lizard up` or `lizard redeploy`.");
     }
     const buildId = app.builds[0].id;
     info(chalk.dim(`Build ${buildId}\n`));

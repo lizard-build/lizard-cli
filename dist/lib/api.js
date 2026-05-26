@@ -31,10 +31,12 @@ export function withScope(path, scope) {
 export class APIError extends Error {
     status;
     code;
-    constructor(status, message, code = "") {
+    body;
+    constructor(status, message, code = "", body = null) {
         super(message);
         this.status = status;
         this.code = code;
+        this.body = body;
     }
 }
 export function isNotFound(err) {
@@ -64,13 +66,15 @@ async function request(method, path, body, extraHeaders = {}) {
     if (!res.ok) {
         let msg = res.statusText;
         let code = "";
+        let body = null;
         try {
             const j = (await res.json());
+            body = j;
             msg = j.error || j.message || msg;
             code = j.code || "";
         }
         catch { }
-        throw new APIError(res.status, msg, code);
+        throw new APIError(res.status, msg, code, body);
     }
     const text = await res.text();
     if (!text)

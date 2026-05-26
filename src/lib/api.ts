@@ -57,10 +57,12 @@ export function withScope(path: string, scope?: ResourceScope): string {
 export class APIError extends Error {
   status: number;
   code: string;
-  constructor(status: number, message: string, code = "") {
+  body: unknown;
+  constructor(status: number, message: string, code = "", body: unknown = null) {
     super(message);
     this.status = status;
     this.code = code;
+    this.body = body;
   }
 }
 
@@ -101,12 +103,14 @@ async function request<T = any>(
   if (!res.ok) {
     let msg = res.statusText;
     let code = "";
+    let body: unknown = null;
     try {
       const j = (await res.json()) as any;
+      body = j;
       msg = j.error || j.message || msg;
       code = j.code || "";
     } catch {}
-    throw new APIError(res.status, msg, code);
+    throw new APIError(res.status, msg, code, body);
   }
 
   const text = await res.text();

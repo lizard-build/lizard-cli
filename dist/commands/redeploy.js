@@ -29,8 +29,9 @@ export function registerRedeploy(program) {
             const { projectId, scope } = await resolveProjectScope(opts.project);
             const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
             const apps = data.apps || [];
-            if (apps.length === 0)
-                throw new Error("No apps in project");
+            if (apps.length === 0) {
+                throw new Error("No apps in project. Create one with `lizard up` or `lizard add`.");
+            }
             if (apps.length === 1) {
                 id = apps[0].id;
             }

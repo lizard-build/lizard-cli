@@ -122,7 +122,105 @@ registerWhoami(program);
 registerWorkspace(program);
 // Error handling
 program.exitOverride();
+const EXIT_CODES = {
+    "0": "success",
+    "1": "generic error",
+    "2": "auth (401/403)",
+    "3": "not found (404)",
+    "4": "timeout (408/504)",
+    "5": "cancelled by user",
+};
+function isHelpJsonRequest(argv) {
+    const hasHelp = argv.some((a) => a === "--help" || a === "-h");
+    const hasJson = argv.some((a) => a === "--json");
+    return hasHelp && hasJson;
+}
+function collectValueFlags(cmd, acc) {
+    for (const opt of cmd.options) {
+        if (opt.required || opt.optional) {
+            if (opt.short)
+                acc.add(opt.short);
+            if (opt.long)
+                acc.add(opt.long);
+        }
+    }
+    for (const sub of cmd.commands)
+        collectValueFlags(sub, acc);
+}
+function findTargetCommand(argv, root) {
+    const valueFlags = new Set();
+    collectValueFlags(root, valueFlags);
+    let cur = root;
+    for (let i = 2; i < argv.length; i++) {
+        const tok = argv[i];
+        if (tok === "--help" || tok === "-h" || tok === "--json")
+            continue;
+        if (tok.startsWith("-")) {
+            if (tok.includes("="))
+                continue;
+            if (valueFlags.has(tok) && i + 1 < argv.length)
+                i++;
+            continue;
+        }
+        const sub = cur.commands.find((c) => c.name() === tok || c.aliases().includes(tok));
+        if (!sub)
+            break;
+        cur = sub;
+    }
+    return cur;
+}
+function dumpOption(o) {
+    return {
+        flags: o.flags,
+        long: o.long ?? null,
+        short: o.short ?? null,
+        description: o.description ?? "",
+        takesValue: Boolean(o.required || o.optional),
+        valueRequired: Boolean(o.required),
+        defaultValue: o.defaultValue ?? null,
+        choices: o.argChoices ?? null,
+        negate: Boolean(o.negate),
+    };
+}
+function dumpCommand(cmd) {
+    const args = (cmd.registeredArguments ?? []).map((a) => ({
+        name: a.name(),
+        description: a.description ?? "",
+        required: Boolean(a.required),
+        variadic: Boolean(a.variadic),
+        defaultValue: a.defaultValue ?? null,
+        choices: a.argChoices ?? null,
+    }));
+    return {
+        name: cmd.name(),
+        aliases: cmd.aliases(),
+        description: cmd.description(),
+        usage: cmd.usage(),
+        arguments: args,
+        options: cmd.options
+            .filter((o) => !o.hidden)
+            .map(dumpOption),
+        subcommands: cmd.commands
+            .filter((c) => !c._hidden)
+            .map(dumpCommand),
+    };
+}
 async function main() {
+    if (isHelpJsonRequest(process.argv)) {
+        const target = findTargetCommand(process.argv, program);
+        const isRoot = target === program;
+        const out = {
+            cli: "lizard",
+            version: CURRENT_VERSION,
+            command: dumpCommand(target),
+            globalOptions: isRoot
+                ? []
+                : program.options.filter((o) => !o.hidden).map(dumpOption),
+            exitCodes: EXIT_CODES,
+        };
+        process.stdout.write(JSON.stringify(out, null, 2) + "\n");
+        process.exit(0);
+    }
     try {
         await program.parseAsync(process.argv);
     }
@@ -144,6 +242,7 @@ async function main() {
                     code,
                     status: status ?? null,
                     message: msg,
+                    body: apiErr?.body ?? null,
                 },
             }, null, 2));
         }

@@ -163,7 +163,9 @@ async function showBuildLogs(
       withScope(`/api/projects/${projectId}/services`, scope),
     );
     if (!data.apps?.length) {
-      throw new Error("No apps in project");
+      throw new Error(
+        "No apps in project. Create one with `lizard up` or `lizard add`.",
+      );
     }
     appId = data.apps[0].id;
   }
@@ -173,7 +175,9 @@ async function showBuildLogs(
     builds?: Array<{ id: string; status: string }>;
   }>(`/api/apps/${appId}`);
   if (!app.builds?.length) {
-    throw new Error("No builds found");
+    throw new Error(
+      "No builds for this app yet. Trigger one with `lizard up` or `lizard redeploy`.",
+    );
   }
 
   const buildId = app.builds[0].id;

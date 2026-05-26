@@ -138,7 +138,11 @@ async function deployFromLocal(args: {
   }
 
   const files = getUploadFiles(args.targetPath, args.useGitignore);
-  if (files.length === 0) throw new Error("No files to upload.");
+  if (files.length === 0) {
+    throw new Error(
+      "No files to upload. Run from a directory with files, or pass a path: `lizard up <path>`.",
+    );
+  }
   info(chalk.dim(`  ${files.length} files selected`));
 
   const detectedPort = args.port === undefined ? detectLocalPort(args.targetPath) : undefined;
@@ -178,7 +182,9 @@ async function deployFromLocal(args: {
     });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(text);
+      throw new Error(
+        `Upload failed (${res.status}): ${text || res.statusText}`,
+      );
     }
     newApp = (await res.json()) as App & { buildId?: string };
     spinner.succeed(`Service ${chalk.bold(newApp.name)} ${args.existingServiceId ? "updated" : "created"}`);
