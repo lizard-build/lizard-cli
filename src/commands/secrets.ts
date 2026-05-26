@@ -103,12 +103,15 @@ export function registerSecrets(program: Command) {
   const cmd = program
     .command("secrets")
     .alias("secret")
-    .description("Manage secrets (default scope: service; use --global for project)")
+    .description(
+      "Manage secrets (default scope: service; use --global for project). " +
+        "Secrets apply live to running VMs; keys with NEXT_PUBLIC_* or VITE_* prefix " +
+        "trigger a redeploy because they're baked into the client bundle.",
+    )
     .option("--global", "Target the whole project")
     .option("--show", "Reveal values")
     .option("--ref", "List reference templates available in this scope")
     .addOption(new Option("--refs").hideHelp().implies({ ref: true }))
-    .option("--no-redeploy", "Don't trigger redeploy on set/delete")
     .option("-s, --service <name>", "Service to scope to (overrides linked)")
     .option("-p, --project <id>", "Project to scope to")
     .action(async (opts) => {
@@ -201,7 +204,6 @@ export function registerSecrets(program: Command) {
     .argument("<pairs...>", "KEY=value pairs")
     .description("Set one or more secrets")
     .option("--global", "Target the whole project")
-    .option("--no-redeploy", "Don't trigger redeploy")
     .action(async (pairs: string[], opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
@@ -225,7 +227,6 @@ export function registerSecrets(program: Command) {
     .argument("<keys...>", "Secret keys to delete")
     .description("Delete one or more secrets")
     .option("--global", "Target the whole project")
-    .option("--no-redeploy", "Don't trigger redeploy")
     .option("-y, --yes", "Skip confirmation")
     .action(async (keys: string[], opts, sub) => {
       const inherited = sub.parent?.opts() || {};
@@ -265,7 +266,6 @@ export function registerSecrets(program: Command) {
     .command("import")
     .description("Import secrets from stdin (KEY=value, one per line)")
     .option("--global", "Target the whole project")
-    .option("--no-redeploy", "Don't trigger redeploy")
     .action(async (opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
