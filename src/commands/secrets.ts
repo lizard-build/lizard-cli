@@ -159,6 +159,8 @@ export function registerSecrets(program: Command) {
     .option("--show", "Reveal values")
     .option("--ref", "List reference templates available in this scope")
     .addOption(new Option("--refs").hideHelp().implies({ ref: true }))
+    .option("-s, --service <name>", "Service to scope to (overrides linked)")
+    .option("-p, --project <id>", "Project to scope to")
     .action(async (opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
@@ -204,6 +206,8 @@ export function registerSecrets(program: Command) {
     .argument("<pairs...>", "KEY=value pairs")
     .description("Set one or more secrets")
     .option("--global", "Target the whole project")
+    .option("-s, --service <name>", "Service to scope to (overrides linked)")
+    .option("-p, --project <id>", "Project to scope to")
     .action(async (pairs: string[], opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
@@ -228,6 +232,8 @@ export function registerSecrets(program: Command) {
     .description("Delete one or more secrets")
     .option("--global", "Target the whole project")
     .option("-y, --yes", "Skip confirmation")
+    .option("-s, --service <name>", "Service to scope to (overrides linked)")
+    .option("-p, --project <id>", "Project to scope to")
     .action(async (keys: string[], opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
@@ -266,6 +272,8 @@ export function registerSecrets(program: Command) {
     .command("import")
     .description("Import secrets from stdin (KEY=value, one per line)")
     .option("--global", "Target the whole project")
+    .option("-s, --service <name>", "Service to scope to (overrides linked)")
+    .option("-p, --project <id>", "Project to scope to")
     .action(async (opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(

@@ -101,6 +101,8 @@ export function registerSecrets(program) {
         .option("--show", "Reveal values")
         .option("--ref", "List reference templates available in this scope")
         .addOption(new Option("--refs").hideHelp().implies({ ref: true }))
+        .option("-s, --service <name>", "Service to scope to (overrides linked)")
+        .option("-p, --project <id>", "Project to scope to")
         .action(async (opts, sub) => {
         const inherited = sub.parent?.opts() || {};
         const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global || inherited.global);
@@ -131,6 +133,8 @@ export function registerSecrets(program) {
         .argument("<pairs...>", "KEY=value pairs")
         .description("Set one or more secrets")
         .option("--global", "Target the whole project")
+        .option("-s, --service <name>", "Service to scope to (overrides linked)")
+        .option("-p, --project <id>", "Project to scope to")
         .action(async (pairs, opts, sub) => {
         const inherited = sub.parent?.opts() || {};
         const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global || inherited.global);
@@ -150,6 +154,8 @@ export function registerSecrets(program) {
         .description("Delete one or more secrets")
         .option("--global", "Target the whole project")
         .option("-y, --yes", "Skip confirmation")
+        .option("-s, --service <name>", "Service to scope to (overrides linked)")
+        .option("-p, --project <id>", "Project to scope to")
         .action(async (keys, opts, sub) => {
         const inherited = sub.parent?.opts() || {};
         const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global || inherited.global);
@@ -183,6 +189,8 @@ export function registerSecrets(program) {
         .command("import")
         .description("Import secrets from stdin (KEY=value, one per line)")
         .option("--global", "Target the whole project")
+        .option("-s, --service <name>", "Service to scope to (overrides linked)")
+        .option("-p, --project <id>", "Project to scope to")
         .action(async (opts, sub) => {
         const inherited = sub.parent?.opts() || {};
         const scope = await resolveScope(opts.project ?? inherited.project, opts.service ?? inherited.service, opts.global || inherited.global);
