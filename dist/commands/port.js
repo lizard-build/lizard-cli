@@ -1,7 +1,6 @@
 import chalk from "chalk";
-import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
-import { getActiveService } from "../lib/resolve.js";
+import { api, withScope } from "../lib/api.js";
+import { getActiveServiceWithKind, resolveProjectScope } from "../lib/resolve.js";
 import { success, info, isJSONMode, printJSON } from "../lib/format.js";
 /**
  * `lizard port [number]`
@@ -14,10 +13,13 @@ export function registerPort(program) {
         .argument("[port]", "Port number to set")
         .description("Show or change the container port for a service")
         .option("-s, --service <name>", "Service name or ID")
-        .option("--project <id>", "Project name, slug, or ID")
+        .option("-p, --project <id>", "Project name, slug, or ID")
         .action(async (portArg, opts) => {
-        const projectId = await resolveProjectId(opts.project);
-        const service = await getActiveService(opts.service, projectId);
+        const { projectId, scope } = await resolveProjectScope(opts.project);
+        const service = await getActiveServiceWithKind(opts.service, projectId);
+        if (service.kind === "addon") {
+            throw new Error("Addons don't have a container port.");
+        }
         if (portArg === undefined) {
             const app = await api.get(`/api/apps/${service.id}`);
             const port = app.containerPort ?? 3000;
@@ -33,7 +35,9 @@ export function registerPort(program) {
         if (isNaN(newPort) || newPort < 1 || newPort > 65535) {
             throw new Error(`Invalid port: ${portArg}. Must be 1–65535.`);
         }
-        await api.patch(`/api/apps/${service.id}`, { containerPort: newPort });
+        // PATCH /api/apps/:id is 410-Gone server-side; writes go through
+        // POST /api/projects/:id/config:apply.
+        await api.post(withScope(`/api/projects/${projectId}/config:apply`, scope), { services: [{ id: service.id, name: service.name, containerPort: newPort }] });
         if (isJSONMode()) {
             printJSON({ ok: true, port: newPort });
         }
