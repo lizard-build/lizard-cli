@@ -80,10 +80,12 @@ export function checkForUpdateInBackground() {
         if (!isNewer)
             return;
         try {
-            process.stderr.write(`\n  Updating lizard v${CURRENT_VERSION} → v${latest}...\n`);
             const ok = await selfUpdate();
-            if (ok)
-                updateMessage = `  lizard updated to v${latest} — restart for the new version\n`;
+            if (ok) {
+                updateMessage =
+                    `\n  Updating lizard v${CURRENT_VERSION} → v${latest}...\n` +
+                        `  lizard updated to v${latest}\n`;
+            }
         }
         catch {
             // silent — don't interrupt the current command
