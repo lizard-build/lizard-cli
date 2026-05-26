@@ -64,7 +64,10 @@ Examples:
         process.exit(1);
       }
 
-      const cmd = cmdArgs.join(" ");
+      // The server executes `cmd` via shell on the VM, so each arg must be
+      // shell-quoted before being joined — otherwise `bash -c "ps | head"`
+      // collapses to `bash -c ps | head` (quotes lost, `|` becomes a real pipe).
+      const cmd = cmdArgs.map(shellQuote).join(" ");
       process.stdout.write(chalk.dim(`$ ${cmd}\n`));
 
       let exitCode = 0;
@@ -161,4 +164,12 @@ function execStream(
     req.write(body);
     req.end();
   });
+}
+
+/** POSIX single-quote escaping. Safe-token chars pass through verbatim;
+ *  anything else gets wrapped in '…' with embedded `'` rewritten as `'\''`. */
+function shellQuote(arg: string): string {
+  if (arg === "") return "''";
+  if (/^[A-Za-z0-9_./:=@%+,-]+$/.test(arg)) return arg;
+  return "'" + arg.replace(/'/g, "'\\''") + "'";
 }

@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { api, withScope } from "../lib/api.js";
 import { getProjectLink } from "../lib/config.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
@@ -49,17 +49,24 @@ export function registerRun(program) {
                     env[s.key] = s.value;
             }
         }
-        const cmd = args.join(" ");
-        try {
-            execSync(cmd, {
-                env,
-                stdio: "inherit",
-                shell: process.env.SHELL || "/bin/sh",
-            });
+        // argv-style spawn — no shell, so quoting / pipes / `;` in user-supplied
+        // args are passed verbatim to the target program instead of being parsed
+        // by /bin/sh. If the user wants a shell, they can invoke one explicitly:
+        // `lizard run sh -c 'foo | bar'`.
+        const result = spawnSync(args[0], args.slice(1), {
+            env,
+            stdio: "inherit",
+        });
+        if (result.error) {
+            const code = result.error.code;
+            if (code === "ENOENT") {
+                console.error(`lizard run: command not found: ${args[0]}`);
+                process.exit(127);
+            }
+            console.error(`lizard run: ${result.error.message}`);
+            process.exit(1);
         }
-        catch (err) {
-            process.exit(err.status || 1);
-        }
+        process.exit(result.status ?? 1);
     });
 }
 //# sourceMappingURL=run.js.map
