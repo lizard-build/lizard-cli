@@ -109,31 +109,35 @@ export async function lookupProjectWorkspace(projectId) {
  * Resolve a project flag → `{ projectId, scope }`. Scope carries
  * workspaceId for `withScope(url, scope)` queries.
  *
- * Lazy-fills missing workspaceId into the cwd link the same way
- * `resolveContext` does.
+ * For the linked project, lazy-fills missing workspaceId into the cwd link.
+ * For a different project (`-p other-project`), fetches the target's
+ * workspace so the scope reflects the target — not whatever the cwd link
+ * happened to be pointing at.
  */
 export async function resolveProjectScope(projectFlag) {
     const projectId = await resolveProjectId(projectFlag);
     const link = getProjectLink();
-    let workspaceId = link?.workspaceId ?? null;
-    let workspaceName = link?.workspaceName;
-    if (!workspaceId && link?.projectId === projectId) {
-        const fetched = await lookupProjectWorkspace(projectId);
-        if (fetched?.workspaceId) {
-            workspaceId = fetched.workspaceId;
-            workspaceName = fetched.workspaceName ?? undefined;
-            try {
-                updateProjectLink({ workspaceId, workspaceName });
+    // Same project as the cwd link — reuse cached workspaceId, lazy-fill if missing.
+    if (link?.projectId === projectId) {
+        let workspaceId = link.workspaceId ?? null;
+        let workspaceName = link.workspaceName;
+        if (!workspaceId) {
+            const fetched = await lookupProjectWorkspace(projectId);
+            if (fetched?.workspaceId) {
+                workspaceId = fetched.workspaceId;
+                workspaceName = fetched.workspaceName ?? undefined;
+                try {
+                    updateProjectLink({ workspaceId, workspaceName });
+                }
+                catch { }
             }
-            catch { }
         }
+        return { projectId, scope: { workspaceId: workspaceId ?? null } };
     }
-    return {
-        projectId,
-        scope: {
-            workspaceId: workspaceId ?? null,
-        },
-    };
+    // Different project — never reuse the link's workspaceId. Look up the
+    // target project's workspace directly. Mirrors `scopeForProject`.
+    const scope = await scopeForProject(projectId);
+    return { projectId, scope };
 }
 /** Build the scope object for `withScope(url, scope)` API calls. */
 export function getScope(ctx) {
@@ -161,25 +165,33 @@ export async function resolveContext(opts) {
             name: link.serviceName || link.serviceId,
         };
     }
-    // Workspace resolution: prefer the link (no extra API call), fall back to
-    // a one-shot lookup which we cache back into the link.
-    let workspaceId = link?.workspaceId;
-    let workspaceName = link?.workspaceName;
-    if (!workspaceId && link?.projectId === projectId) {
-        const fetched = await lookupProjectWorkspace(projectId);
-        if (fetched?.workspaceId) {
-            workspaceId = fetched.workspaceId;
-            workspaceName = fetched.workspaceName ?? undefined;
-            try {
-                updateProjectLink({
-                    workspaceId,
-                    workspaceName,
-                });
-            }
-            catch {
-                // Non-fatal: link may not exist for this cwd (e.g. --project flag).
+    // Workspace resolution: only reuse the link's workspaceId when it
+    // describes the same project. For cross-project commands we fetch the
+    // target project's workspace so the scope is correct — using the link's
+    // ws here would scope into the wrong workspace.
+    let workspaceId;
+    let workspaceName;
+    if (link?.projectId === projectId) {
+        workspaceId = link.workspaceId;
+        workspaceName = link.workspaceName;
+        if (!workspaceId) {
+            const fetched = await lookupProjectWorkspace(projectId);
+            if (fetched?.workspaceId) {
+                workspaceId = fetched.workspaceId;
+                workspaceName = fetched.workspaceName ?? undefined;
+                try {
+                    updateProjectLink({ workspaceId, workspaceName });
+                }
+                catch {
+                    // Non-fatal: link may not exist for this cwd (e.g. --project flag).
+                }
             }
         }
+    }
+    else {
+        const fetched = await lookupProjectWorkspace(projectId);
+        workspaceId = fetched?.workspaceId ?? undefined;
+        workspaceName = fetched?.workspaceName ?? undefined;
     }
     return {
         projectId,

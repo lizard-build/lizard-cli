@@ -22,7 +22,6 @@ import { registerAdd } from "./commands/add.js";
 import { registerConfig } from "./commands/config.js";
 import { registerDocs } from "./commands/docs.js";
 import { registerDomain } from "./commands/domain.js";
-import { registerDown } from "./commands/down.js";
 import { registerGit } from "./commands/git.js";
 import { registerInit } from "./commands/init.js";
 import { registerLink } from "./commands/link.js";
@@ -80,10 +79,15 @@ program
     if (process.env.LIZARD_API_URL) {
         setBaseURL(process.env.LIZARD_API_URL);
     }
-    // Commands that don't need auth. `status` prints the local link; the
-    // optional workspace backfill silently no-ops when not authed.
+    // Top-level commands that don't need auth. `status` prints the local link;
+    // the optional workspace backfill silently no-ops when not authed.
+    //
+    // Match by name AND parent — otherwise leaf subcommands sharing a name
+    // (e.g. `service status`, `git status`, `up status`) skip the auto-login
+    // flow and would 401 instead of prompting the user to log in.
     const noAuth = new Set(["login", "logout", "upgrade", "help", "docs", "status"]);
-    if (noAuth.has(actionCommand.name()))
+    const isTopLevel = actionCommand.parent === thisCommand;
+    if (isTopLevel && noAuth.has(actionCommand.name()))
         return;
     // Require auth — auto-triggers login flow if not logged in
     const creds = await requireAuth();
@@ -94,7 +98,6 @@ registerAdd(program);
 registerConfig(program);
 registerDocs(program);
 registerDomain(program);
-registerDown(program);
 registerGit(program);
 registerInit(program);
 registerLink(program);

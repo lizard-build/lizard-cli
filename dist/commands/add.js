@@ -115,9 +115,36 @@ export function registerAdd(program) {
         .option("--list", "Show available database types")
         .action(async (types, opts, command) => {
         const merged = command.optsWithGlobals();
-        const projectFlag = merged.project;
-        const workspaceFlag = opts.workspace;
-        const region = opts.region ?? DEFAULT_REGION;
+        await runAdd({
+            types,
+            addon: opts.addon,
+            service: opts.service,
+            repo: opts.repo,
+            variables: opts.variables,
+            name: opts.name,
+            instanceName: opts.instanceName,
+            workspace: opts.workspace,
+            region: opts.region,
+            list: opts.list,
+            projectFlag: merged.project,
+        });
+    });
+}
+async function runAdd(input) {
+    const types = input.types ?? [];
+    const opts = {
+        addon: input.addon,
+        service: input.service,
+        repo: input.repo,
+        variables: input.variables,
+        name: input.name,
+        instanceName: input.instanceName,
+        list: input.list,
+    };
+    const projectFlag = input.projectFlag;
+    const workspaceFlag = input.workspace;
+    const region = input.region ?? DEFAULT_REGION;
+    {
         // ── --list: show DB catalog and exit ──────────────────────────────
         if (opts.list || (!types.length && !opts.addon && !opts.service && !opts.repo && !isTTY())) {
             if (isJSONMode()) {
@@ -245,7 +272,10 @@ export function registerAdd(program) {
             return;
         }
         // ── No flags + no positional → interactive wizard ────────────────
-        if (!types.length && isTTY()) {
+        // After the wizard collects a concrete choice we re-enter runAdd
+        // directly (no program.parseAsync round-trip): runAdd routes to a
+        // concrete branch above based on the inputs we hand it.
+        if (!types.length && !input.skipWizard && isTTY()) {
             const kind = await p.select({
                 message: "What do you need?",
                 options: [
@@ -268,16 +298,11 @@ export function registerAdd(program) {
                 });
                 if (p.isCancel(sel))
                     process.exit(5);
-                // recursively call with positional type
-                await new Promise((resolve) => {
-                    program.parseAsync(["add", sel], { from: "user" }).then(() => resolve());
-                });
+                await runAdd({ ...input, types: [sel], skipWizard: true });
                 return;
             }
             if (kind === "s3") {
-                await new Promise((resolve) => {
-                    program.parseAsync(["add", "s3"], { from: "user" }).then(() => resolve());
-                });
+                await runAdd({ ...input, types: ["s3"], skipWizard: true });
                 return;
             }
             if (kind === "repo") {
@@ -287,10 +312,11 @@ export function registerAdd(program) {
                 const svc = await p.text({ message: "Service name", placeholder: String(repo).split("/").pop() });
                 if (p.isCancel(svc))
                     process.exit(5);
-                await new Promise((resolve) => {
-                    program
-                        .parseAsync(["add", "-r", String(repo), "-s", String(svc) || ""], { from: "user" })
-                        .then(() => resolve());
+                await runAdd({
+                    ...input,
+                    repo: String(repo),
+                    service: String(svc) || undefined,
+                    skipWizard: true,
                 });
                 return;
             }
@@ -298,9 +324,7 @@ export function registerAdd(program) {
                 const svc = await p.text({ message: "Service name" });
                 if (p.isCancel(svc))
                     process.exit(5);
-                await new Promise((resolve) => {
-                    program.parseAsync(["add", "-s", String(svc)], { from: "user" }).then(() => resolve());
-                });
+                await runAdd({ ...input, service: String(svc), skipWizard: true });
                 return;
             }
         }
@@ -308,6 +332,6 @@ export function registerAdd(program) {
             "  lizard add postgres        Add a managed database\n" +
             "  lizard add -r owner/repo   Create a service from a GitHub repo\n" +
             "  lizard add -s my-service   Empty service");
-    });
+    }
 }
 //# sourceMappingURL=add.js.map

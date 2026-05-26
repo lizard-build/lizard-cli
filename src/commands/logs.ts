@@ -2,7 +2,7 @@ import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { streamSSE, api, withScope, withQuery, type ResourceScope } from "../lib/api.js";
-import { resolveProjectScope } from "../lib/resolve.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { info, error, isTTY, isJSONMode } from "../lib/format.js";
 
 export function registerLogs(program: Command) {
@@ -23,13 +23,21 @@ export function registerLogs(program: Command) {
         return;
       }
 
+      // Resolve -s flag (may be name, slug, or ID) once up front so every
+      // branch below talks to the API with a real service ID.
+      let serviceId: string | undefined;
+      if (opts.service) {
+        const svc = await resolveService(projectId, opts.service);
+        serviceId = svc.id;
+      }
+
       // --tail: fetch historical logs and exit
       if (tailN !== undefined) {
         const entries = await api.get<any[]>(
           withScope(
             withQuery(`/api/projects/${projectId}/logs`, {
               limit: tailN,
-              service: opts.service,
+              service: serviceId,
             }),
             scope,
           ),
@@ -37,8 +45,6 @@ export function registerLogs(program: Command) {
         for (const e of entries) printLogEntry(e);
         return;
       }
-
-      let serviceId = opts.service;
 
       if (!serviceId && isTTY() && !isJSONMode()) {
         // Offer to pick a specific service or stream all
@@ -150,12 +156,16 @@ function printLogLine(data: string) {
 }
 
 async function showBuildLogs(
-  serviceId: string | undefined,
+  serviceRef: string | undefined,
   projectId: string,
   scope: ResourceScope,
   tailN?: number,
 ) {
-  let appId = serviceId;
+  let appId: string | undefined;
+  if (serviceRef) {
+    const svc = await resolveService(projectId, serviceRef);
+    appId = svc.id;
+  }
 
   if (!appId) {
     // Get first app in project

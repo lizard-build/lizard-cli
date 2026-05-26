@@ -133,6 +133,22 @@ function parseVariables(pairs: string[] | undefined): Record<string, string> {
   return out;
 }
 
+interface AddInput {
+  types: string[];
+  addon?: string[];
+  service?: string;
+  repo?: string;
+  variables?: string[];
+  name?: string;
+  instanceName?: string;
+  workspace?: string;
+  region?: string;
+  list?: boolean;
+  projectFlag?: string;
+  /** Set by the wizard so we don't re-enter it after the user already picked. */
+  skipWizard?: boolean;
+}
+
 export function registerAdd(program: Command) {
   program
     .command("add")
@@ -160,12 +176,40 @@ export function registerAdd(program: Command) {
     .option("--list", "Show available database types")
     .action(async (types: string[], opts, command) => {
       const merged = command.optsWithGlobals();
-      const projectFlag = merged.project;
-      const workspaceFlag = opts.workspace;
-      const region = opts.region ?? DEFAULT_REGION;
+      await runAdd({
+        types,
+        addon: opts.addon,
+        service: opts.service,
+        repo: opts.repo,
+        variables: opts.variables,
+        name: opts.name,
+        instanceName: opts.instanceName,
+        workspace: opts.workspace,
+        region: opts.region,
+        list: opts.list,
+        projectFlag: merged.project,
+      });
+    });
+}
 
-      // ── --list: show DB catalog and exit ──────────────────────────────
-      if (opts.list || (!types.length && !opts.addon && !opts.service && !opts.repo && !isTTY())) {
+async function runAdd(input: AddInput): Promise<void> {
+  const types = input.types ?? [];
+  const opts = {
+    addon: input.addon,
+    service: input.service,
+    repo: input.repo,
+    variables: input.variables,
+    name: input.name,
+    instanceName: input.instanceName,
+    list: input.list,
+  };
+  const projectFlag = input.projectFlag;
+  const workspaceFlag = input.workspace;
+  const region = input.region ?? DEFAULT_REGION;
+
+  {
+    // ── --list: show DB catalog and exit ──────────────────────────────
+    if (opts.list || (!types.length && !opts.addon && !opts.service && !opts.repo && !isTTY())) {
         if (isJSONMode()) {
           printJSON(CATALOG);
         } else {
@@ -310,7 +354,10 @@ export function registerAdd(program: Command) {
       }
 
       // ── No flags + no positional → interactive wizard ────────────────
-      if (!types.length && isTTY()) {
+      // After the wizard collects a concrete choice we re-enter runAdd
+      // directly (no program.parseAsync round-trip): runAdd routes to a
+      // concrete branch above based on the inputs we hand it.
+      if (!types.length && !input.skipWizard && isTTY()) {
         const kind = await p.select({
           message: "What do you need?",
           options: [
@@ -332,17 +379,12 @@ export function registerAdd(program: Command) {
             })),
           });
           if (p.isCancel(sel)) process.exit(5);
-          // recursively call with positional type
-          await new Promise<void>((resolve) => {
-            program.parseAsync(["add", sel as string], { from: "user" }).then(() => resolve());
-          });
+          await runAdd({ ...input, types: [sel as string], skipWizard: true });
           return;
         }
 
         if (kind === "s3") {
-          await new Promise<void>((resolve) => {
-            program.parseAsync(["add", "s3"], { from: "user" }).then(() => resolve());
-          });
+          await runAdd({ ...input, types: ["s3"], skipWizard: true });
           return;
         }
 
@@ -351,10 +393,11 @@ export function registerAdd(program: Command) {
           if (p.isCancel(repo)) process.exit(5);
           const svc = await p.text({ message: "Service name", placeholder: String(repo).split("/").pop() });
           if (p.isCancel(svc)) process.exit(5);
-          await new Promise<void>((resolve) => {
-            program
-              .parseAsync(["add", "-r", String(repo), "-s", String(svc) || ""], { from: "user" })
-              .then(() => resolve());
+          await runAdd({
+            ...input,
+            repo: String(repo),
+            service: String(svc) || undefined,
+            skipWizard: true,
           });
           return;
         }
@@ -362,9 +405,7 @@ export function registerAdd(program: Command) {
         if (kind === "service") {
           const svc = await p.text({ message: "Service name" });
           if (p.isCancel(svc)) process.exit(5);
-          await new Promise<void>((resolve) => {
-            program.parseAsync(["add", "-s", String(svc)], { from: "user" }).then(() => resolve());
-          });
+          await runAdd({ ...input, service: String(svc), skipWizard: true });
           return;
         }
       }
@@ -375,5 +416,5 @@ export function registerAdd(program: Command) {
           "  lizard add -r owner/repo   Create a service from a GitHub repo\n" +
           "  lizard add -s my-service   Empty service",
       );
-    });
+  }
 }

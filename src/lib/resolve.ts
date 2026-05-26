@@ -175,8 +175,10 @@ export async function lookupProjectWorkspace(
  * Resolve a project flag → `{ projectId, scope }`. Scope carries
  * workspaceId for `withScope(url, scope)` queries.
  *
- * Lazy-fills missing workspaceId into the cwd link the same way
- * `resolveContext` does.
+ * For the linked project, lazy-fills missing workspaceId into the cwd link.
+ * For a different project (`-p other-project`), fetches the target's
+ * workspace so the scope reflects the target — not whatever the cwd link
+ * happened to be pointing at.
  */
 export async function resolveProjectScope(
   projectFlag?: string,
@@ -184,26 +186,27 @@ export async function resolveProjectScope(
   const projectId = await resolveProjectId(projectFlag);
   const link = getProjectLink();
 
-  let workspaceId: string | null | undefined = link?.workspaceId ?? null;
-  let workspaceName: string | undefined = link?.workspaceName;
-
-  if (!workspaceId && link?.projectId === projectId) {
-    const fetched = await lookupProjectWorkspace(projectId);
-    if (fetched?.workspaceId) {
-      workspaceId = fetched.workspaceId;
-      workspaceName = fetched.workspaceName ?? undefined;
-      try {
-        updateProjectLink({ workspaceId, workspaceName });
-      } catch {}
+  // Same project as the cwd link — reuse cached workspaceId, lazy-fill if missing.
+  if (link?.projectId === projectId) {
+    let workspaceId: string | null | undefined = link.workspaceId ?? null;
+    let workspaceName: string | undefined = link.workspaceName;
+    if (!workspaceId) {
+      const fetched = await lookupProjectWorkspace(projectId);
+      if (fetched?.workspaceId) {
+        workspaceId = fetched.workspaceId;
+        workspaceName = fetched.workspaceName ?? undefined;
+        try {
+          updateProjectLink({ workspaceId, workspaceName });
+        } catch {}
+      }
     }
+    return { projectId, scope: { workspaceId: workspaceId ?? null } };
   }
 
-  return {
-    projectId,
-    scope: {
-      workspaceId: workspaceId ?? null,
-    },
-  };
+  // Different project — never reuse the link's workspaceId. Look up the
+  // target project's workspace directly. Mirrors `scopeForProject`.
+  const scope = await scopeForProject(projectId);
+  return { projectId, scope };
 }
 
 export interface ResolvedContext {
@@ -246,24 +249,31 @@ export async function resolveContext(opts: {
     };
   }
 
-  // Workspace resolution: prefer the link (no extra API call), fall back to
-  // a one-shot lookup which we cache back into the link.
-  let workspaceId = link?.workspaceId;
-  let workspaceName = link?.workspaceName;
-  if (!workspaceId && link?.projectId === projectId) {
-    const fetched = await lookupProjectWorkspace(projectId);
-    if (fetched?.workspaceId) {
-      workspaceId = fetched.workspaceId;
-      workspaceName = fetched.workspaceName ?? undefined;
-      try {
-        updateProjectLink({
-          workspaceId,
-          workspaceName,
-        });
-      } catch {
-        // Non-fatal: link may not exist for this cwd (e.g. --project flag).
+  // Workspace resolution: only reuse the link's workspaceId when it
+  // describes the same project. For cross-project commands we fetch the
+  // target project's workspace so the scope is correct — using the link's
+  // ws here would scope into the wrong workspace.
+  let workspaceId: string | undefined;
+  let workspaceName: string | undefined;
+  if (link?.projectId === projectId) {
+    workspaceId = link.workspaceId;
+    workspaceName = link.workspaceName;
+    if (!workspaceId) {
+      const fetched = await lookupProjectWorkspace(projectId);
+      if (fetched?.workspaceId) {
+        workspaceId = fetched.workspaceId;
+        workspaceName = fetched.workspaceName ?? undefined;
+        try {
+          updateProjectLink({ workspaceId, workspaceName });
+        } catch {
+          // Non-fatal: link may not exist for this cwd (e.g. --project flag).
+        }
       }
     }
+  } else {
+    const fetched = await lookupProjectWorkspace(projectId);
+    workspaceId = fetched?.workspaceId ?? undefined;
+    workspaceName = fetched?.workspaceName ?? undefined;
   }
 
   return {

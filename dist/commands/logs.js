@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { streamSSE, api, withScope, withQuery } from "../lib/api.js";
-import { resolveProjectScope } from "../lib/resolve.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { info, error, isTTY, isJSONMode } from "../lib/format.js";
 export function registerLogs(program) {
     program
@@ -18,17 +18,23 @@ export function registerLogs(program) {
             await showBuildLogs(opts.service, projectId, scope, tailN);
             return;
         }
+        // Resolve -s flag (may be name, slug, or ID) once up front so every
+        // branch below talks to the API with a real service ID.
+        let serviceId;
+        if (opts.service) {
+            const svc = await resolveService(projectId, opts.service);
+            serviceId = svc.id;
+        }
         // --tail: fetch historical logs and exit
         if (tailN !== undefined) {
             const entries = await api.get(withScope(withQuery(`/api/projects/${projectId}/logs`, {
                 limit: tailN,
-                service: opts.service,
+                service: serviceId,
             }), scope));
             for (const e of entries)
                 printLogEntry(e);
             return;
         }
-        let serviceId = opts.service;
         if (!serviceId && isTTY() && !isJSONMode()) {
             // Offer to pick a specific service or stream all
             const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
@@ -131,8 +137,12 @@ function printLogLine(data) {
         process.stdout.write(data + "\n");
     }
 }
-async function showBuildLogs(serviceId, projectId, scope, tailN) {
-    let appId = serviceId;
+async function showBuildLogs(serviceRef, projectId, scope, tailN) {
+    let appId;
+    if (serviceRef) {
+        const svc = await resolveService(projectId, serviceRef);
+        appId = svc.id;
+    }
     if (!appId) {
         // Get first app in project
         const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));

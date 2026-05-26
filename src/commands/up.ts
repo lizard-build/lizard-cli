@@ -219,21 +219,23 @@ function getDefaultAppName(cwd: string = process.cwd()): string {
 function getUploadFiles(cwd: string, useGitignore: boolean): string[] {
   if (useGitignore) {
     try {
-      const tracked = execSync("git ls-files", {
+      // `-z` outputs NUL-separated paths and disables git's default behaviour
+      // of double-quoting names with unusual characters. Without it, a file
+      // called `weird\nname.txt` would either get quoted (and never matched
+      // by tar) or split the listing across newlines.
+      const tracked = execSync("git ls-files -z", {
         cwd,
-        encoding: "utf8",
         stdio: ["pipe", "pipe", "pipe"],
       })
-        .trim()
-        .split("\n")
+        .toString("utf8")
+        .split("\0")
         .filter(Boolean);
-      const untracked = execSync("git ls-files --others --exclude-standard", {
+      const untracked = execSync("git ls-files --others --exclude-standard -z", {
         cwd,
-        encoding: "utf8",
         stdio: ["pipe", "pipe", "pipe"],
       })
-        .trim()
-        .split("\n")
+        .toString("utf8")
+        .split("\0")
         .filter(Boolean);
       return [...new Set([...tracked, ...untracked])];
     } catch {
@@ -274,7 +276,11 @@ function collectFilesManually(root: string, dir: string): string[] {
 function createTarball(files: string[], cwd: string): Promise<Uint8Array> {
   return new Promise((resolve, reject) => {
     const chunks: Uint8Array[] = [];
-    const tar = spawn("tar", ["-czf", "-", "-T", "-"], { cwd });
+    // `--null` makes tar read NUL-separated paths from stdin, matching what
+    // `git ls-files -z` writes. Newline-separated input would split filenames
+    // containing `\n` across multiple entries. Both bsdtar (macOS) and GNU
+    // tar accept `--null` before `-T -`.
+    const tar = spawn("tar", ["--null", "-czf", "-", "-T", "-"], { cwd });
     tar.stdout.on("data", (c: Buffer) => chunks.push(c));
     tar.stderr.on("data", () => {});
     tar.on("close", (code: number) => {
@@ -291,7 +297,7 @@ function createTarball(files: string[], cwd: string): Promise<Uint8Array> {
         reject(new Error(`tar exited ${code}`));
       }
     });
-    tar.stdin.write(files.join("\n"));
+    if (files.length > 0) tar.stdin.write(files.join("\0") + "\0");
     tar.stdin.end();
   });
 }

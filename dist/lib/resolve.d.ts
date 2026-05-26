@@ -50,8 +50,10 @@ export declare function lookupProjectWorkspace(projectId: string): Promise<{
  * Resolve a project flag → `{ projectId, scope }`. Scope carries
  * workspaceId for `withScope(url, scope)` queries.
  *
- * Lazy-fills missing workspaceId into the cwd link the same way
- * `resolveContext` does.
+ * For the linked project, lazy-fills missing workspaceId into the cwd link.
+ * For a different project (`-p other-project`), fetches the target's
+ * workspace so the scope reflects the target — not whatever the cwd link
+ * happened to be pointing at.
  */
 export declare function resolveProjectScope(projectFlag?: string): Promise<{
     projectId: string;
