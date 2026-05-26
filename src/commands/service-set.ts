@@ -23,7 +23,7 @@ import { success, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
  *   deploy.preDeployCommand    string
  *   deploy.healthcheckPath     string
  *   deploy.healthcheckTimeout  number (ms; flattens to healthcheckTimeoutMs)
- *   source.type                "github" | "upload" | "docker"
+ *   source.type                "github" | "upload"
  *   source.repoUrl             string
  *   source.branch              string
  *   source.rootDirectory       string
@@ -52,7 +52,7 @@ export function registerServiceSet(svc: Command) {
     .option("--force", "Overwrite even if the config was changed remotely")
     .addHelpText("after", `
 Supported --set paths:
-  source.type                 github | upload | docker
+  source.type                 github | upload
   source.repoUrl              string  (e.g. https://github.com/acme/api)
   source.branch               string
   source.rootDirectory        string  (monorepo subpath)
@@ -464,7 +464,7 @@ async function interactivePatch(projectId: string, scope: ResourceScope): Promis
         { value: "build.dockerfilePath", label: "Dockerfile path" },
         { value: "deploy.healthcheckPath", label: "Healthcheck path" },
         { value: "deploy.healthcheckTimeout", label: "Healthcheck timeout (ms)" },
-        { value: "source.type", label: "Source type (github/upload/docker)" },
+        { value: "source.type", label: "Source type (github/upload)" },
         { value: "source.branch", label: "Branch" },
         { value: "source.rootDirectory", label: "Root directory" },
         { value: "source.repoUrl", label: "GitHub repo" },
