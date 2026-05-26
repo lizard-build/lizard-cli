@@ -20,9 +20,9 @@ import { success, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
  *   build.watchPatterns        string[] (JSON array or comma-separated)
  *   build.dockerfilePath       string
  *   deploy.startCommand        string
+ *   deploy.preDeployCommand    string
  *   deploy.healthcheckPath     string
- *   deploy.healthcheckTimeout  number
- *   deploy.restartPolicyType   "ON_FAILURE" | "ALWAYS" | "NEVER"
+ *   deploy.healthcheckTimeout  number (ms; flattens to healthcheckTimeoutMs)
  *   source.type                "github" | "upload" | "docker"
  *   source.repoUrl             string
  *   source.branch              string
@@ -30,6 +30,9 @@ import { success, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
  *   variables.<KEY>.value      string (supports ${{...}} references)
  *
  * Note: replica count is changed via `lizard scale`, not here.
+ * Note: `variables.*` are written to per-service secrets, not the legacy
+ *   `envVars` column — the `/config:apply` endpoint dropped envVars in favour
+ *   of `secrets.services[<name>]`. Same runtime effect, higher precedence.
  */
 export function registerServiceSet(svc: Command) {
   svc
@@ -48,6 +51,38 @@ export function registerServiceSet(svc: Command) {
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name, slug, or ID")
     .option("--force", "Overwrite even if the config was changed remotely")
+    .addHelpText("after", `
+Supported --set paths:
+  source.type                 github | upload | docker
+  source.repoUrl              string  (e.g. https://github.com/acme/api)
+  source.branch               string
+  source.rootDirectory        string  (monorepo subpath)
+  build.buildCommand          string  (e.g. "npm run build")
+  build.watchPatterns         string[] — comma-separated or JSON array
+  build.dockerfilePath        string  (path to Dockerfile, enables docker build)
+  deploy.startCommand         string  (e.g. "node dist/index.js")
+  deploy.preDeployCommand     string  (runs once before each rollout, e.g. migrations)
+  deploy.healthcheckPath      string  (HTTP path, e.g. /health)
+  deploy.healthcheckTimeout   number  (milliseconds)
+  variables.<KEY>             string  (shortcut; pass null/empty to unset)
+  variables.<KEY>.value       string  (supports \${{ <ref>.KEY }} templates)
+
+Notes:
+  Replica count is changed via 'lizard scale', not here.
+  Use -f <file> or pipe JSON on stdin for multi-service patches.
+  --set requires a service argument; pairs are repeatable.
+  'variables.*' are written to per-service secrets (same runtime env as
+  'lizard secrets set --service <name>'); they are not the legacy envVars
+  column. To set project-wide env, pass JSON with a top-level
+  'sharedVariables' or 'secrets.shared' block via -f / stdin.
+
+Examples:
+  lizard service set api --set deploy.startCommand="node dist/index.js"
+  lizard service set api --set build.buildCommand="npm run build" \\
+                         --set deploy.healthcheckPath=/health
+  lizard service set api --set variables.PORT=3000
+  lizard service set api --set variables.DB_URL.value='\${{ postgres.DATABASE_URL }}'
+  lizard service set -f lizard-config.json`)
     .action(async (serviceArg: string | undefined, opts) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);
 
@@ -127,7 +162,10 @@ export function registerServiceSet(svc: Command) {
  *   { services: [{ name, buildCommand?, startCommand?, ... }], secrets?: {...} }
  *
  * Dot-path mapping: build.X / deploy.X / source.X all collapse to the matching
- * top-level field on the service. `variables.<KEY>.value` becomes envVars[KEY].
+ * top-level field on the service. `variables.<KEY>` (and the legacy `envVars`
+ * alias on the cfg) collapse into `secrets.services[<name>][KEY]` — the
+ * backend strips per-service envVars from this endpoint and reads env from
+ * the secrets path instead.
  */
 async function flattenPatch(
   patch: any,
@@ -182,49 +220,77 @@ async function flattenPatch(
       flat.healthcheckPath = cfg.deploy.healthcheckPath;
     if (cfg.deploy?.healthcheckTimeout !== undefined)
       flat.healthcheckTimeoutMs = cfg.deploy.healthcheckTimeout;
-    if (cfg.deploy?.restartPolicyType !== undefined) {
-      // Accept ON_FAILURE/ALWAYS/NEVER input; server uses on-failure/always/never
-      const v = String(cfg.deploy.restartPolicyType).toLowerCase().replace(/_/g, "-");
-      flat.restartPolicyType = v;
-    }
 
-    // Variables → envVars (templated values are stored verbatim, deployer resolves)
-    if (cfg.variables && typeof cfg.variables === "object") {
-      const envVars: Record<string, string> = {};
-      for (const [k, raw] of Object.entries(cfg.variables)) {
-        envVars[k] = typeof raw === "object" && raw && "value" in (raw as any)
-          ? String((raw as any).value)
-          : String(raw);
-      }
-      flat.envVars = envVars;
-    }
-
-    // Allow an explicit envVars block at the service level too
+    // Per-service variables → secrets.services[<name>]. The backend's
+    // `/config:apply` validator strips `services[].envVars`, so the only
+    // wire-supported path for setting per-service env is via `secrets.services`
+    // (it lands in the `app_secrets` table, which overrides legacy envVars in
+    // the runtime env precedence chain).
+    const svcVars = collectKv(cfg.variables);
     if (cfg.envVars && typeof cfg.envVars === "object") {
-      flat.envVars = { ...(flat.envVars as object | undefined), ...cfg.envVars };
+      for (const [k, v] of Object.entries(cfg.envVars)) {
+        svcVars[k] = v == null ? null : String(v);
+      }
+    }
+    if (Object.keys(svcVars).length > 0) {
+      mergeServiceSecrets(out, name, svcVars);
     }
 
     out.services.push(flat);
   }
 
-  // Pass through shared / per-service secrets if the patch carries them
-  if (patch.sharedVariables || patch.secrets) {
-    const secrets: { shared?: Record<string, string>; services?: Record<string, Record<string, string>> } = {};
-    if (patch.sharedVariables) {
-      secrets.shared = {};
-      for (const [k, raw] of Object.entries(patch.sharedVariables)) {
-        secrets.shared[k] =
-          typeof raw === "object" && raw && "value" in (raw as any)
-            ? String((raw as any).value)
-            : String(raw);
-      }
+  // Pass through shared / per-service secrets the patch carries directly.
+  // Merge into whatever was already collected from per-service `variables`
+  // above so both inputs survive in one apply.
+  if (patch.sharedVariables) {
+    const shared = collectKv(patch.sharedVariables);
+    mergeSharedSecrets(out, shared);
+  }
+  if (patch.secrets?.services) {
+    for (const [svcName, kv] of Object.entries(patch.secrets.services)) {
+      mergeServiceSecrets(out, svcName, kv as Record<string, string | null>);
     }
-    if (patch.secrets?.services) secrets.services = patch.secrets.services;
-    if (patch.secrets?.shared) secrets.shared = { ...(secrets.shared || {}), ...patch.secrets.shared };
-    out.secrets = secrets;
+  }
+  if (patch.secrets?.shared) {
+    mergeSharedSecrets(out, patch.secrets.shared);
   }
 
   return out;
+}
+
+/** Convert `{ KEY: "v" | { value: "v" } | null }` to a flat `{ KEY: "v" | null }`. */
+function collectKv(src: any): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  if (!src || typeof src !== "object") return out;
+  for (const [k, raw] of Object.entries(src)) {
+    if (raw == null) {
+      out[k] = null;
+      continue;
+    }
+    out[k] =
+      typeof raw === "object" && "value" in (raw as any)
+        ? String((raw as any).value)
+        : String(raw);
+  }
+  return out;
+}
+
+function mergeServiceSecrets(
+  out: { secrets?: any },
+  serviceName: string,
+  kv: Record<string, string | null>,
+) {
+  out.secrets ??= {};
+  out.secrets.services ??= {};
+  out.secrets.services[serviceName] = {
+    ...(out.secrets.services[serviceName] || {}),
+    ...kv,
+  };
+}
+
+function mergeSharedSecrets(out: { secrets?: any }, kv: Record<string, string | null>) {
+  out.secrets ??= {};
+  out.secrets.shared = { ...(out.secrets.shared || {}), ...kv };
 }
 
 // ── input handling ──────────────────────────────────────────────────────────
@@ -394,11 +460,12 @@ async function interactivePatch(projectId: string, scope: ResourceScope): Promis
       message: "What to change?",
       options: [
         { value: "deploy.startCommand", label: "Start command" },
+        { value: "deploy.preDeployCommand", label: "Pre-deploy command" },
         { value: "build.buildCommand", label: "Build command" },
         { value: "build.watchPatterns", label: "Watch patterns" },
         { value: "build.dockerfilePath", label: "Dockerfile path" },
         { value: "deploy.healthcheckPath", label: "Healthcheck path" },
-        { value: "deploy.restartPolicyType", label: "Restart policy" },
+        { value: "deploy.healthcheckTimeout", label: "Healthcheck timeout (ms)" },
         { value: "source.type", label: "Source type (github/upload/docker)" },
         { value: "source.branch", label: "Branch" },
         { value: "source.rootDirectory", label: "Root directory" },
@@ -427,17 +494,10 @@ async function interactivePatch(projectId: string, scope: ResourceScope): Promis
 // ── value coercion ──────────────────────────────────────────────────────────
 
 function parseValue(dotPath: string, raw: string): any {
-  if (
-    dotPath === "deploy.healthcheckTimeout" ||
-    dotPath === "deploy.restartPolicyMaxRetries"
-  ) {
+  if (dotPath === "deploy.healthcheckTimeout") {
     const n = Number(raw);
     if (Number.isNaN(n)) throw new Error(`${dotPath} expects a number, got "${raw}"`);
     return n;
-  }
-
-  if (dotPath === "deploy.sleepApplication") {
-    return raw === "true" || raw === "1";
   }
 
   if (dotPath === "build.watchPatterns") {

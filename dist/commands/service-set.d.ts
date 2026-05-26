@@ -13,9 +13,9 @@ import { Command } from "commander";
  *   build.watchPatterns        string[] (JSON array or comma-separated)
  *   build.dockerfilePath       string
  *   deploy.startCommand        string
+ *   deploy.preDeployCommand    string
  *   deploy.healthcheckPath     string
- *   deploy.healthcheckTimeout  number
- *   deploy.restartPolicyType   "ON_FAILURE" | "ALWAYS" | "NEVER"
+ *   deploy.healthcheckTimeout  number (ms; flattens to healthcheckTimeoutMs)
  *   source.type                "github" | "upload" | "docker"
  *   source.repoUrl             string
  *   source.branch              string
@@ -23,5 +23,8 @@ import { Command } from "commander";
  *   variables.<KEY>.value      string (supports ${{...}} references)
  *
  * Note: replica count is changed via `lizard scale`, not here.
+ * Note: `variables.*` are written to per-service secrets, not the legacy
+ *   `envVars` column — the `/config:apply` endpoint dropped envVars in favour
+ *   of `secrets.services[<name>]`. Same runtime effect, higher precedence.
  */
 export declare function registerServiceSet(svc: Command): void;
