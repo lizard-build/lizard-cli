@@ -25,6 +25,11 @@ export function registerServiceShow(svc: Command) {
       const ref = serviceArg || opts.service;
       if (ref) {
         const svcInfo = await resolveService(projectId, ref);
+        if (svcInfo.kind === "addon") {
+          throw new Error(
+            `\`service show\` is for apps. For addon details, use \`lizard service status ${svcInfo.name}\`.`,
+          );
+        }
         const detail = await api
           .get<unknown>(withScope(`/api/apps/${svcInfo.id}/config`, scope))
           .catch((err: any) => {
