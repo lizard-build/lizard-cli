@@ -4,7 +4,7 @@ import * as readline from "node:readline";
 import { api, getBaseURL, streamSSE, withScope } from "../lib/api.js";
 import { openURL } from "../lib/auth.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
-import { success, error, info, isJSONMode, printJSON, link } from "../lib/format.js";
+import { success, error, info, isJSONMode, printJSON, isTTY, link } from "../lib/format.js";
 export function registerGit(program) {
     const git = program
         .command("git")
@@ -17,11 +17,29 @@ export function registerGit(program) {
         // Check current status
         const status = await api.get("/api/github/status");
         if (status.installed) {
+            if (isJSONMode()) {
+                printJSON({
+                    installed: true,
+                    installationId: status.installationId,
+                    alreadyConnected: true,
+                });
+                return;
+            }
             success("GitHub App is already connected.");
             info(chalk.dim("  Use `lizard git status` to see connected repositories."));
             return;
         }
         const installUrl = `${getBaseURL()}/api/auth/github/install`;
+        // Non-interactive callers (--json, piped) can't press Enter; return
+        // the install URL so they can drive the flow themselves and re-run.
+        if (isJSONMode() || !isTTY()) {
+            if (isJSONMode()) {
+                printJSON({ installed: false, installUrl });
+                return;
+            }
+            info(`Open this URL to connect GitHub:\n  ${chalk.cyan(installUrl)}`);
+            return;
+        }
         const opened = await openURL(installUrl);
         if (opened) {
             info("Opening GitHub to install the Lizard GitHub App...");

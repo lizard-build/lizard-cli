@@ -38,14 +38,33 @@ export function registerGit(program: Command) {
       const status = await api.get<GitHubStatus>("/api/github/status");
 
       if (status.installed) {
+        if (isJSONMode()) {
+          printJSON({
+            installed: true,
+            installationId: status.installationId,
+            alreadyConnected: true,
+          });
+          return;
+        }
         success("GitHub App is already connected.");
         info(chalk.dim("  Use `lizard git status` to see connected repositories."));
         return;
       }
 
       const installUrl = `${getBaseURL()}/api/auth/github/install`;
-      const opened = await openURL(installUrl);
 
+      // Non-interactive callers (--json, piped) can't press Enter; return
+      // the install URL so they can drive the flow themselves and re-run.
+      if (isJSONMode() || !isTTY()) {
+        if (isJSONMode()) {
+          printJSON({ installed: false, installUrl });
+          return;
+        }
+        info(`Open this URL to connect GitHub:\n  ${chalk.cyan(installUrl)}`);
+        return;
+      }
+
+      const opened = await openURL(installUrl);
       if (opened) {
         info("Opening GitHub to install the Lizard GitHub App...");
       } else {

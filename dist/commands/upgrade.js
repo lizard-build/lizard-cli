@@ -23,6 +23,13 @@ export function registerUpgrade(program) {
             return;
         }
         if (result.kind === "error") {
+            if (isJSONMode()) {
+                printJSON({
+                    currentVersion: CURRENT_VERSION,
+                    error: { code: "check_failed" },
+                });
+                return;
+            }
             info("Could not check for updates. Check your internet connection.");
             return;
         }
@@ -33,6 +40,15 @@ export function registerUpgrade(program) {
             return;
         }
         if (!updateAvailable) {
+            if (isJSONMode()) {
+                printJSON({
+                    currentVersion: CURRENT_VERSION,
+                    latestVersion: latest,
+                    updateAvailable: false,
+                    upgraded: false,
+                });
+                return;
+            }
             info(`Already up to date (v${CURRENT_VERSION})`);
             return;
         }
@@ -44,7 +60,16 @@ export function registerUpgrade(program) {
         info(`Upgrading v${CURRENT_VERSION} → ${chalk.green("v" + latest)}...`);
         try {
             await selfUpdate((msg) => info(chalk.dim(msg)));
-            success(`Upgraded to v${latest}`);
+            if (isJSONMode()) {
+                printJSON({
+                    previousVersion: CURRENT_VERSION,
+                    latestVersion: latest,
+                    upgraded: true,
+                });
+            }
+            else {
+                success(`Upgraded to v${latest}`);
+            }
         }
         catch (e) {
             throw new Error(`Upgrade failed: ${e.message}`);

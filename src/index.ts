@@ -66,7 +66,7 @@ program
       return alias ? `${cmd.name()}|${alias}` : cmd.name();
     },
   })
-  .option("--json", "Output in JSON format")
+  .option("--json", "Output in JSON format (combine with --help to dump machine-readable command schema for agents)")
   .hook("preAction", async (thisCommand, actionCommand) => {
     const opts = thisCommand.opts();
 
@@ -220,6 +220,14 @@ function dumpCommand(cmd: Command): any {
 }
 
 async function main() {
+  // Set JSON mode from argv *before* parseAsync so the catch block below
+  // honors --json even when commander rejects before our preAction hook
+  // fires (e.g. unknown command, malformed global flag). Non-TTY auto-mode
+  // stays in preAction — `lizard --help | less` shouldn't suddenly emit JSON.
+  if (process.argv.includes("--json")) {
+    setJSONMode(true);
+  }
+
   if (isHelpJsonRequest(process.argv)) {
     const target = findTargetCommand(process.argv, program);
     const isRoot = target === program;
