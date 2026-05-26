@@ -29,7 +29,6 @@ import { success, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
  *   source.rootDirectory       string
  *   variables.<KEY>.value      string (supports ${{...}} references)
  *
- * Note: replica count is changed via `lizard scale`, not here.
  * Note: `variables.*` are written to per-service secrets, not the legacy
  *   `envVars` column — the `/config:apply` endpoint dropped envVars in favour
  *   of `secrets.services[<name>]`. Same runtime effect, higher precedence.
@@ -68,7 +67,6 @@ Supported --set paths:
   variables.<KEY>.value       string  (supports \${{ <ref>.KEY }} templates)
 
 Notes:
-  Replica count is changed via 'lizard scale', not here.
   Use -f <file> or pipe JSON on stdin for multi-service patches.
   --set requires a service argument; pairs are repeatable.
   'variables.*' are written to per-service secrets (same runtime env as

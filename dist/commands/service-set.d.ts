@@ -22,7 +22,6 @@ import { Command } from "commander";
  *   source.rootDirectory       string
  *   variables.<KEY>.value      string (supports ${{...}} references)
  *
- * Note: replica count is changed via `lizard scale`, not here.
  * Note: `variables.*` are written to per-service secrets, not the legacy
  *   `envVars` column — the `/config:apply` endpoint dropped envVars in favour
  *   of `secrets.services[<name>]`. Same runtime effect, higher precedence.
