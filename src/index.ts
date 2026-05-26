@@ -4,7 +4,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
 import { setTokenOverride, requireAuth, isLoggedIn } from "./lib/auth.js";
-import { setBaseURL, setAccessToken } from "./lib/api.js";
+import { setBaseURL, setAccessToken, APIError } from "./lib/api.js";
 import { checkForUpdateInBackground, CURRENT_VERSION } from "./lib/updater.js";
 
 const BANNER = chalk.rgb(16, 185, 129)(
@@ -68,7 +68,6 @@ program
     },
   })
   .option("--json", "Output in JSON format")
-  .option("--region <region>", "Region for creating services")
   .option("--token <token>", "API token")
   .hook("preAction", async (thisCommand, actionCommand) => {
     const opts = thisCommand.opts();
@@ -151,13 +150,17 @@ async function main() {
     }
 
     const msg = err.message || String(err);
+    const apiErr = err instanceof APIError ? err : undefined;
+    const status = apiErr?.status;
+    const code = apiErr?.code || err.code || "ERROR";
 
     if (isJSONMode()) {
       console.log(
         JSON.stringify(
           {
             error: {
-              code: err.code || "ERROR",
+              code,
+              status: status ?? null,
               message: msg,
             },
           },
@@ -169,16 +172,19 @@ async function main() {
       error(msg);
     }
 
-    // Exit codes per spec
-    if (msg.includes("Not authenticated") || msg.includes("Invalid token")) {
-      process.exit(2);
-    }
-    if (msg.includes("not found") || msg.includes("Not found")) {
-      process.exit(3);
-    }
-    if (msg.includes("timeout") || msg.includes("Timeout")) {
-      process.exit(4);
-    }
+    // Exit codes derived from APIError.status (or tagged error codes), not message text
+    const isAuth = status === 401 || status === 403 || code === "NOT_AUTHENTICATED";
+    const isNotFound = status === 404;
+    const isTimeout =
+      status === 408 ||
+      status === 504 ||
+      err.name === "AbortError" ||
+      err.code === "ETIMEDOUT" ||
+      err.code === "UND_ERR_CONNECT_TIMEOUT";
+
+    if (isAuth) process.exit(2);
+    if (isNotFound) process.exit(3);
+    if (isTimeout) process.exit(4);
     process.exit(1);
   }
 }

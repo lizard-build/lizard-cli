@@ -61,9 +61,11 @@ export async function requireAuth(): Promise<Credentials> {
   if (creds) return creds;
 
   if (!isTTY()) {
-    throw new Error(
+    const err = new Error(
       "Not authenticated. Set LIZARD_TOKEN or run `lizard login` first.",
-    );
+    ) as Error & { code: string };
+    err.code = "NOT_AUTHENTICATED";
+    throw err;
   }
 
   const { performLogin } = await import("../commands/login.js");

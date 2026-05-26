@@ -1,8 +1,9 @@
 import chalk from "chalk";
+import * as p from "@clack/prompts";
 import { api } from "../lib/api.js";
 import { resolveProjectId } from "../lib/config.js";
 import { getActiveService } from "../lib/resolve.js";
-import { success, isJSONMode, printJSON } from "../lib/format.js";
+import { success, isJSONMode, printJSON, isTTY } from "../lib/format.js";
 /**
  * `lizard domain` — domain management.
  *   bare         → if no domain, auto-generate one; otherwise show current
@@ -154,10 +155,20 @@ export function registerDomain(program) {
         .alias("rm")
         .argument("<hostname>", "Domain to remove")
         .description("Remove a domain")
+        .option("-y, --yes", "Skip confirmation")
         .action(async (hostname, _opts, sub) => {
         const opts = sub.optsWithGlobals();
         const projectId = await resolveProjectId(opts.project);
         const service = await getActiveService(opts.service, projectId);
+        if (!opts.yes) {
+            if (!isTTY())
+                throw new Error("Use -y to confirm in non-interactive mode");
+            const confirm = await p.confirm({
+                message: `Remove domain ${chalk.bold(hostname)} from ${chalk.bold(service.name)}?`,
+            });
+            if (p.isCancel(confirm) || !confirm)
+                process.exit(5);
+        }
         await api
             .delete(`/api/apps/${service.id}/domains/${encodeURIComponent(hostname)}`)
             .catch((err) => {

@@ -1,9 +1,10 @@
 import { getToken } from "./auth.js";
+import { CURRENT_VERSION } from "./updater.js";
 import * as https from "node:https";
 import * as http from "node:http";
 
 const DEFAULT_BASE_URL = "https://lizard.build";
-const USER_AGENT = "lizard-cli/0.1";
+const USER_AGENT = `lizard-cli/${CURRENT_VERSION}`;
 
 let baseURL = process.env.LIZARD_API_URL || DEFAULT_BASE_URL;
 let _accessToken: string | null = null;

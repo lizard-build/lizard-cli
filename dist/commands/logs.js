@@ -2,7 +2,7 @@ import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { streamSSE, api, withScope, withQuery } from "../lib/api.js";
 import { resolveProjectScope } from "../lib/resolve.js";
-import { info, error, isTTY } from "../lib/format.js";
+import { info, error, isTTY, isJSONMode } from "../lib/format.js";
 export function registerLogs(program) {
     program
         .command("logs")
@@ -29,7 +29,7 @@ export function registerLogs(program) {
             return;
         }
         let serviceId = opts.service;
-        if (!serviceId && isTTY()) {
+        if (!serviceId && isTTY() && !isJSONMode()) {
             // Offer to pick a specific service or stream all
             const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
             const apps = data.apps || [];
@@ -92,6 +92,10 @@ function replicaPrefix(e) {
     return chalk.magenta(`[${e.replica}]`) + " ";
 }
 function printLogEntry(e) {
+    if (isJSONMode()) {
+        process.stdout.write(JSON.stringify(e) + "\n");
+        return;
+    }
     const rep = replicaPrefix(e);
     if (e.service && e.message) {
         const prefix = chalk.cyan(`[${e.service}]`);
@@ -102,24 +106,28 @@ function printLogEntry(e) {
     }
 }
 function printLogLine(data) {
+    let parsed;
     try {
-        const parsed = JSON.parse(data);
-        const rep = replicaPrefix(parsed);
-        if (parsed.service && parsed.message) {
-            const prefix = chalk.cyan(`[${parsed.service}]`);
-            process.stdout.write(`${prefix} ${rep}${parsed.message}\n`);
-        }
-        else if (parsed.message) {
-            process.stdout.write(`${rep}${parsed.message}\n`);
-        }
-        else if (typeof parsed === "string") {
-            process.stdout.write(parsed + "\n");
-        }
-        else {
-            process.stdout.write(data + "\n");
-        }
+        parsed = JSON.parse(data);
     }
     catch {
+        parsed = { message: data };
+    }
+    if (typeof parsed === "string")
+        parsed = { message: parsed };
+    if (isJSONMode()) {
+        process.stdout.write(JSON.stringify(parsed) + "\n");
+        return;
+    }
+    const rep = replicaPrefix(parsed);
+    if (parsed.service && parsed.message) {
+        const prefix = chalk.cyan(`[${parsed.service}]`);
+        process.stdout.write(`${prefix} ${rep}${parsed.message}\n`);
+    }
+    else if (parsed.message) {
+        process.stdout.write(`${rep}${parsed.message}\n`);
+    }
+    else {
         process.stdout.write(data + "\n");
     }
 }

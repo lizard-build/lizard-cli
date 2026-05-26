@@ -1,9 +1,10 @@
 import chalk from "chalk";
+import * as p from "@clack/prompts";
 import { Command, Option } from "commander";
 import { api, withScope, type ResourceScope } from "../lib/api.js";
 import { getProjectLink } from "../lib/config.js";
 import { getActiveService, resolveProjectScope } from "../lib/resolve.js";
-import { success, isJSONMode, printJSON, table } from "../lib/format.js";
+import { success, isJSONMode, printJSON, table, isTTY } from "../lib/format.js";
 
 interface Secret {
   key: string;
@@ -221,6 +222,7 @@ export function registerSecrets(program: Command) {
     .description("Delete one or more secrets")
     .option("--global", "Target the whole project")
     .option("--no-redeploy", "Don't trigger redeploy")
+    .option("-y, --yes", "Skip confirmation")
     .action(async (keys: string[], opts, sub) => {
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
@@ -234,6 +236,16 @@ export function registerSecrets(program: Command) {
       if (notFound.length > 0) {
         throw new Error(`Secret(s) not found: ${notFound.join(", ")}`);
       }
+
+      if (!opts.yes) {
+        if (!isTTY()) throw new Error("Use -y to confirm in non-interactive mode");
+        const summary = keys.length === 1 ? chalk.bold(keys[0]) : `${keys.length} keys`;
+        const confirm = await p.confirm({
+          message: `Delete ${summary} from ${chalk.bold(scope.label)} scope?`,
+        });
+        if (p.isCancel(confirm) || !confirm) process.exit(5);
+      }
+
       const deletePayload: Record<string, null> = {};
       keys.forEach((k) => { deletePayload[k] = null; });
       await configApplySecrets(scope, deletePayload);

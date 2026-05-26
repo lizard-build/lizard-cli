@@ -8,7 +8,7 @@ import { api, streamSSE, getBaseURL } from "../lib/api.js";
 import { updateProjectLink } from "../lib/config.js";
 import { resolveContext, getScope } from "../lib/resolve.js";
 import { ensureLinked } from "./init.js";
-import { success, info, error, isJSONMode, printJSON, statusColor, } from "../lib/format.js";
+import { success, info, error, isJSONMode, isTTY, printJSON, statusColor, } from "../lib/format.js";
 /**
  * Builds the `up` command:
  *   - upload local code (or `[path]`) as a tarball
@@ -26,6 +26,7 @@ export function registerUp(program) {
         .option("-s, --service <name>", "Service to deploy to (defaults to linked)")
         .option("--no-gitignore", "Don't ignore paths from .gitignore")
         .option("--path-as-root", "Use the path argument as the archive root")
+        .option("--region <code>", "Region to create the service in (new services only)")
         .option("--build-command <cmd>", "Build command to run (e.g. 'npm run build')")
         .option("--start-command <cmd>", "Start command to run (e.g. 'node dist/index.js')")
         .option("--pre-deploy-command <cmd>", "Pre-deploy command (e.g. 'node dist/migrate.js')")
@@ -34,7 +35,7 @@ export function registerUp(program) {
         const merged = cmd.optsWithGlobals();
         const serviceFlag = merged.service ?? opts.service;
         const projectFlag = merged.project;
-        const region = merged.region ?? undefined;
+        const region = opts.region;
         // Run init flow if cwd isn't linked yet
         await ensureLinked({ projectName: projectFlag });
         // Resolve target service: --service flag → linked → first-in-project → prompt-or-fail
@@ -87,7 +88,7 @@ async function deployFromLocal(args) {
     const defaultName = args.serviceFlag || getDefaultAppName(args.targetPath);
     info(`${args.existingServiceId ? "Uploading" : "Creating service from"} ${chalk.dim(args.targetPath)}`);
     let appName = args.serviceFlag || defaultName;
-    if (!args.existingServiceId && !args.serviceFlag) {
+    if (!args.existingServiceId && !args.serviceFlag && isTTY()) {
         const nameInput = await prompt(`Service name [${defaultName}]: `);
         appName = nameInput || defaultName;
     }
@@ -308,21 +309,12 @@ async function streamBuildLogs(appId, ciMode = false) {
             await streamSSE(`/api/builds/${buildId}/logs`, (event, data) => {
                 if (event === "done" || event === "error") {
                     if (event === "error")
-                        error(`Build failed: ${data}`);
+                        emitBuildError(data);
                     else
-                        success("Build complete");
+                        emitBuildDone();
                     return false;
                 }
-                try {
-                    const parsed = JSON.parse(data);
-                    if (parsed.line)
-                        process.stdout.write(parsed.line + "\n");
-                    else if (typeof parsed === "string")
-                        process.stdout.write(parsed + "\n");
-                }
-                catch {
-                    process.stdout.write(data + "\n");
-                }
+                emitBuildLine(data);
                 return true;
             });
         }
@@ -344,12 +336,75 @@ async function streamBuildLogs(appId, ciMode = false) {
     if (ciMode)
         return;
     const app = await api.get(`/api/apps/${appId}`);
-    if (app.status === "running")
-        success(`Deployed! ${app.domain ? chalk.cyan(`https://${app.domain}`) : ""}`);
-    else if (app.status === "failed")
-        error("Deploy failed. Check logs with `lizard logs --build`");
-    else if (app.status === "deploying")
-        info(chalk.dim("Still deploying... check status with `lizard ps`"));
+    if (app.status === "running") {
+        if (isJSONMode()) {
+            process.stdout.write(JSON.stringify({
+                event: "deployed",
+                status: "running",
+                url: app.domain ? `https://${app.domain}` : null,
+            }) + "\n");
+        }
+        else {
+            success(`Deployed! ${app.domain ? chalk.cyan(`https://${app.domain}`) : ""}`);
+        }
+    }
+    else if (app.status === "failed") {
+        if (isJSONMode()) {
+            process.stdout.write(JSON.stringify({ event: "failed", status: "failed" }) + "\n");
+        }
+        else {
+            error("Deploy failed. Check logs with `lizard logs --build`");
+        }
+    }
+    else if (app.status === "deploying") {
+        if (isJSONMode()) {
+            process.stdout.write(JSON.stringify({ event: "deploying", status: "deploying" }) + "\n");
+        }
+        else {
+            info(chalk.dim("Still deploying... check status with `lizard ps`"));
+        }
+    }
+}
+// ── build stream emitters ────────────────────────────────────────────────────
+function emitBuildLine(data) {
+    let parsed;
+    try {
+        parsed = JSON.parse(data);
+    }
+    catch {
+        parsed = { line: data };
+    }
+    if (typeof parsed === "string")
+        parsed = { line: parsed };
+    const line = parsed.line ?? parsed.message ?? "";
+    if (isJSONMode()) {
+        process.stdout.write(JSON.stringify({ event: "log", line, ...stripLine(parsed) }) + "\n");
+        return;
+    }
+    if (line)
+        process.stdout.write(line + "\n");
+    else
+        process.stdout.write(data + "\n");
+}
+function stripLine(obj) {
+    const { line: _l, message: _m, ...rest } = obj;
+    return rest;
+}
+function emitBuildDone() {
+    if (isJSONMode()) {
+        process.stdout.write(JSON.stringify({ event: "done" }) + "\n");
+    }
+    else {
+        success("Build complete");
+    }
+}
+function emitBuildError(data) {
+    if (isJSONMode()) {
+        process.stdout.write(JSON.stringify({ event: "error", message: data }) + "\n");
+    }
+    else {
+        error(`Build failed: ${data}`);
+    }
 }
 function sleep(ms) {
     return new Promise((r) => setTimeout(r, ms));

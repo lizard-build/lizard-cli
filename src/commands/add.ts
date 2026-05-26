@@ -174,12 +174,13 @@ export function registerAdd(program: Command) {
     .option("-n, --name <name>", "Name used in ${{<name>.KEY}} templates and shown in the dashboard. Renamable; refs stay stable.")
     .option("--instance-name <name>", "(deprecated) alias for --name")
     .option("-w, --workspace <ws>", "Disambiguate project lookup by workspace")
+    .option("--region <code>", "Region to provision the addon/service in")
     .option("--list", "Show available database types")
     .action(async (types: string[], opts, command) => {
       const merged = command.optsWithGlobals();
       const projectFlag = merged.project;
       const workspaceFlag = opts.workspace;
-      const region = merged.region ?? DEFAULT_REGION;
+      const region = opts.region ?? DEFAULT_REGION;
 
       // ── --list: show DB catalog and exit ──────────────────────────────
       if (opts.list || (!types.length && !opts.addon && !opts.service && !opts.repo && !isTTY())) {
