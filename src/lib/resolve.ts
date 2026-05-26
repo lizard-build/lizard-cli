@@ -6,15 +6,19 @@ import {
 } from "./config.js";
 
 /**
- * Build a ResourceScope for an arbitrary project. Used by resolve* helpers
- * to avoid awkward import cycles with the picker.
+ * Build a ResourceScope for an arbitrary project. When the project matches the
+ * cwd link, reuse its workspaceId (no extra round-trip). Otherwise fetch the
+ * project's workspace once so cross-project commands (`-p other-project`) still
+ * get `?workspaceId=…` on the request — without it the backend can 404 a
+ * project the user reaches via workspace membership.
  */
-function scopeFromLink(projectId: string): ResourceScope {
+export async function scopeForProject(projectId: string): Promise<ResourceScope> {
   const link = getProjectLink();
-  if (link?.projectId !== projectId) return { workspaceId: null };
-  return {
-    workspaceId: link.workspaceId ?? null,
-  };
+  if (link?.projectId === projectId && link.workspaceId) {
+    return { workspaceId: link.workspaceId };
+  }
+  const fetched = await lookupProjectWorkspace(projectId);
+  return { workspaceId: fetched?.workspaceId ?? null };
 }
 
 interface AppLite {
@@ -44,7 +48,7 @@ export async function resolveService(
   nameOrId: string,
 ): Promise<{ id: string; name: string; kind: "app" | "addon" }> {
   const data = await api.get<ServicesResponse>(
-    withScope(`/api/projects/${projectId}/services`, scopeFromLink(projectId)),
+    withScope(`/api/projects/${projectId}/services`, await scopeForProject(projectId)),
   );
 
   const apps = data.apps || [];
@@ -123,7 +127,7 @@ export async function getActiveServiceWithKind(
   const link = getProjectLink();
   if (link?.serviceId) {
     const data = await api.get<ServicesResponse>(
-      withScope(`/api/projects/${projectId}/services`, scopeFromLink(projectId)),
+      withScope(`/api/projects/${projectId}/services`, await scopeForProject(projectId)),
     );
     const app = data.apps?.find((a) => a.id === link.serviceId);
     if (app) return { id: app.id, name: app.name, kind: "app" };

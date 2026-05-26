@@ -1,5 +1,13 @@
 import { type ResourceScope } from "./api.js";
 /**
+ * Build a ResourceScope for an arbitrary project. When the project matches the
+ * cwd link, reuse its workspaceId (no extra round-trip). Otherwise fetch the
+ * project's workspace once so cross-project commands (`-p other-project`) still
+ * get `?workspaceId=…` on the request — without it the backend can 404 a
+ * project the user reaches via workspace membership.
+ */
+export declare function scopeForProject(projectId: string): Promise<ResourceScope>;
+/**
  * Resolve a service (app or addon) within a project. Match by ID or name.
  * Throws with a helpful list of available services when not found.
  */

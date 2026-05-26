@@ -1,23 +1,26 @@
 import { api, withScope } from "./api.js";
 import { getProjectLink, resolveProjectId, updateProjectLink, } from "./config.js";
 /**
- * Build a ResourceScope for an arbitrary project. Used by resolve* helpers
- * to avoid awkward import cycles with the picker.
+ * Build a ResourceScope for an arbitrary project. When the project matches the
+ * cwd link, reuse its workspaceId (no extra round-trip). Otherwise fetch the
+ * project's workspace once so cross-project commands (`-p other-project`) still
+ * get `?workspaceId=…` on the request — without it the backend can 404 a
+ * project the user reaches via workspace membership.
  */
-function scopeFromLink(projectId) {
+export async function scopeForProject(projectId) {
     const link = getProjectLink();
-    if (link?.projectId !== projectId)
-        return { workspaceId: null };
-    return {
-        workspaceId: link.workspaceId ?? null,
-    };
+    if (link?.projectId === projectId && link.workspaceId) {
+        return { workspaceId: link.workspaceId };
+    }
+    const fetched = await lookupProjectWorkspace(projectId);
+    return { workspaceId: fetched?.workspaceId ?? null };
 }
 /**
  * Resolve a service (app or addon) within a project. Match by ID or name.
  * Throws with a helpful list of available services when not found.
  */
 export async function resolveService(projectId, nameOrId) {
-    const data = await api.get(withScope(`/api/projects/${projectId}/services`, scopeFromLink(projectId)));
+    const data = await api.get(withScope(`/api/projects/${projectId}/services`, await scopeForProject(projectId)));
     const apps = data.apps || [];
     const addons = data.addons || [];
     const lower = nameOrId.toLowerCase();
@@ -69,7 +72,7 @@ export async function getActiveServiceWithKind(serviceFlag, projectId) {
     }
     const link = getProjectLink();
     if (link?.serviceId) {
-        const data = await api.get(withScope(`/api/projects/${projectId}/services`, scopeFromLink(projectId)));
+        const data = await api.get(withScope(`/api/projects/${projectId}/services`, await scopeForProject(projectId)));
         const app = data.apps?.find((a) => a.id === link.serviceId);
         if (app)
             return { id: app.id, name: app.name, kind: "app" };

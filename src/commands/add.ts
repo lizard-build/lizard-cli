@@ -1,9 +1,9 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { Command } from "commander";
-import { api, withQuery, withScope, type ResourceScope } from "../lib/api.js";
+import { api, withQuery, withScope } from "../lib/api.js";
 import { getProjectLink, updateProjectLink, DEFAULT_REGION } from "../lib/config.js";
-import { lookupProjectWorkspace } from "../lib/resolve.js";
+import { scopeForProject } from "../lib/resolve.js";
 import { resolveWorkspace } from "../lib/picker.js";
 import {
   success,
@@ -120,24 +120,6 @@ async function resolveProject(
   throw new Error(
     "No project linked to this directory. Pass -p <project-name> or run `lizard init`.",
   );
-}
-
-/**
- * Build a ResourceScope for an arbitrary project id. Uses the cwd link when
- * it matches; otherwise does one lookup so `--project foo` from any cwd still
- * tags the right workspace on the request.
- */
-async function scopeForProject(projectId: string): Promise<ResourceScope> {
-  const link = getProjectLink();
-  if (link?.projectId === projectId && link.workspaceId) {
-    return {
-      workspaceId: link.workspaceId,
-    };
-  }
-  const fetched = await lookupProjectWorkspace(projectId);
-  return {
-    workspaceId: fetched?.workspaceId ?? null,
-  };
 }
 
 function parseVariables(pairs: string[] | undefined): Record<string, string> {
