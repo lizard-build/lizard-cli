@@ -25,7 +25,6 @@ export function registerUp(program) {
         .option("-c, --ci", "Stream build logs only, exit on completion")
         .option("-s, --service <name>", "Service to deploy to (defaults to linked)")
         .option("--no-gitignore", "Don't ignore paths from .gitignore")
-        .option("--path-as-root", "Use the path argument as the archive root")
         .option("--region <code>", "Region to create the service in (new services only)")
         .option("--build-command <cmd>", "Build command to run (e.g. 'npm run build')")
         .option("--start-command <cmd>", "Start command to run (e.g. 'node dist/index.js')")
@@ -46,14 +45,12 @@ export function registerUp(program) {
         const projectId = ctx.projectId;
         const scope = getScope(ctx);
         const targetPath = pathArg ? path.resolve(pathArg) : process.cwd();
-        const archiveRoot = opts.pathAsRoot ? targetPath : process.cwd();
         // `up` always uploads a local tarball. For redeploy of an existing
         // build without re-uploading, use `lizard redeploy`.
         await deployFromLocal({
             projectId,
             scope,
             targetPath,
-            archiveRoot,
             useGitignore: opts.gitignore !== false,
             serviceFlag,
             existingServiceId: ctx.service?.id,
@@ -100,7 +97,7 @@ async function deployFromLocal(args) {
     const detectedPort = args.port === undefined ? detectLocalPort(args.targetPath) : undefined;
     if (detectedPort)
         info(`Detected port ${chalk.bold(detectedPort)} from Dockerfile`);
-    const tarball = await createTarball(files, args.archiveRoot);
+    const tarball = await createTarball(files, args.targetPath);
     info(chalk.dim(`  Tarball: ${(tarball.length / 1024 / 1024).toFixed(1)} MB`));
     const spinner = ora("Uploading...").start();
     let newApp;
