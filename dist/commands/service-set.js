@@ -13,28 +13,67 @@ import { success, info, isJSONMode, printJSON, isTTY } from "../lib/format.js";
  *   3. piped stdin JSON                  — auto-detected when stdin has data
  *   4. interactive                       — TTY prompts when nothing else is given
  *
- * Dot-paths supported:
- *   build.buildCommand         string
- *   build.watchPatterns        string[] (JSON array or comma-separated)
- *   build.dockerfilePath       string
- *   deploy.startCommand        string
- *   deploy.preDeployCommand    string
- *   deploy.healthcheckPath     string
- *   deploy.healthcheckTimeout  number (ms; flattens to healthcheckTimeoutMs)
- *   source.type                "github" | "upload" | "docker"
- *   source.repoUrl             string
- *   source.branch              string
- *   source.rootDirectory       string
- *   variables.<KEY>.value      string (supports ${{...}} references)
+ * Field names are flat and match the wire schema of `POST /config:apply`
+ * exactly. There is no nested {build,deploy,source} grouping anywhere in the
+ * system — DB columns, REST schemas, node-agent payloads, and `service show`
+ * output are all flat. See SERVICE_FIELDS below for the full list.
  *
- * Note: `variables.*` are written to per-service secrets, not the legacy
- *   `envVars` column — the `/config:apply` endpoint dropped envVars in favour
- *   of `secrets.services[<name>]`. Same runtime effect, higher precedence.
+ * Namespaces (variables.*, secrets.*, sharedVariables) are kept because they
+ * really are separate stores (per-service / project-wide env), not flat
+ * service-config fields.
  */
+/**
+ * Canonical service-config fields accepted by `--set` and as keys in a `-f`
+ * file's cfg blob. Mirrors `configApplySchema.serviceConfigSchema` in
+ * dragonlabs-platform/server/src/routes/projects.ts.
+ */
+export const SERVICE_FIELDS = [
+    "name", // rename target — only sent when it differs from current
+    "sourceType",
+    "repoUrl",
+    "branch",
+    "rootDirectory",
+    "buildCommand",
+    "watchPatterns",
+    "dockerfilePath",
+    "startCommand",
+    "preDeployCommand",
+    "healthcheckPath",
+    "healthcheckTimeoutMs",
+];
+const SERVICE_FIELD_SET = new Set(SERVICE_FIELDS);
+const NUMERIC_FIELDS = new Set(["healthcheckTimeoutMs"]);
+const STRING_ARRAY_FIELDS = new Set(["watchPatterns"]);
+/** Per-service "namespace" keys — not flat fields, separate stores. */
+const NAMESPACE_KEYS = new Set(["variables", "envVars"]);
+/** Allowed top-level keys in a `-f` / stdin JSON payload. */
+const TOP_LEVEL_KEYS = new Set([
+    "services",
+    "apps",
+    "sharedVariables",
+    "secrets",
+]);
+/**
+ * Service-name rule mirrored from dragonlabs-platform
+ * (server/src/services/var-transform.ts::NAME_REGEX).
+ * LIZARD-55: 1–40 chars, lowercase a–z / digits / hyphens, can't start or
+ * end with a hyphen.
+ */
+const NAME_REGEX = /^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/;
+const NAME_HINT = "1–40 chars, lowercase a–z, digits, hyphens; can't start or end with a hyphen";
+export function validateName(name) {
+    if (!name)
+        return "name is required";
+    if (name.length > 40)
+        return "name must be 40 characters or fewer";
+    if (!NAME_REGEX.test(name))
+        return `invalid name (${NAME_HINT})`;
+    return null;
+}
 export function registerServiceSet(svc) {
     svc
         .command("set")
-        .description("Apply build/start/watch/variable changes to a service")
+        .description("Apply build/start/health/source/variables/rename changes to a service")
         .argument("[service]", "Service name or ID (required when using --set)")
         .option("--set <pair>", "Set a field: <path>=<value>. Repeatable.", (val, prev) => [...prev, val], [])
         .option("-f, --file <path>", "JSON config file to apply")
@@ -42,40 +81,44 @@ export function registerServiceSet(svc) {
         .option("-p, --project <id>", "Project name, slug, or ID")
         .option("--force", "Overwrite even if the config was changed remotely")
         .addHelpText("after", `
-Supported --set paths:
-  source.type                 github | upload | docker
-  source.repoUrl              string  (e.g. https://github.com/acme/api)
-  source.branch               string
-  source.rootDirectory        string  (monorepo subpath)
-  build.buildCommand          string  (e.g. "npm run build")
-  build.watchPatterns         string[] — comma-separated or JSON array
-  build.dockerfilePath        string  (path to Dockerfile, enables docker build)
-  deploy.startCommand         string  (e.g. "node dist/index.js")
-  deploy.preDeployCommand     string  (runs once before each rollout, e.g. migrations)
-  deploy.healthcheckPath      string  (HTTP path, e.g. /health)
-  deploy.healthcheckTimeout   number  (milliseconds)
-  variables.<KEY>             string  (shortcut; pass null/empty to unset)
+Supported --set fields (flat — matches the wire schema and \`service show\`):
+  name                        rename the service (lowercase a-z, digits, hyphens; 1-40 chars)
+  sourceType                  github | upload
+  repoUrl                     string  (e.g. https://github.com/acme/api)
+  branch                      string
+  rootDirectory               string  (monorepo subpath)
+  buildCommand                string  (e.g. "npm run build")
+  watchPatterns               string[] — comma-separated or JSON array
+  dockerfilePath              string  (path to Dockerfile, enables docker build)
+  startCommand                string  (e.g. "node dist/index.js")
+  preDeployCommand            string  (runs once before each rollout, e.g. migrations)
+  healthcheckPath             string  (HTTP path, e.g. /health)
+  healthcheckTimeoutMs        number  (milliseconds)
+
+  variables.<KEY>             string  (per-service env shortcut)
   variables.<KEY>.value       string  (supports \${{ <ref>.KEY }} templates)
 
 Notes:
   Use -f <file> or pipe JSON on stdin for multi-service patches.
   --set requires a service argument; pairs are repeatable.
-  'variables.*' are written to per-service secrets (same runtime env as
-  'lizard secrets set --service <name>'); they are not the legacy envVars
-  column. To set project-wide env, pass JSON with a top-level
-  'sharedVariables' or 'secrets.shared' block via -f / stdin.
+  'variables.*' are stored as per-service secrets (same runtime env as
+  'lizard secrets set --service <name>'). To set project-wide env, use
+  'lizard secrets set --global' or pass JSON with a top-level
+  'sharedVariables' / 'secrets.shared' block via -f / stdin.
+  Rename ('--set name=...') cannot be combined with secret updates in the
+  same call — split into two calls.
 
 Examples:
-  lizard service set api --set deploy.startCommand="node dist/index.js"
-  lizard service set api --set build.buildCommand="npm run build" \\
-                         --set deploy.healthcheckPath=/health
+  lizard service set api --set startCommand="node dist/index.js"
+  lizard service set api --set buildCommand="npm run build" --set healthcheckPath=/health
+  lizard service set api --set name=api-v2
   lizard service set api --set variables.PORT=3000
   lizard service set api --set variables.DB_URL.value='\${{ postgres.DATABASE_URL }}'
   lizard service set -f lizard-config.json`)
         .action(async (serviceArg, opts) => {
         const { projectId, scope } = await resolveProjectScope(opts.project);
         const patch = await buildPatch(serviceArg || opts.service, opts, projectId, scope);
-        if (!patch || isEmpty(patch)) {
+        if (!patch || isPatchEmpty(patch)) {
             if (isJSONMode()) {
                 printJSON({ staged: false, committed: false, message: "No changes" });
             }
@@ -84,13 +127,11 @@ Examples:
             }
             return;
         }
-        // The backend `/api/projects/:id/config:apply` schema expects:
-        //   { services: [{ id, name, buildCommand?, startCommand?, ... }],
-        //     addons:   [...],
-        //     secrets:  { shared?, services? } }
-        // The internal `patch.services` we built is keyed by service id with a
-        // nested {build,deploy,source,variables} layout — flatten it before send.
-        const body = await flattenPatch(patch, projectId, scope);
+        // Resolve current service names for: rename detection, error messages,
+        // and per-service-secret keying. One call, reused.
+        const nameById = await fetchNameIndex(projectId, scope, Object.keys(patch.services));
+        const body = flattenPatch(patch, nameById);
+        validateNoRenameWithSecrets(body, nameById);
         // Fetch current configRevision for CAS — skipped when --force is set.
         if (!opts.force) {
             try {
@@ -131,67 +172,48 @@ Examples:
         success(`Service configuration applied`);
     });
 }
+// ── pure transforms (exported for tests) ─────────────────────────────────────
 /**
- * Convert the internal nested patch shape (keyed by service id, with build/deploy
- * sub-objects) into the flat array shape the server expects:
- *   { services: [{ name, buildCommand?, startCommand?, ... }], secrets?: {...} }
+ * Convert a normalised patch (services keyed by id, flat cfg blobs) into the
+ * wire body for `POST /api/projects/:id/config:apply`:
  *
- * Dot-path mapping: build.X / deploy.X / source.X all collapse to the matching
- * top-level field on the service. `variables.<KEY>` (and the legacy `envVars`
- * alias on the cfg) collapse into `secrets.services[<name>][KEY]` — the
- * backend strips per-service envVars from this endpoint and reads env from
- * the secrets path instead.
+ *   { services: [{ id, name?, buildCommand?, startCommand?, ... }],
+ *     secrets?: { shared?, services? } }
+ *
+ * `nameById` provides the current display name for each service id. Rename
+ * fires only when cfg.name is set AND differs from current — equal names
+ * are silently dropped so non-rename calls don't bloat the audit log.
+ *
+ * Unknown fields in cfg throw before any network call.
  */
-async function flattenPatch(patch, projectId, scope) {
+export function flattenPatch(patch, nameById) {
     const out = { services: [] };
     if (!patch || typeof patch !== "object")
         return out;
     const services = patch.services ?? {};
-    const idsInPatch = Object.keys(services);
-    // Need each service's name (server keys upserts by name, not id)
-    let nameById = new Map();
-    if (idsInPatch.length > 0) {
-        const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
-        const all = [...(data.apps || []), ...(data.addons || [])];
-        nameById = new Map(all.map((s) => [s.id, s.name]));
-    }
-    for (const id of idsInPatch) {
-        const cfg = services[id] || {};
-        const name = nameById.get(id);
-        if (!name) {
+    for (const [id, cfgRaw] of Object.entries(services)) {
+        const currentName = nameById.get(id);
+        if (!currentName) {
             throw new Error(`Service ${id} no longer exists in the project.`);
         }
-        const flat = { id, name };
-        // Source group
-        if (cfg.source?.type !== undefined)
-            flat.sourceType = cfg.source.type;
-        if (cfg.source?.repoUrl !== undefined)
-            flat.repoUrl = cfg.source.repoUrl;
-        if (cfg.source?.branch !== undefined)
-            flat.branch = cfg.source.branch;
-        if (cfg.source?.rootDirectory !== undefined)
-            flat.rootDirectory = cfg.source.rootDirectory;
-        // Build group
-        if (cfg.build?.buildCommand !== undefined)
-            flat.buildCommand = cfg.build.buildCommand;
-        if (cfg.build?.watchPatterns !== undefined)
-            flat.watchPatterns = cfg.build.watchPatterns;
-        if (cfg.build?.dockerfilePath !== undefined)
-            flat.dockerfilePath = cfg.build.dockerfilePath;
-        // Deploy group
-        if (cfg.deploy?.startCommand !== undefined)
-            flat.startCommand = cfg.deploy.startCommand;
-        if (cfg.deploy?.preDeployCommand !== undefined)
-            flat.preDeployCommand = cfg.deploy.preDeployCommand;
-        if (cfg.deploy?.healthcheckPath !== undefined)
-            flat.healthcheckPath = cfg.deploy.healthcheckPath;
-        if (cfg.deploy?.healthcheckTimeout !== undefined)
-            flat.healthcheckTimeoutMs = cfg.deploy.healthcheckTimeout;
-        // Per-service variables → secrets.services[<name>]. The backend's
-        // `/config:apply` validator strips `services[].envVars`, so the only
-        // wire-supported path for setting per-service env is via `secrets.services`
-        // (it lands in the `app_secrets` table, which overrides legacy envVars in
-        // the runtime env precedence chain).
+        const cfg = cfgRaw && typeof cfgRaw === "object" && !Array.isArray(cfgRaw)
+            ? cfgRaw
+            : {};
+        rejectUnknownServiceFields(cfg, currentName);
+        const flat = { id };
+        if (cfg.name !== undefined && cfg.name !== currentName) {
+            const reason = validateName(String(cfg.name));
+            if (reason) {
+                throw new Error(`Invalid 'name' for service "${currentName}": ${reason}`);
+            }
+            flat.name = cfg.name;
+        }
+        for (const f of SERVICE_FIELDS) {
+            if (f === "name")
+                continue;
+            if (cfg[f] !== undefined)
+                flat[f] = cfg[f];
+        }
         const svcVars = collectKv(cfg.variables);
         if (cfg.envVars && typeof cfg.envVars === "object") {
             for (const [k, v] of Object.entries(cfg.envVars)) {
@@ -199,16 +221,12 @@ async function flattenPatch(patch, projectId, scope) {
             }
         }
         if (Object.keys(svcVars).length > 0) {
-            mergeServiceSecrets(out, name, svcVars);
+            mergeServiceSecrets(out, currentName, svcVars);
         }
         out.services.push(flat);
     }
-    // Pass through shared / per-service secrets the patch carries directly.
-    // Merge into whatever was already collected from per-service `variables`
-    // above so both inputs survive in one apply.
     if (patch.sharedVariables) {
-        const shared = collectKv(patch.sharedVariables);
-        mergeSharedSecrets(out, shared);
+        mergeSharedSecrets(out, collectKv(patch.sharedVariables));
     }
     if (patch.secrets?.services) {
         for (const [svcName, kv] of Object.entries(patch.secrets.services)) {
@@ -219,6 +237,40 @@ async function flattenPatch(patch, projectId, scope) {
         mergeSharedSecrets(out, patch.secrets.shared);
     }
     return out;
+}
+/**
+ * Reject a wire body that combines a rename with per-service secret updates.
+ * The backend's `secrets.services[<name>]` lookup uses a pre-rename snapshot
+ * of the apps table, so a rename + secrets-by-new-name in one call fails
+ * with "Unknown services in secrets". Catch it client-side with a clearer
+ * message before sending.
+ */
+export function validateNoRenameWithSecrets(body, nameById) {
+    const renames = [];
+    for (const s of body.services) {
+        if (s.name !== undefined && s.name !== nameById.get(s.id)) {
+            renames.push(`${nameById.get(s.id)} → ${s.name}`);
+        }
+    }
+    if (renames.length === 0)
+        return;
+    const hasServiceSecrets = body.secrets?.services && Object.keys(body.secrets.services).length > 0;
+    if (!hasServiceSecrets)
+        return;
+    throw new Error(`Cannot combine a service rename (${renames.join(", ")}) with per-service ` +
+        `secret updates in the same call. Backend keys per-service secrets by name ` +
+        `from a pre-rename snapshot, which fails on conflict. ` +
+        `Split into two calls: rename first, then update secrets.`);
+}
+function rejectUnknownServiceFields(cfg, serviceName) {
+    for (const key of Object.keys(cfg)) {
+        if (SERVICE_FIELD_SET.has(key))
+            continue;
+        if (NAMESPACE_KEYS.has(key))
+            continue;
+        throw new Error(`Unknown field '${key}' in service "${serviceName}". ` +
+            `See 'lizard service set --help' for the list of supported fields.`);
+    }
 }
 /** Convert `{ KEY: "v" | { value: "v" } | null }` to a flat `{ KEY: "v" | null }`. */
 function collectKv(src) {
@@ -322,15 +374,36 @@ function stdinHasData() {
     });
 }
 /**
- * Normalise a raw user JSON payload. Accepts:
- *   { services: { name|id: { build: ..., deploy: ..., variables: ... } } }
- *   { apps: { name|id: { ... } } }            // alias
- *   { name|id: { ... } }                       // top-level shortcut
+ * Normalise a raw JSON payload (`-f` / stdin):
+ *   { services: { name|id: { <flat cfg> } } }
+ *   { apps: { name|id: { <flat cfg> } } }                   // alias
+ *   { name|id: { <flat cfg> } }                              // shortcut (no siblings)
+ *   plus optional top-level: sharedVariables, secrets
+ *
+ * Unknown top-level keys throw. Per-service cfg validation happens in
+ * `flattenPatch` once we know the current service name.
  */
 async function normalisePatch(raw, projectId) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        throw new Error("Config must be a JSON object.");
+    }
+    const hasExplicitServices = "services" in raw || "apps" in raw;
+    const hasSiblings = "sharedVariables" in raw || "secrets" in raw;
+    if (!hasExplicitServices && hasSiblings) {
+        throw new Error("Cannot use shortcut form alongside 'sharedVariables'/'secrets'. " +
+            "Wrap services in a top-level 'services' key.");
+    }
+    if (hasExplicitServices) {
+        for (const k of Object.keys(raw)) {
+            if (!TOP_LEVEL_KEYS.has(k)) {
+                throw new Error(`Unknown top-level field '${k}'. ` +
+                    `Allowed: ${Array.from(TOP_LEVEL_KEYS).join(", ")}.`);
+            }
+        }
+    }
     const root = raw.services ?? raw.apps ?? raw;
     if (typeof root !== "object" || Array.isArray(root)) {
-        throw new Error("Config must be an object keyed by service name or ID.");
+        throw new Error("'services' must be an object keyed by service name or ID.");
     }
     const services = {};
     for (const [key, value] of Object.entries(root)) {
@@ -340,6 +413,8 @@ async function normalisePatch(raw, projectId) {
     const out = { services };
     if (raw.sharedVariables)
         out.sharedVariables = raw.sharedVariables;
+    if (raw.secrets)
+        out.secrets = raw.secrets;
     return out;
 }
 /** Convert a list of "<path>=<value>" pairs (for one service) into a nested patch. */
@@ -353,10 +428,29 @@ async function setPairsToPatch(serviceRef, pairs, projectId) {
         }
         const dotPath = pair.slice(0, eq).trim();
         const rawValue = pair.slice(eq + 1);
+        validateSetPath(dotPath);
         const value = parseValue(dotPath, rawValue);
         setDeep(cfg, dotPath, value);
     }
     return { services: { [svc.id]: cfg } };
+}
+/** Validate a `--set` dot-path against the canonical (flat) field list and
+ *  the `variables.*` namespace. Throws on anything else. */
+export function validateSetPath(dotPath) {
+    if (SERVICE_FIELD_SET.has(dotPath))
+        return;
+    if (dotPath.startsWith("variables.")) {
+        const parts = dotPath.split(".");
+        // variables.KEY  or  variables.KEY.value
+        if (parts.length === 2 && parts[1])
+            return;
+        if (parts.length === 3 && parts[1] && parts[2] === "value")
+            return;
+        throw new Error(`Invalid --set path '${dotPath}'. ` +
+            `Use 'variables.<KEY>' or 'variables.<KEY>.value'.`);
+    }
+    throw new Error(`Unknown --set field '${dotPath}'. ` +
+        `See 'lizard service set --help' for the list of supported fields.`);
 }
 /** Interactive prompt loop. Pick service → pick field → enter value. */
 async function interactivePatch(projectId, scope) {
@@ -383,26 +477,29 @@ async function interactivePatch(projectId, scope) {
         const field = await p.select({
             message: "What to change?",
             options: [
-                { value: "deploy.startCommand", label: "Start command" },
-                { value: "deploy.preDeployCommand", label: "Pre-deploy command" },
-                { value: "build.buildCommand", label: "Build command" },
-                { value: "build.watchPatterns", label: "Watch patterns" },
-                { value: "build.dockerfilePath", label: "Dockerfile path" },
-                { value: "deploy.healthcheckPath", label: "Healthcheck path" },
-                { value: "deploy.healthcheckTimeout", label: "Healthcheck timeout (ms)" },
-                { value: "source.type", label: "Source type (github/upload/docker)" },
-                { value: "source.branch", label: "Branch" },
-                { value: "source.rootDirectory", label: "Root directory" },
-                { value: "source.repoUrl", label: "GitHub repo" },
+                { value: "startCommand", label: "Start command" },
+                { value: "preDeployCommand", label: "Pre-deploy command" },
+                { value: "buildCommand", label: "Build command" },
+                { value: "watchPatterns", label: "Watch patterns" },
+                { value: "dockerfilePath", label: "Dockerfile path" },
+                { value: "healthcheckPath", label: "Healthcheck path" },
+                { value: "healthcheckTimeoutMs", label: "Healthcheck timeout (ms)" },
+                { value: "sourceType", label: "Source type (github/upload)" },
+                { value: "branch", label: "Branch" },
+                { value: "rootDirectory", label: "Root directory" },
+                { value: "repoUrl", label: "GitHub repo" },
+                { value: "name", label: "Rename service" },
             ],
         });
         if (p.isCancel(field))
             break;
         const valueInput = await p.text({
             message: `${field}`,
-            placeholder: field === "build.watchPatterns"
+            placeholder: field === "watchPatterns"
                 ? "comma-separated or JSON array"
-                : "value",
+                : field === "name"
+                    ? "new-service-name"
+                    : "value",
         });
         if (p.isCancel(valueInput))
             break;
@@ -413,14 +510,15 @@ async function interactivePatch(projectId, scope) {
     return { services: out };
 }
 // ── value coercion ──────────────────────────────────────────────────────────
-function parseValue(dotPath, raw) {
-    if (dotPath === "deploy.healthcheckTimeout") {
+export function parseValue(dotPath, raw) {
+    if (NUMERIC_FIELDS.has(dotPath)) {
         const n = Number(raw);
-        if (Number.isNaN(n))
+        if (Number.isNaN(n)) {
             throw new Error(`${dotPath} expects a number, got "${raw}"`);
+        }
         return n;
     }
-    if (dotPath === "build.watchPatterns") {
+    if (STRING_ARRAY_FIELDS.has(dotPath)) {
         const trimmed = raw.trim();
         if (trimmed.startsWith("[")) {
             try {
@@ -430,7 +528,10 @@ function parseValue(dotPath, raw) {
                 throw new Error(`Invalid JSON array for ${dotPath}: ${raw}`);
             }
         }
-        return trimmed.split(",").map((s) => s.trim()).filter(Boolean);
+        return trimmed
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
     }
     const trimmed = raw.trim();
     if ((trimmed.startsWith("{") && trimmed.endsWith("}")) ||
@@ -444,7 +545,7 @@ function parseValue(dotPath, raw) {
     }
     return raw;
 }
-function setDeep(obj, dotPath, value) {
+export function setDeep(obj, dotPath, value) {
     const keys = dotPath.split(".");
     let cur = obj;
     for (let i = 0; i < keys.length - 1; i++) {
@@ -455,13 +556,24 @@ function setDeep(obj, dotPath, value) {
     }
     cur[keys[keys.length - 1]] = value;
 }
-function isEmpty(obj) {
-    if (!obj || typeof obj !== "object")
+function isPatchEmpty(patch) {
+    if (!patch || typeof patch !== "object")
         return true;
-    if (Array.isArray(obj))
-        return obj.length === 0;
-    if (obj.services && Object.keys(obj.services).length === 0)
-        return true;
-    return Object.keys(obj).length === 0;
+    if (patch.services && Object.keys(patch.services).length === 0) {
+        return !patch.sharedVariables && !patch.secrets;
+    }
+    return false;
+}
+// ── network helpers ─────────────────────────────────────────────────────────
+/**
+ * Fetch current display names for each service id in the patch. Reused for
+ * rename detection (current vs cfg.name) and per-service-secret keying.
+ */
+async function fetchNameIndex(projectId, scope, ids) {
+    if (ids.length === 0)
+        return new Map();
+    const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
+    const all = [...(data.apps || []), ...(data.addons || [])];
+    return new Map(all.map((s) => [s.id, s.name]));
 }
 //# sourceMappingURL=service-set.js.map
