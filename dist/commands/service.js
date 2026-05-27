@@ -6,7 +6,7 @@ import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { validateName } from "../lib/name.js";
 import { registerServiceSet } from "./service-set.js";
 import { registerServiceShow } from "./service-show.js";
-import { success, info, isJSONMode, printJSON, isTTY, statusColor, } from "../lib/format.js";
+import { success, info, isJSONMode, printJSON, isTTY, } from "../lib/format.js";
 /**
  * `lizard service` — service group:
  *   - bare: link a service to cwd
@@ -42,35 +42,6 @@ export function registerService(program) {
         }
         else {
             await linkInteractive(sub);
-        }
-    });
-    svc
-        .command("status")
-        .description("Show status of the linked or specified service")
-        .argument("[service]", "Service name or ID (defaults to linked)")
-        .option("-s, --service <name>", "Service name or ID")
-        .option("-p, --project <id>", "Project name, slug, or ID")
-        .action(async (serviceArg, opts) => {
-        const { projectId, scope } = await resolveProjectScope(opts.project);
-        const target = serviceArg || opts.service || getProjectLink()?.serviceId;
-        if (!target)
-            throw new Error("No service specified or linked.");
-        const svcInfo = await resolveService(projectId, target);
-        const detail = await api.get(svcInfo.kind === "app"
-            ? withScope(`/api/apps/${svcInfo.id}`, scope)
-            : withScope(`/api/projects/${projectId}/addons/${svcInfo.id}`, scope));
-        if (isJSONMode()) {
-            printJSON(detail);
-            return;
-        }
-        console.log(chalk.bold(detail.name || svcInfo.name));
-        console.log(`  status: ${statusColor(detail.status)}`);
-        if (detail.domain)
-            console.log(`  url: ${chalk.cyan(`https://${detail.domain}`)}`);
-        if (detail.repo || detail.repoUrl)
-            console.log(`  repo: ${detail.repo || detail.repoUrl}`);
-        if (detail.builds?.length) {
-            console.log(`  latest build: ${statusColor(detail.builds[0].status)}`);
         }
     });
     svc

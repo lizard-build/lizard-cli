@@ -24,10 +24,10 @@ export function registerProjects(program) {
             console.log("No projects. Run `lizard init` to create one.");
             return;
         }
-        table(["Name", "Workspace", "ID", "Role", "Members"], projects.map((p) => [
+        table(["Name", "Workspace", "Slug", "Role", "Members"], projects.map((p) => [
             p.name,
             p.workspaceName || chalk.dim("—"),
-            p.id,
+            p.slug,
             p.role || "owner",
             String(p.memberCount || 1),
         ]));
