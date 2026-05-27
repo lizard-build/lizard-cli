@@ -112,6 +112,7 @@ export function registerAdd(program) {
         .option("--instance-name <name>", "(deprecated) alias for --name")
         .option("-w, --workspace <ws>", "Disambiguate project lookup by workspace")
         .option("--region <code>", "Region to provision the addon/service in")
+        .option("--no-deploy", "With -r: attach repo but skip the initial build. First deploy fires on next `service set` or `redeploy`.")
         .option("--list", "Show available database types")
         .action(async (types, opts, command) => {
         const merged = command.optsWithGlobals();
@@ -125,6 +126,7 @@ export function registerAdd(program) {
             instanceName: opts.instanceName,
             workspace: opts.workspace,
             region: opts.region,
+            noDeploy: opts.deploy === false,
             list: opts.list,
             projectFlag: merged.project,
         });
@@ -234,12 +236,18 @@ async function runAdd(input) {
                 region,
                 variables,
                 ...(detectedPort ? { containerPort: detectedPort } : {}),
+                ...(input.noDeploy ? { skipInitialDeploy: true } : {}),
             });
             if (isJSONMode())
                 printJSON(app);
             else {
-                success(`Service ${chalk.bold(app.name)} created`);
+                success(`Service ${chalk.bold(app.name)} created${input.noDeploy ? " (initial deploy deferred)" : ""}`);
                 info("");
+                if (input.noDeploy) {
+                    info(chalk.dim(`  Configure and trigger the first deploy:`));
+                    info(`    ${chalk.cyan(`lizard service set ${app.name} --set buildCommand='...' --set startCommand='...'`)}`);
+                    info("");
+                }
                 info(chalk.dim(`  Reference this service's private URL from other services:`));
                 info(`    ${chalk.cyan(`\${{${app.name}.LIZARD_PRIVATE_DOMAIN}}`)}`);
             }
