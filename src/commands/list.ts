@@ -44,11 +44,11 @@ export function registerList(program: Command) {
       }
 
       table(
-        ["Name", "Workspace", "ID", "Role", "Members"],
+        ["Name", "Workspace", "Slug", "Role", "Members"],
         projects.map((p) => [
           p.name,
           p.workspaceName || chalk.dim("—"),
-          p.id,
+          p.slug,
           p.role || "owner",
           String(p.memberCount || 1),
         ]),

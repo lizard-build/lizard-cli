@@ -6,11 +6,11 @@ import { printJSON } from "../lib/format.js";
 /**
  * `lizard service show` — print the current service configuration as JSON.
  *
+ * Works for both apps and addons. Without `-s` shows the whole project
+ * (`{ apps, addons }`). With `-s <name>` shows just that service.
+ *
  * Useful for diff-ing against a `lizard.config.json`, seeding a new file,
  * or feeding into `lizard service set` to roll back.
- *
- * Without `-s` shows the whole project (all services keyed by ID).
- * With `-s <name>` shows just that service.
  */
 export function registerServiceShow(svc: Command) {
   svc
@@ -25,37 +25,28 @@ export function registerServiceShow(svc: Command) {
       const ref = serviceArg || opts.service;
       if (ref) {
         const svcInfo = await resolveService(projectId, ref);
-        if (svcInfo.kind === "addon") {
-          throw new Error(
-            `\`service show\` is for apps. For addon details, use \`lizard service status ${svcInfo.name}\`.`,
+        if (svcInfo.kind === "app") {
+          const detail = await api.get<unknown>(
+            withScope(`/api/apps/${svcInfo.id}`, scope),
           );
+          printJSON(detail);
+          return;
         }
-        const detail = await api
-          .get<unknown>(withScope(`/api/apps/${svcInfo.id}/config`, scope))
-          .catch((err: any) => {
-            if (err?.status === 404) {
-              throw new Error(
-                "Service config endpoint not yet implemented. The API needs " +
-                  "`GET /api/apps/{id}/config` returning { source, build, deploy, variables }.",
-              );
-            }
-            throw err;
-          });
-        printJSON(detail);
+        // Addons: pluck from the project /services endpoint, which already
+        // returns rich addon objects (connection, config, volume, region).
+        // There is no per-addon GET route on the backend.
+        const data = await api.get<{ addons?: any[] }>(
+          withScope(`/api/projects/${projectId}/services`, scope),
+        );
+        const addon = (data.addons || []).find((a: any) => a.id === svcInfo.id);
+        if (!addon) throw new Error(`Addon ${svcInfo.name} not found`);
+        printJSON(addon);
         return;
       }
 
-      const config = await api
-        .get<unknown>(withScope(`/api/projects/${projectId}/config`, scope))
-        .catch((err: any) => {
-          if (err?.status === 404) {
-            throw new Error(
-              "Project config endpoint not yet implemented. The API needs " +
-                "`GET /api/projects/{id}/config` returning { services: { <id>: {...} } }.",
-            );
-          }
-          throw err;
-        });
-      printJSON(config);
+      const data = await api.get<unknown>(
+        withScope(`/api/projects/${projectId}/services`, scope),
+      );
+      printJSON(data);
     });
 }

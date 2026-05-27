@@ -89,8 +89,8 @@ program
     // the optional workspace backfill silently no-ops when not authed.
     //
     // Match by name AND parent — otherwise leaf subcommands sharing a name
-    // (e.g. `service status`, `git status`, `up status`) skip the auto-login
-    // flow and would 401 instead of prompting the user to log in.
+    // (e.g. `git status`, `up status`) skip the auto-login flow and would
+    // 401 instead of prompting the user to log in.
     const noAuth = new Set(["login", "logout", "upgrade", "help", "docs", "status"]);
     const isTopLevel = actionCommand.parent === thisCommand;
     if (isTopLevel && noAuth.has(actionCommand.name())) return;
