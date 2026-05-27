@@ -1,7 +1,6 @@
 import { describe, test, expect } from "vitest";
 import {
   flattenPatch,
-  validateNoRenameWithSecrets,
   validateSetPath,
   validateName,
   parseValue,
@@ -199,46 +198,32 @@ describe("flattenPatch — variables and secrets", () => {
   });
 });
 
-// ── rename + secrets guard ─────────────────────────────────────────────────
+// ── rename + secrets: CLI keys per-service secrets by pre-rename name ─────
 
-describe("validateNoRenameWithSecrets", () => {
-  test("rename + per-service secrets → throws with split-call hint", () => {
+describe("flattenPatch — rename combined with secrets", () => {
+  // The backend's secrets.services lookup uses a pre-rename snapshot of the
+  // apps table, so per-service secret keys must match the pre-rename name.
+  // The CLI keys variables/envVars by `currentName` (= pre-rename) on its
+  // own, so this combination produces a body the backend accepts.
+  test("rename + variables.X — variables stay keyed by pre-rename name", () => {
     const body = flattenPatch(
-      {
-        services: { [ID]: { name: "api-v2", variables: { K: "v" } } },
-      },
+      { services: { [ID]: { name: "api-v2", variables: { K: "v" } } } },
       NAMES,
     );
-    expect(() => validateNoRenameWithSecrets(body, NAMES)).toThrow(
-      /rename.*secret updates.*Split into two calls/s,
-    );
+    expect(body.services).toEqual([{ id: ID, name: "api-v2" }]);
+    expect(body.secrets).toEqual({ services: { [NAME]: { K: "v" } } });
   });
 
-  test("rename alone is fine", () => {
-    const body = flattenPatch(
-      { services: { [ID]: { name: "api-v2" } } },
-      NAMES,
-    );
-    expect(() => validateNoRenameWithSecrets(body, NAMES)).not.toThrow();
-  });
-
-  test("rename + only shared secrets is fine (shared isn't name-keyed)", () => {
+  test("rename + explicit secrets.services keyed by old name passes through", () => {
     const body = flattenPatch(
       {
         services: { [ID]: { name: "api-v2" } },
-        sharedVariables: { LOG_LEVEL: "debug" },
+        secrets: { services: { [NAME]: { K: "v" } } },
       },
       NAMES,
     );
-    expect(() => validateNoRenameWithSecrets(body, NAMES)).not.toThrow();
-  });
-
-  test("secrets without rename is fine", () => {
-    const body = flattenPatch(
-      { services: { [ID]: { variables: { K: "v" } } } },
-      NAMES,
-    );
-    expect(() => validateNoRenameWithSecrets(body, NAMES)).not.toThrow();
+    expect(body.services).toEqual([{ id: ID, name: "api-v2" }]);
+    expect(body.secrets!.services[NAME]).toEqual({ K: "v" });
   });
 });
 

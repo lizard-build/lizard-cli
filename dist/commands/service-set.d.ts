@@ -42,17 +42,6 @@ export declare function flattenPatch(patch: any, nameById: Map<string, string>):
     services: any[];
     secrets?: any;
 };
-/**
- * Reject a wire body that combines a rename with per-service secret updates.
- * The backend's `secrets.services[<name>]` lookup uses a pre-rename snapshot
- * of the apps table, so a rename + secrets-by-new-name in one call fails
- * with "Unknown services in secrets". Catch it client-side with a clearer
- * message before sending.
- */
-export declare function validateNoRenameWithSecrets(body: {
-    services: any[];
-    secrets?: any;
-}, nameById: Map<string, string>): void;
 /** Validate a `--set` dot-path against the canonical (flat) field list and
  *  the `variables.*` namespace. Throws on anything else. */
 export declare function validateSetPath(dotPath: string): void;

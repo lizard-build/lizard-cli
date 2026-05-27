@@ -105,8 +105,6 @@ Notes:
   'lizard secrets set --service <name>'). To set project-wide env, use
   'lizard secrets set --global' or pass JSON with a top-level
   'sharedVariables' / 'secrets.shared' block via -f / stdin.
-  Rename ('--set name=...') cannot be combined with secret updates in the
-  same call — split into two calls.
 
 Examples:
   lizard service set api --set startCommand="node dist/index.js"
@@ -131,7 +129,6 @@ Examples:
         // and per-service-secret keying. One call, reused.
         const nameById = await fetchNameIndex(projectId, scope, Object.keys(patch.services));
         const body = flattenPatch(patch, nameById);
-        validateNoRenameWithSecrets(body, nameById);
         // Fetch current configRevision for CAS — skipped when --force is set.
         if (!opts.force) {
             try {
@@ -237,30 +234,6 @@ export function flattenPatch(patch, nameById) {
         mergeSharedSecrets(out, patch.secrets.shared);
     }
     return out;
-}
-/**
- * Reject a wire body that combines a rename with per-service secret updates.
- * The backend's `secrets.services[<name>]` lookup uses a pre-rename snapshot
- * of the apps table, so a rename + secrets-by-new-name in one call fails
- * with "Unknown services in secrets". Catch it client-side with a clearer
- * message before sending.
- */
-export function validateNoRenameWithSecrets(body, nameById) {
-    const renames = [];
-    for (const s of body.services) {
-        if (s.name !== undefined && s.name !== nameById.get(s.id)) {
-            renames.push(`${nameById.get(s.id)} → ${s.name}`);
-        }
-    }
-    if (renames.length === 0)
-        return;
-    const hasServiceSecrets = body.secrets?.services && Object.keys(body.secrets.services).length > 0;
-    if (!hasServiceSecrets)
-        return;
-    throw new Error(`Cannot combine a service rename (${renames.join(", ")}) with per-service ` +
-        `secret updates in the same call. Backend keys per-service secrets by name ` +
-        `from a pre-rename snapshot, which fails on conflict. ` +
-        `Split into two calls: rename first, then update secrets.`);
 }
 function rejectUnknownServiceFields(cfg, serviceName) {
     for (const key of Object.keys(cfg)) {
