@@ -39,6 +39,7 @@ import { registerRun } from "./commands/run.js";
 import { registerScale } from "./commands/scale.js";
 import { registerSecrets } from "./commands/secrets.js";
 import { registerService } from "./commands/service.js";
+import { registerSkill } from "./commands/skill.js";
 import { registerSSH } from "./commands/ssh.js";
 import { registerStatus } from "./commands/status.js";
 import { registerUnlink } from "./commands/unlink.js";
@@ -76,12 +77,15 @@ program
     // Top-level commands that don't need auth. `status` prints the local link;
     // the optional workspace backfill silently no-ops when not authed.
     //
-    // Match by name AND parent — otherwise leaf subcommands sharing a name
-    // (e.g. `git status`, `up status`) skip the auto-login flow and would
-    // 401 instead of prompting the user to log in.
-    const noAuth = new Set(["login", "logout", "upgrade", "help", "docs", "status"]);
-    const isTopLevel = actionCommand.parent === thisCommand;
-    if (isTopLevel && noAuth.has(actionCommand.name()))
+    // Walk up to the top-level ancestor so subcommands inherit (`skill list`
+    // matches via `skill`). Leaf names like `git status` don't false-positive
+    // because we check the ancestor's name, not the action's.
+    const noAuth = new Set(["login", "logout", "upgrade", "help", "docs", "status", "skill"]);
+    let topLevel = actionCommand;
+    while (topLevel.parent && topLevel.parent !== thisCommand) {
+        topLevel = topLevel.parent;
+    }
+    if (noAuth.has(topLevel.name()))
         return;
     // Require auth — auto-triggers login flow if not logged in
     const creds = await requireAuth();
@@ -109,6 +113,7 @@ registerRun(program);
 registerScale(program);
 registerSecrets(program);
 registerService(program);
+registerSkill(program);
 registerSSH(program);
 registerStatus(program);
 registerUnlink(program);
