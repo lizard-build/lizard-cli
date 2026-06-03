@@ -27,7 +27,13 @@ export function registerLogs(program) {
             await showRestartLogTail(opts.service, projectId, String(opts.restart));
             return;
         }
-        const tailN = opts.tail !== undefined ? parseTail(opts.tail) : undefined;
+        // In JSON mode default to a historical tail so non-interactive callers
+        // (agents, pipes) get a snapshot and exit instead of hanging on SSE.
+        const tailN = opts.tail !== undefined
+            ? parseTail(opts.tail)
+            : isJSONMode()
+                ? 200
+                : undefined;
         if (opts.build) {
             await showBuildLogs(opts.service, projectId, scope, tailN);
             return;

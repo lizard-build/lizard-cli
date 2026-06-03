@@ -38,11 +38,9 @@ export const SERVICE_FIELDS = [
     "dockerfilePath",
     "startCommand",
     "preDeployCommand",
-    "healthcheckPath",
-    "healthcheckTimeoutMs",
 ];
 const SERVICE_FIELD_SET = new Set(SERVICE_FIELDS);
-const NUMERIC_FIELDS = new Set(["healthcheckTimeoutMs"]);
+const NUMERIC_FIELDS = new Set([]);
 const STRING_ARRAY_FIELDS = new Set(["watchPatterns"]);
 /** Per-service "namespace" keys — not flat fields, separate stores. */
 const NAMESPACE_KEYS = new Set(["variables", "envVars"]);
@@ -92,8 +90,6 @@ Supported --set fields (flat — matches the wire schema and \`service show\`):
   dockerfilePath              string  (path to Dockerfile, enables docker build)
   startCommand                string  (e.g. "node dist/index.js")
   preDeployCommand            string  (runs once before each rollout, e.g. migrations)
-  healthcheckPath             string  (HTTP path, e.g. /health)
-  healthcheckTimeoutMs        number  (milliseconds)
 
   variables.<KEY>             string  (per-service env shortcut)
   variables.<KEY>.value       string  (supports \${{ <ref>.KEY }} templates)
@@ -108,7 +104,7 @@ Notes:
 
 Examples:
   lizard service set api --set startCommand="node dist/index.js"
-  lizard service set api --set buildCommand="npm run build" --set healthcheckPath=/health
+  lizard service set api --set buildCommand="npm run build"
   lizard service set api --set name=api-v2
   lizard service set api --set variables.PORT=3000
   lizard service set api --set variables.DB_URL.value='\${{ postgres.DATABASE_URL }}'
@@ -455,8 +451,6 @@ async function interactivePatch(projectId, scope) {
                 { value: "buildCommand", label: "Build command" },
                 { value: "watchPatterns", label: "Watch patterns" },
                 { value: "dockerfilePath", label: "Dockerfile path" },
-                { value: "healthcheckPath", label: "Healthcheck path" },
-                { value: "healthcheckTimeoutMs", label: "Healthcheck timeout (ms)" },
                 { value: "sourceType", label: "Source type (github/upload)" },
                 { value: "branch", label: "Branch" },
                 { value: "rootDirectory", label: "Root directory" },

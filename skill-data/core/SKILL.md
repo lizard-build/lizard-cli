@@ -24,7 +24,7 @@ Before writing commands for a specific project:
 ## Execution rules
 
 1. Prefer the `lizard` CLI. For anything not exposed by it, ask the user — don't hit the API directly.
-2. Always pass `--json` on non-interactive calls. The CLI also auto-switches when stdout isn't a TTY. For streaming commands (`lizard up` without `--detach`, `lizard logs`), `--json` produces one JSON event per line: `{ event: "log", line }`, terminating with `{ event: "done" }` / `{ event: "error", message }`, plus `{ event: "deployed", status, url }` for `up`.
+2. Always pass `--json` on non-interactive calls. The CLI also auto-switches when stdout isn't a TTY. For streaming commands (`lizard up` without `--detach`), `--json` produces one JSON event per line: `{ event: "log", line }`, terminating with `{ event: "done" }` / `{ event: "error", message }`, plus `{ event: "deployed", status, url }` for `up`. `lizard logs --json` is **not** a stream: it returns the last 200 lines (override with `--tail N`, max 1000) and exits — do not wait on it expecting more. Need a specific incident? Use `--restart latest` or `--restart <id>`. Only stream logs without `--json` if the user actively wants a live tail.
 3. For unfamiliar commands, run `lizard <cmd> --help --json` first — never guess flag shapes. See [Discovery](#discovery).
 4. Resolve context before any mutation. `lizard status` shows the cwd link; `lizard ps --json` shows services in the linked project. Confirm you're targeting the right thing.
 5. For destructive actions (delete service, drop addon, overwrite a project-wide secret, prod restart), confirm intent with the user before executing. The CLI's own prompts fire only on TTY.
@@ -187,8 +187,9 @@ Multi-step requests follow natural chains. Return one unified response, don't fa
 ## Common ops
 
 ```
-lizard logs --json [--service <name>]      # streamed runtime logs
+lizard logs --json [--service <name>]      # last 200 runtime log lines, then exit (--tail N to override)
 lizard logs --build --json                  # last build's logs
+lizard logs --restart latest --json         # log tail of the most recent crash/restart
 lizard ps --json                            # running instances per service
 lizard status                               # cwd project link (no auth needed)
 lizard restart --service <name>             # rolling restart
