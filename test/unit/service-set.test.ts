@@ -23,8 +23,6 @@ describe("flattenPatch — flat canonical shape", () => {
             buildCommand: "npm run build",
             startCommand: "node dist/index.js",
             preDeployCommand: "npm run migrate",
-            healthcheckPath: "/health",
-            healthcheckTimeoutMs: 5000,
             sourceType: "github",
             repoUrl: "https://github.com/acme/api",
             branch: "main",
@@ -43,8 +41,6 @@ describe("flattenPatch — flat canonical shape", () => {
           buildCommand: "npm run build",
           startCommand: "node dist/index.js",
           preDeployCommand: "npm run migrate",
-          healthcheckPath: "/health",
-          healthcheckTimeoutMs: 5000,
           sourceType: "github",
           repoUrl: "https://github.com/acme/api",
           branch: "main",
@@ -66,7 +62,7 @@ describe("flattenPatch — flat canonical shape", () => {
     for (const f of SERVICE_FIELDS) {
       if (f === "name") continue;
       const cfg: Record<string, unknown> = {};
-      cfg[f] = f === "healthcheckTimeoutMs" ? 1234 : f === "watchPatterns" ? ["x"] : "v";
+      cfg[f] = f === "watchPatterns" ? ["x"] : "v";
       const body = flattenPatch({ services: { [ID]: cfg } }, NAMES);
       expect(body.services[0]).toMatchObject({ id: ID, [f]: cfg[f] });
     }
@@ -302,13 +298,6 @@ describe("validateName", () => {
 // ── parseValue ──────────────────────────────────────────────────────────────
 
 describe("parseValue", () => {
-  test("healthcheckTimeoutMs coerces to number", () => {
-    expect(parseValue("healthcheckTimeoutMs", "5000")).toBe(5000);
-    expect(() => parseValue("healthcheckTimeoutMs", "fast")).toThrow(
-      /expects a number/,
-    );
-  });
-
   test("watchPatterns: JSON array form", () => {
     expect(parseValue("watchPatterns", '["src/**","apps/api/**"]')).toEqual([
       "src/**",
