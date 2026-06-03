@@ -104,7 +104,8 @@ function shortDesc(desc: string, max = 100): string {
 
 export function registerSkill(program: Command) {
   const skill = program
-    .command("skill")
+    .command("skills")
+    .alias("skill")
     .description("Read embedded agent skills shipped with this CLI version");
 
   skill

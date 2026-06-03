@@ -88,10 +88,10 @@ program
     // Top-level commands that don't need auth. `status` prints the local link;
     // the optional workspace backfill silently no-ops when not authed.
     //
-    // Walk up to the top-level ancestor so subcommands inherit (`skill list`
-    // matches via `skill`). Leaf names like `git status` don't false-positive
+    // Walk up to the top-level ancestor so subcommands inherit (`skills list`
+    // matches via `skills`). Leaf names like `git status` don't false-positive
     // because we check the ancestor's name, not the action's.
-    const noAuth = new Set(["login", "logout", "upgrade", "help", "docs", "status", "skill"]);
+    const noAuth = new Set(["login", "logout", "upgrade", "help", "docs", "status", "skills"]);
     let topLevel: Command = actionCommand;
     while (topLevel.parent && topLevel.parent !== thisCommand) {
       topLevel = topLevel.parent;
