@@ -50,7 +50,7 @@ export function registerUp(program: Command) {
     .option("--build-command <cmd>", "Build command to run (e.g. 'npm run build')")
     .option("--start-command <cmd>", "Start command to run (e.g. 'node dist/index.js')")
     .option("--pre-deploy-command <cmd>", "Pre-deploy command (e.g. 'node dist/migrate.js')")
-    .option("--port <number>", "Container port (default: 3000)")
+    .option("--port <number>", "Container port (default: 3000; 0 = worker mode, no HTTP listener)")
     .action(async (pathArg: string | undefined, opts, cmd) => {
       const merged = cmd.optsWithGlobals();
       const serviceFlag = merged.service ?? opts.service;
@@ -83,7 +83,8 @@ export function registerUp(program: Command) {
         buildCommand: opts.buildCommand,
         startCommand: opts.startCommand,
         preDeployCommand: opts.preDeployCommand,
-        port: opts.port ? parseInt(opts.port, 10) : undefined,
+        // Use undefined check, not truthy — "0" is worker mode and must reach the server.
+        port: opts.port !== undefined ? parseInt(opts.port, 10) : undefined,
         opts,
       });
     });

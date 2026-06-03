@@ -23,8 +23,12 @@ export function registerPort(program) {
         if (portArg === undefined) {
             const app = await api.get(`/api/apps/${service.id}`);
             const port = app.containerPort ?? 3000;
+            const isWorker = port === 0;
             if (isJSONMode()) {
-                printJSON({ port });
+                printJSON({ port, worker: isWorker });
+            }
+            else if (isWorker) {
+                info(`${chalk.bold(service.name)} is in worker mode (containerPort=0, no HTTP listener)`);
             }
             else {
                 info(`${chalk.bold(service.name)} container port: ${chalk.cyan(port)}`);
@@ -32,14 +36,19 @@ export function registerPort(program) {
             return;
         }
         const newPort = parseInt(portArg, 10);
-        if (isNaN(newPort) || newPort < 1 || newPort > 65535) {
-            throw new Error(`Invalid port: ${portArg}. Must be 1–65535.`);
+        // 0 = worker mode (no HTTP listener; platform skips PORT injection and
+        // the vm-agent port reachability check).
+        if (isNaN(newPort) || newPort < 0 || newPort > 65535) {
+            throw new Error(`Invalid port: ${portArg}. Must be 0 (worker mode) or 1–65535.`);
         }
         // PATCH /api/apps/:id is 410-Gone server-side; writes go through
         // POST /api/projects/:id/config:apply.
         await api.post(withScope(`/api/projects/${projectId}/config:apply`, scope), { services: [{ id: service.id, name: service.name, containerPort: newPort }] });
         if (isJSONMode()) {
-            printJSON({ ok: true, port: newPort });
+            printJSON({ ok: true, port: newPort, worker: newPort === 0 });
+        }
+        else if (newPort === 0) {
+            success(`${chalk.bold(service.name)} switched to worker mode — takes effect on next deploy`);
         }
         else {
             success(`${chalk.bold(service.name)} container port set to ${chalk.cyan(newPort)} — takes effect on next deploy`);

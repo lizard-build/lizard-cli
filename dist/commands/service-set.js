@@ -38,9 +38,10 @@ export const SERVICE_FIELDS = [
     "dockerfilePath",
     "startCommand",
     "preDeployCommand",
+    "containerPort", // 0 = worker mode (no HTTP listener)
 ];
 const SERVICE_FIELD_SET = new Set(SERVICE_FIELDS);
-const NUMERIC_FIELDS = new Set([]);
+const NUMERIC_FIELDS = new Set(["containerPort"]);
 const STRING_ARRAY_FIELDS = new Set(["watchPatterns"]);
 /** Per-service "namespace" keys — not flat fields, separate stores. */
 const NAMESPACE_KEYS = new Set(["variables", "envVars"]);
@@ -90,6 +91,7 @@ Supported --set fields (flat — matches the wire schema and \`service show\`):
   dockerfilePath              string  (path to Dockerfile, enables docker build)
   startCommand                string  (e.g. "node dist/index.js")
   preDeployCommand            string  (runs once before each rollout, e.g. migrations)
+  containerPort               number  (1-65535, or 0 for worker mode / no HTTP listener)
 
   variables.<KEY>             string  (per-service env shortcut)
   variables.<KEY>.value       string  (supports \${{ <ref>.KEY }} templates)
