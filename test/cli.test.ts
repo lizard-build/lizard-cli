@@ -116,19 +116,19 @@ beforeAll(async () => {
     projectId = process.env.LIZARD_TEST_PROJECT_ID;
     return;
   }
-  // Then any cwd-linked project on this machine.
-  const cfg = loadConfig();
-  const linked = Object.values(cfg.projects ?? {})[0];
-  if (linked?.projectId) {
-    projectId = linked.projectId;
-    return;
-  }
-  // Last resort: pick any project the auth'd user can see.
+  // Fetch the canonical list so we don't trust stale entries in
+  // ~/.lizard/config.json that point at projects deleted on the server.
   const projects = await cliJSON("project", "list");
   if (!Array.isArray(projects) || projects.length === 0) {
     throw new Error("No projects found — run `lizard init` first or set LIZARD_TEST_PROJECT_ID");
   }
-  projectId = projects[0].id;
+  const liveIds = new Set(projects.map((p: any) => p.id));
+  // Prefer a cwd-linked project, but only if it still exists server-side.
+  const cfg = loadConfig();
+  const linked = Object.values(cfg.projects ?? {}).find(
+    (p: any) => p?.projectId && liveIds.has(p.projectId),
+  );
+  projectId = (linked as any)?.projectId ?? projects[0].id;
 });
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
@@ -229,7 +229,7 @@ describe("project secrets", () => {
   });
 
   test("delete the key", async () => {
-    const { stdout } = await cli("secret", "delete", KEY, "--global", "--project", projectId);
+    const { stdout } = await cli("secret", "delete", KEY, "--global", "-y", "--project", projectId);
     expect(stdout).toMatch(/deleted/i);
   });
 
@@ -442,7 +442,7 @@ describe.skipIf(process.env.LIZARD_SKIP_DEPLOY === "1")("deploy", () => {
     });
 
     test("delete the key", async () => {
-      const { stdout } = await cliFrom(FIXTURE, "secret", "delete", KEY);
+      const { stdout } = await cliFrom(FIXTURE, "secret", "delete", KEY, "-y");
       expect(stdout).toMatch(/deleted/i);
     });
 

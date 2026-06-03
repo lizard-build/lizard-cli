@@ -57,10 +57,10 @@ function parseJSON(s: string): any {
 // assert the dump is complete and to drill into each subcommand's --help
 // --json output.
 const TOP_LEVEL_COMMANDS = [
-  "add", "config", "docs", "domain", "git", "init", "link", "list", "login",
+  "add", "config", "docs", "domain", "git", "init", "link", "login",
   "logout", "logs", "open", "port", "project", "ps", "redeploy", "regions",
-  "restart", "run", "scale", "secrets", "service", "ssh", "status", "unlink",
-  "up", "upgrade", "whoami", "workspace",
+  "restart", "run", "scale", "secrets", "service", "skills", "ssh", "status",
+  "unlink", "up", "upgrade", "whoami", "workspace",
 ];
 
 // ── help dump ────────────────────────────────────────────────────────────────
