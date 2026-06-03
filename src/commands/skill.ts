@@ -1,40 +1,63 @@
 import { Command } from "commander";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { error, info, isJSONMode, printJSON, table } from "../lib/format.js";
+import { EMBEDDED_SKILLS } from "../lib/skills-data.generated.js";
 
-const DEFAULT_SKILLS_DIR = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "skill-data",
-);
+// Skills are embedded into the JS bundle at build time (see scripts/gen-skills.mjs).
+// This makes `lizard skill` work both in the npm-installed package and in the
+// Bun --compile standalone binary, where the skill-data/ directory is not
+// reachable through the filesystem.
+//
+// LIZARD_SKILLS_DIR overrides the embedded source with a real directory — useful
+// for authoring new skills locally without a rebuild.
 
-function skillsDir(): string {
-  return process.env.LIZARD_SKILLS_DIR || DEFAULT_SKILLS_DIR;
+interface Source {
+  list(): string[];
+  read(name: string): string | null;
+  pathOf(name?: string): string;
 }
 
-function listSkills(): string[] {
-  const dir = skillsDir();
-  try {
-    return readdirSync(dir)
-      .filter((name) => {
-        const p = path.join(dir, name);
-        try {
-          return statSync(p).isDirectory();
-        } catch {
-          return false;
-        }
-      })
-      .sort();
-  } catch {
-    return [];
-  }
+function fsSource(dir: string): Source {
+  return {
+    list: () => {
+      try {
+        return readdirSync(dir)
+          .filter((name) => {
+            try {
+              return statSync(path.join(dir, name)).isDirectory();
+            } catch {
+              return false;
+            }
+          })
+          .sort();
+      } catch {
+        return [];
+      }
+    },
+    read: (name) => {
+      try {
+        return readFileSync(path.join(dir, name, "SKILL.md"), "utf8");
+      } catch {
+        return null;
+      }
+    },
+    pathOf: (name) => (name ? path.join(dir, name, "SKILL.md") : dir),
+  };
 }
 
-function skillFile(name: string): string {
-  return path.join(skillsDir(), name, "SKILL.md");
+function embeddedSource(): Source {
+  return {
+    list: () => Object.keys(EMBEDDED_SKILLS).sort(),
+    read: (name) => EMBEDDED_SKILLS[name]?.content ?? null,
+    pathOf: (name) =>
+      name ? `embedded://skills/${name}/SKILL.md` : "embedded://skills",
+  };
+}
+
+function getSource(): Source {
+  const override = process.env.LIZARD_SKILLS_DIR;
+  return override ? fsSource(override) : embeddedSource();
 }
 
 // Minimal YAML-ish frontmatter parser. Pulls top-level scalar keys (name,
@@ -61,12 +84,12 @@ function parseFrontmatter(md: string): Record<string, string> {
   return out;
 }
 
-function readSkill(name: string): { md: string; meta: Record<string, string> } {
-  const file = skillFile(name);
-  let md: string;
-  try {
-    md = readFileSync(file, "utf8");
-  } catch {
+function readSkill(
+  src: Source,
+  name: string,
+): { md: string; meta: Record<string, string> } {
+  const md = src.read(name);
+  if (md == null) {
     throw new Error(
       `Skill '${name}' not found. Run \`lizard skill list\` to see available skills.`,
     );
@@ -88,13 +111,14 @@ export function registerSkill(program: Command) {
     .command("list")
     .description("List available skills with descriptions")
     .action(() => {
-      const names = listSkills();
+      const src = getSource();
+      const names = src.list();
       if (isJSONMode()) {
         printJSON({
-          dir: skillsDir(),
+          dir: src.pathOf(),
           skills: names.map((n) => {
             try {
-              const { meta } = readSkill(n);
+              const { meta } = readSkill(src, n);
               return { name: n, description: meta.description || "" };
             } catch {
               return { name: n, description: "" };
@@ -109,7 +133,7 @@ export function registerSkill(program: Command) {
       }
       const rows = names.map((n) => {
         try {
-          const { meta } = readSkill(n);
+          const { meta } = readSkill(src, n);
           return [n, shortDesc(meta.description || "")];
         } catch {
           return [n, ""];
@@ -122,14 +146,18 @@ export function registerSkill(program: Command) {
     .command("get")
     .description("Print a skill's full content (markdown)")
     .argument("<name>", "skill name (e.g. core)")
-    .option("--full", "Include reference files (reserved; currently equivalent to default)")
+    .option(
+      "--full",
+      "Include reference files (reserved; currently equivalent to default)",
+    )
     .action((name: string, _opts: { full?: boolean }) => {
+      const src = getSource();
       try {
-        const { md, meta } = readSkill(name);
+        const { md, meta } = readSkill(src, name);
         if (isJSONMode()) {
           printJSON({
             name,
-            path: skillFile(name),
+            path: src.pathOf(name),
             frontmatter: meta,
             content: md,
           });
@@ -147,7 +175,8 @@ export function registerSkill(program: Command) {
     .description("Print the filesystem path of a skill (or the skills root)")
     .argument("[name]", "skill name; omit to print the skills directory")
     .action((name?: string) => {
-      const target = name ? skillFile(name) : skillsDir();
+      const src = getSource();
+      const target = src.pathOf(name);
       if (isJSONMode()) {
         printJSON({ path: target });
         return;

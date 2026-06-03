@@ -7,6 +7,12 @@
     "lizard": "./dist/index.js"
   },
   "scripts": {
+    "gen:skills": "node scripts/gen-skills.mjs",
+    "prepare": "node scripts/gen-skills.mjs",
+    "prebuild": "node scripts/gen-skills.mjs",
+    "predev": "node scripts/gen-skills.mjs",
+    "pretest": "node scripts/gen-skills.mjs",
+    "pretest:unit": "node scripts/gen-skills.mjs",
     "dev": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",

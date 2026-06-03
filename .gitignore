@@ -2,3 +2,4 @@ node_modules/
 .lizard/
 *.tsbuildinfo
 bin/
+src/lib/skills-data.generated.ts
