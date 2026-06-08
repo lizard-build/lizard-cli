@@ -318,7 +318,7 @@ async function runAdd(input: AddInput): Promise<void> {
               ? opts.repo
               : `https://github.com/${opts.repo}`,
             region,
-            variables,
+            envVars: variables,
             ...(detectedPort ? { containerPort: detectedPort } : {}),
             ...(input.noDeploy ? { skipInitialDeploy: true } : {}),
           },
@@ -349,7 +349,7 @@ async function runAdd(input: AddInput): Promise<void> {
           {
             name: opts.service,
             region,
-            variables,
+            envVars: variables,
           },
         );
         if (isJSONMode()) printJSON(app);

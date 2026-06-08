@@ -234,7 +234,7 @@ async function runAdd(input) {
                     ? opts.repo
                     : `https://github.com/${opts.repo}`,
                 region,
-                variables,
+                envVars: variables,
                 ...(detectedPort ? { containerPort: detectedPort } : {}),
                 ...(input.noDeploy ? { skipInitialDeploy: true } : {}),
             });
@@ -263,7 +263,7 @@ async function runAdd(input) {
             const app = await api.post(withScope(`/api/projects/${projectId}/apps`, scope), {
                 name: opts.service,
                 region,
-                variables,
+                envVars: variables,
             });
             if (isJSONMode())
                 printJSON(app);
