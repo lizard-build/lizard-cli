@@ -84,21 +84,22 @@ export function registerGit(program) {
             services: [{ name: serviceName, branch }],
         });
         spinner.succeed(`Branch set to ${chalk.cyan(branch)}`);
-        // Trigger redeploy
+        // Trigger redeploy — the endpoint returns the freshly created Build
+        // record; using its id avoids racing against a previous build.
         const deploySpinner = ora("Starting redeploy...").start();
-        await api.post(withScope(`/api/apps/${serviceId}/redeploy`, scope));
+        const build = await api.post(withScope(`/api/apps/${serviceId}/redeploy`, scope), undefined, { "X-Deploy-Source": "cli" });
         deploySpinner.stop();
         if (opts.detach || isJSONMode()) {
             if (isJSONMode())
-                printJSON({ id: serviceId, branch, status: "deploying" });
+                printJSON({ id: serviceId, buildId: build?.id, branch, status: "deploying" });
             else
                 success(`Redeploy started on branch ${chalk.cyan(branch)}`);
             return;
         }
         info(`Redeploying ${chalk.bold(serviceName)} on ${chalk.cyan(branch)}...`);
-        // Wait for build to appear
-        let buildId = null;
-        for (let i = 0; i < 30; i++) {
+        let buildId = build?.id ?? null;
+        // Fallback for older servers that respond without a Build record.
+        for (let i = 0; !buildId && i < 30; i++) {
             await new Promise((r) => setTimeout(r, 2000));
             try {
                 const app = await api.get(`/api/apps/${serviceId}`);

@@ -198,7 +198,7 @@ async function deployFromLocal(args: {
       : success(`Deploy started  ${chalk.dim(`lizard up status ${newApp.id}`)}`);
     return;
   }
-  await streamBuildLogs(newApp.id, args.opts.ci);
+  await streamBuildLogs(newApp.id, args.opts.ci, newApp.buildId);
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -260,12 +260,16 @@ const EXCLUDE_DIRS = new Set([
   ".turbo",
   ".vercel",
 ]);
-const EXCLUDE_EXT = new Set([".pyc", ".pyo", ".log", ".DS_Store"]);
+const EXCLUDE_EXT = new Set([".pyc", ".pyo", ".log"]);
+// Matched by full name — `path.extname(".DS_Store")` is "" (dotfile), so
+// extension matching never catches these.
+const EXCLUDE_FILES = new Set([".DS_Store"]);
 
 function collectFilesManually(root: string, dir: string): string[] {
   const results: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (EXCLUDE_DIRS.has(entry.name)) continue;
+    if (EXCLUDE_FILES.has(entry.name)) continue;
     if (EXCLUDE_EXT.has(path.extname(entry.name))) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) results.push(...collectFilesManually(root, full));
@@ -324,23 +328,28 @@ function prompt(question: string): Promise<string> {
   });
 }
 
-async function streamBuildLogs(appId: string, ciMode: boolean = false) {
-  const spinner = ora("Waiting for build...").start();
-  let buildId: string | null = null;
-  for (let i = 0; i < 30; i++) {
-    await sleep(2000);
-    try {
-      const app = await api.get<App>(`/api/apps/${appId}`);
-      if (app.builds?.length) {
-        const latest = app.builds[0];
-        if (["building", "deploying", "running", "failed"].includes(latest.status)) {
-          buildId = latest.id;
-          break;
+async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuildId?: string) {
+  // Prefer the buildId returned by the upload/redeploy response — polling
+  // builds[0] races against a still-running previous build and can attach
+  // to the wrong one.
+  let buildId: string | null = knownBuildId ?? null;
+  if (!buildId) {
+    const spinner = ora("Waiting for build...").start();
+    for (let i = 0; i < 30; i++) {
+      await sleep(2000);
+      try {
+        const app = await api.get<App>(`/api/apps/${appId}`);
+        if (app.builds?.length) {
+          const latest = app.builds[0];
+          if (["building", "deploying", "running", "failed"].includes(latest.status)) {
+            buildId = latest.id;
+            break;
+          }
         }
-      }
-    } catch {}
+      } catch {}
+    }
+    spinner.stop();
   }
-  spinner.stop();
   if (!buildId) {
     info(chalk.dim("No build found. Check `lizard up status <id>`."));
     return;

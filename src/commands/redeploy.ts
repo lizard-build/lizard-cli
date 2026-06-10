@@ -54,24 +54,30 @@ export function registerRedeploy(program: Command) {
       }
 
       const spinner = ora("Starting redeploy...").start();
-      await api.post(`/api/apps/${id}/redeploy`);
+      // The endpoint pre-creates and returns the Build record — use its id
+      // instead of polling builds[0], which races against a previous build.
+      const build = await api.post<{ id?: string; status?: string }>(
+        `/api/apps/${id}/redeploy`,
+        undefined,
+        { "X-Deploy-Source": "cli" },
+      );
       spinner.stop();
 
       if (opts.detach || isJSONMode()) {
         if (isJSONMode()) {
-          printJSON({ id, status: "deploying" });
+          printJSON({ id, buildId: build?.id, status: "deploying" });
         } else {
           success("Redeploy started");
-          info(chalk.dim(`  Check status: lizard deploy status ${id}`));
+          info(chalk.dim(`  Check status: lizard up status ${id}`));
         }
         return;
       }
 
       info("Redeploying...");
 
-      // Poll for build
-      let buildId: string | null = null;
-      for (let i = 0; i < 30; i++) {
+      let buildId: string | null = build?.id ?? null;
+      // Fallback for older servers that respond without a Build record.
+      for (let i = 0; !buildId && i < 30; i++) {
         await new Promise((r) => setTimeout(r, 2000));
         try {
           const app = await api.get<{ builds?: Array<{ id: string; status: string }> }>(
