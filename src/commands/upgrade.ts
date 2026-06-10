@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import { Command } from "commander";
 import { info, success, isJSONMode, printJSON } from "../lib/format.js";
-import { CURRENT_VERSION, getLatestVersion, selfUpdate } from "../lib/updater.js";
+import { CURRENT_VERSION, getLatestVersion, selfUpdate, isStandaloneBinary } from "../lib/updater.js";
 
 export function registerUpgrade(program: Command) {
   program
@@ -64,6 +64,26 @@ export function registerUpgrade(program: Command) {
       if (opts.check) {
         info(`Update available: v${CURRENT_VERSION} → ${chalk.green("v" + latest)}`);
         info(chalk.dim(`Run \`lizard upgrade\` to install`));
+        return;
+      }
+
+      // npm install — self-replacing process.execPath would overwrite the
+      // user's node binary. Point at npm instead.
+      if (!isStandaloneBinary()) {
+        if (isJSONMode()) {
+          printJSON({
+            currentVersion: CURRENT_VERSION,
+            latestVersion: latest,
+            updateAvailable: true,
+            upgraded: false,
+            method: "npm",
+            hint: "npm install -g @lizard-build/cli@latest",
+          });
+          return;
+        }
+        info(`Update available: v${CURRENT_VERSION} → ${chalk.green("v" + latest)}`);
+        info(`This copy was installed via npm. Upgrade with:`);
+        info(`  ${chalk.cyan("npm install -g @lizard-build/cli@latest")}`);
         return;
       }
 

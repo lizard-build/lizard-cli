@@ -1,11 +1,14 @@
-import { createWriteStream, existsSync, renameSync, chmodSync } from "node:fs";
+import { createWriteStream, existsSync, renameSync, chmodSync, unlinkSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-export const CURRENT_VERSION = "0.3.37";
+import { join, dirname } from "node:path";
+import os from "node:os";
+import { spawn } from "node:child_process";
+export const CURRENT_VERSION = "0.3.38";
 const RELEASES_API = "https://api.github.com/repos/lizard-build/lizard-cli/releases/latest";
 const RELEASE_BASE = "https://github.com/lizard-build/lizard-cli/releases/latest/download";
+/** Minimum gap between background update checks. */
+const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
 function getBinaryName() {
     const os = process.platform;
     const arch = process.arch;
@@ -19,6 +22,21 @@ function getBinaryName() {
         return "lizard-linux-arm64";
     return null;
 }
+/**
+ * True only when running as the Bun-compiled standalone binary. Under
+ * npm/node, `process.execPath` is the *node* executable — self-update would
+ * overwrite the user's Node.js install with the lizard binary.
+ */
+export function isStandaloneBinary() {
+    return typeof globalThis.Bun !== "undefined";
+}
+function stateDir() {
+    return process.env.LIZARD_HOME
+        ? join(process.env.LIZARD_HOME, ".lizard")
+        : join(os.homedir(), ".lizard");
+}
+const checkStampFile = () => join(stateDir(), "update-check.json");
+const updateNoticeFile = () => join(stateDir(), "update-notice.json");
 export async function getLatestVersion() {
     try {
         const res = await fetch(RELEASES_API, {
@@ -39,64 +57,134 @@ export async function getLatestVersion() {
         return { kind: "error" };
     }
 }
+export function isNewerVersion(latest, current) {
+    const [maj, min, pat] = latest.split(".").map(Number);
+    const [cmaj, cmin, cpat] = current.split(".").map(Number);
+    if (![maj, min, pat, cmaj, cmin, cpat].every(Number.isFinite))
+        return false;
+    return maj > cmaj || (maj === cmaj && min > cmin) || (maj === cmaj && min === cmin && pat > cpat);
+}
 export async function selfUpdate(onProgress) {
     const binaryName = getBinaryName();
     if (!binaryName)
         return false;
-    // Find current executable path
+    // Refuse to replace anything that isn't the standalone lizard binary —
+    // under npm the execPath is the user's node executable.
+    if (!isStandaloneBinary())
+        return false;
     const currentBin = process.execPath;
     if (!existsSync(currentBin))
         return false;
     const url = `${RELEASE_BASE}/${binaryName}`;
-    const tmp = join(tmpdir(), `lizard-update-${Date.now()}`);
+    // Download next to the target binary: rename() must stay on one filesystem
+    // (tmpdir is often tmpfs on Linux → EXDEV).
+    const tmp = join(dirname(currentBin), `.lizard-update-${process.pid}`);
     onProgress?.(`Downloading ${binaryName}...`);
-    const res = await fetch(url, { signal: AbortSignal.timeout(60000) });
-    if (!res.ok)
-        throw new Error(`Download failed: ${res.status}`);
-    const writer = createWriteStream(tmp);
-    await pipeline(Readable.fromWeb(res.body), writer);
-    chmodSync(tmp, 0o755);
-    onProgress?.("Installing...");
-    renameSync(tmp, currentBin);
-    return true;
+    try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(60000) });
+        if (!res.ok)
+            throw new Error(`Download failed: ${res.status}`);
+        const writer = createWriteStream(tmp);
+        await pipeline(Readable.fromWeb(res.body), writer);
+        chmodSync(tmp, 0o755);
+        onProgress?.("Installing...");
+        renameSync(tmp, currentBin);
+        return true;
+    }
+    catch (err) {
+        try {
+            unlinkSync(tmp);
+        }
+        catch { }
+        throw err;
+    }
 }
-/** Check for a newer version and auto-install it in the background.
- *  Prints a one-line notice on exit — either "Updated to vX.Y.Z" or nothing on failure.
- *  Never blocks or crashes the current command. */
+function readJSON(file) {
+    try {
+        return JSON.parse(readFileSync(file, "utf8"));
+    }
+    catch {
+        return null;
+    }
+}
+function writeJSON(file, data) {
+    try {
+        mkdirSync(stateDir(), { recursive: true });
+        writeFileSync(file, JSON.stringify(data));
+    }
+    catch { }
+}
+function autoUpdateDisabled() {
+    return Boolean(process.env.LIZARD_NO_UPDATE || process.env.CI);
+}
+/** Print (once) the notice left behind by a completed background update. */
+function flushUpdateNotice() {
+    const notice = readJSON(updateNoticeFile());
+    if (!notice?.to)
+        return;
+    try {
+        unlinkSync(updateNoticeFile());
+    }
+    catch { }
+    // We are already running the replaced binary, so notice.to should match.
+    if (notice.to === CURRENT_VERSION && notice.from !== CURRENT_VERSION) {
+        process.stderr.write(`  lizard auto-updated: v${notice.from} → v${notice.to}\n`);
+    }
+}
+/**
+ * Kick off an update check without delaying the current command.
+ *
+ * The check+download runs in a *detached child process* (`lizard
+ * __lizard-update`): an in-process fetch would keep the event loop alive and
+ * make every command linger until GitHub answers. Checks are throttled via a
+ * stamp file (6h), disabled with LIZARD_NO_UPDATE/CI, and only run for the
+ * standalone binary — npm installs upgrade through npm.
+ */
 export function checkForUpdateInBackground() {
-    // Only auto-update in TTY; skip CI / piped output
     if (!process.stdout.isTTY)
         return;
-    let updateMessage = null;
-    const promise = getLatestVersion().then(async (r) => {
-        if (r.kind !== "ok")
-            return;
-        const latest = r.version;
-        if (latest === CURRENT_VERSION)
-            return;
-        const [maj, min, pat] = latest.split(".").map(Number);
-        const [cmaj, cmin, cpat] = CURRENT_VERSION.split(".").map(Number);
-        const isNewer = maj > cmaj || (maj === cmaj && min > cmin) || (maj === cmaj && min === cmin && pat > cpat);
-        if (!isNewer)
-            return;
-        try {
-            const ok = await selfUpdate();
-            if (ok) {
-                updateMessage =
-                    `\n  Updating lizard v${CURRENT_VERSION} → v${latest}...\n` +
-                        `  lizard updated to v${latest}\n`;
-            }
+    if (autoUpdateDisabled())
+        return;
+    flushUpdateNotice();
+    if (!isStandaloneBinary())
+        return;
+    const stamp = readJSON(checkStampFile());
+    if (stamp?.lastCheckAt && Date.now() - stamp.lastCheckAt < CHECK_INTERVAL_MS)
+        return;
+    // Stamp before spawning so parallel commands don't pile up children.
+    writeJSON(checkStampFile(), { lastCheckAt: Date.now(), lastVersion: CURRENT_VERSION });
+    try {
+        const child = spawn(process.execPath, ["__lizard-update"], {
+            detached: true,
+            stdio: "ignore",
+        });
+        child.unref();
+    }
+    catch {
+        // never break the actual command over an update check
+    }
+}
+/**
+ * Body of the hidden `__lizard-update` command: check the latest release and
+ * install it, leaving a notice file for the next foreground run.
+ */
+export async function runBackgroundUpdate() {
+    if (autoUpdateDisabled() || !isStandaloneBinary())
+        return;
+    const r = await getLatestVersion();
+    writeJSON(checkStampFile(), { lastCheckAt: Date.now(), lastVersion: r.kind === "ok" ? r.version : CURRENT_VERSION });
+    if (r.kind !== "ok")
+        return;
+    if (!isNewerVersion(r.version, CURRENT_VERSION))
+        return;
+    try {
+        const ok = await selfUpdate();
+        if (ok) {
+            writeJSON(updateNoticeFile(), { from: CURRENT_VERSION, to: r.version, at: Date.now() });
         }
-        catch {
-            // silent — don't interrupt the current command
-        }
-    }).catch(() => { });
-    process.on("exit", () => {
-        if (updateMessage)
-            process.stderr.write(updateMessage);
-    });
-    // Don't block process exit
-    if (typeof promise.unref === "function")
-        promise.unref();
+    }
+    catch {
+        // silent — retried after the next throttle window
+    }
 }
 //# sourceMappingURL=updater.js.map

@@ -4,7 +4,7 @@ import chalk from "chalk";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
 import { requireAuth } from "./lib/auth.js";
 import { setBaseURL, setAccessToken, APIError } from "./lib/api.js";
-import { checkForUpdateInBackground, CURRENT_VERSION } from "./lib/updater.js";
+import { checkForUpdateInBackground, runBackgroundUpdate, CURRENT_VERSION } from "./lib/updater.js";
 const BANNER = chalk.rgb(16, 185, 129)([
     "╔═══════════════════════════════════════════════════╗",
     "║                                                   ║",
@@ -207,6 +207,12 @@ function dumpCommand(cmd) {
     };
 }
 async function main() {
+    // Hidden entry point: detached child spawned by checkForUpdateInBackground.
+    // Handled before commander so it never shows up in help or telemetry.
+    if (process.argv.includes("__lizard-update")) {
+        await runBackgroundUpdate();
+        process.exit(0);
+    }
     // Set JSON mode from argv *before* parseAsync so the catch block below
     // honors --json even when commander rejects before our preAction hook
     // fires (e.g. unknown command, malformed global flag). Non-TTY auto-mode
@@ -256,6 +262,9 @@ async function main() {
         }
         else {
             error(msg);
+            if (status === 401) {
+                process.stderr.write("Run `lizard login` to re-authenticate.\n");
+            }
         }
         // Exit codes derived from APIError.status (or tagged error codes), not message text
         const isAuth = status === 401 || status === 403 || code === "NOT_AUTHENTICATED";
