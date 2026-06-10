@@ -75,6 +75,35 @@ describe("ProjectLink schema", () => {
     expect(got?.workspaceName).toBe("filled");
   });
 
+  test("updateProjectLink with explicit undefined clears the service (no appId resurrection)", () => {
+    setProjectLink(
+      { projectId: "proj_1", serviceId: "svc_1", serviceName: "api" },
+      tmpDir,
+    );
+    // Simulates `lizard service delete` of the linked service.
+    updateProjectLink({ serviceId: undefined, serviceName: undefined }, tmpDir);
+
+    const got = getProjectLink(tmpDir);
+    expect(got?.projectId).toBe("proj_1");
+    expect(got?.serviceId).toBeUndefined();
+    expect(got?.serviceName).toBeUndefined();
+    expect(got?.appId).toBeUndefined();
+    expect(got?.appName).toBeUndefined();
+  });
+
+  test("updateProjectLink with a new serviceId also updates the legacy mirror", () => {
+    setProjectLink(
+      { projectId: "proj_1", serviceId: "svc_old", serviceName: "old" },
+      tmpDir,
+    );
+    updateProjectLink({ serviceId: "svc_new", serviceName: "new" }, tmpDir);
+
+    const got = getProjectLink(tmpDir);
+    expect(got?.serviceId).toBe("svc_new");
+    expect(got?.appId).toBe("svc_new");
+    expect(got?.appName).toBe("new");
+  });
+
   test("config.json without workspaceId still loads (legacy compat)", () => {
     const cfgFile = path.join(tmpDir, ".lizard", "config.json");
     fs.mkdirSync(path.dirname(cfgFile), { recursive: true });

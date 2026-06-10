@@ -59,7 +59,15 @@ export function updateProjectLink(patch, cwd = process.cwd()) {
     const existing = getProjectLink(cwd);
     if (!existing)
         return;
-    setProjectLink({ ...existing, ...patch }, cwd);
+    const merged = { ...existing, ...patch };
+    // An explicit serviceId/serviceName in the patch (including `undefined`,
+    // i.e. "clear it") must override the legacy mirror too — otherwise
+    // setProjectLink resurrects the old value from appId/appName.
+    if ("serviceId" in patch)
+        merged.appId = patch.serviceId;
+    if ("serviceName" in patch)
+        merged.appName = patch.serviceName;
+    setProjectLink(merged, cwd);
 }
 export function clearProjectLink(cwd = process.cwd()) {
     const config = loadConfig();
@@ -82,7 +90,11 @@ export async function resolveProjectId(flagValue) {
     }
     const { api } = await import("./api.js");
     const projects = await api.get("/api/projects");
-    const match = projects.find((p) => p.id === flagValue || p.slug === flagValue || p.name === flagValue);
+    // Case-insensitive, matching `lizard link` / `lizard init` behaviour.
+    const lower = flagValue.toLowerCase();
+    const match = projects.find((p) => p.id.toLowerCase() === lower ||
+        p.slug?.toLowerCase() === lower ||
+        p.name?.toLowerCase() === lower);
     if (!match)
         throw new Error(`Project "${flagValue}" not found.`);
     return match.id;
