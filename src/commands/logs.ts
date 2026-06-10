@@ -347,12 +347,19 @@ async function showBuildLogs(
   info(chalk.dim(`Build ${buildId}\n`));
 
   if (tailN !== undefined) {
+    // Snapshot semantics: the server replays history immediately; if the
+    // build is still running the stream would otherwise follow it forever.
+    // Stop after 3s without new events and print what we have.
     const lines: string[] = [];
-    await streamSSE(`/api/builds/${buildId}/logs`, (event, data) => {
-      if (event === "done" || event === "error") return false;
-      lines.push(data);
-      return true;
-    });
+    await streamSSE(
+      `/api/builds/${buildId}/logs`,
+      (event, data) => {
+        if (event === "done" || event === "error") return false;
+        lines.push(data);
+        return true;
+      },
+      { idleTimeoutMs: 3000 },
+    );
     for (const line of lines.slice(-tailN)) printLogLine(line);
     return;
   }

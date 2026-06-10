@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { api, getBaseURL, withScope } from "../lib/api.js";
-import { resolveProjectScope } from "../lib/resolve.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { error, isTTY } from "../lib/format.js";
 import { getToken } from "../lib/auth.js";
 import * as https from "node:https";
@@ -20,9 +20,19 @@ Examples:
   lizard ssh -s my-app -- bash -c "ps aux | head"`)
         .action(async (cmdArgs, opts) => {
         const { projectId, scope } = await resolveProjectScope(opts.project);
-        let serviceId = opts.service;
-        // Resolve service interactively if not given
-        if (!serviceId) {
+        let serviceId;
+        if (opts.service) {
+            // Resolve by name or ID through the shared resolver — guessing
+            // "looks like an ID" by length breaks for long service names.
+            const svc = await resolveService(projectId, opts.service);
+            if (svc.kind !== "app") {
+                error(`"${svc.name}" is an addon — ssh works only for app services.`);
+                process.exit(1);
+            }
+            serviceId = svc.id;
+        }
+        else {
+            // Resolve service interactively if not given
             const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
             const running = (data.apps || []).filter((a) => a.status === "running");
             if (running.length === 0) {
@@ -46,13 +56,6 @@ Examples:
                 process.exit(1);
             }
         }
-        // Resolve service ID if a name was given (lookup by name)
-        if (serviceId && !serviceId.match(/^[A-Za-z0-9_-]{20,}$/)) {
-            const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
-            const match = (data.apps || []).find((a) => a.name === serviceId || a.serviceName === serviceId || a.id === serviceId);
-            if (match)
-                serviceId = match.id;
-        }
         if (cmdArgs.length === 0) {
             error("No command given. Usage: lizard ssh -s <service> -- <cmd> [args...]");
             process.exit(1);
@@ -62,22 +65,24 @@ Examples:
         // collapses to `bash -c ps | head` (quotes lost, `|` becomes a real pipe).
         const cmd = cmdArgs.map(shellQuote).join(" ");
         process.stdout.write(chalk.dim(`$ ${cmd}\n`));
-        let exitCode = 0;
-        await execStream(serviceId, cmd, (stream, line) => {
+        const exitCode = await execStream(serviceId, cmd, (stream, line) => {
             if (stream === "stderr") {
                 process.stderr.write(line + "\n");
             }
             else {
                 process.stdout.write(line + "\n");
             }
-        }, (code) => {
-            exitCode = code;
         });
         process.exit(exitCode);
     });
 }
-function execStream(appId, cmd, onLine, onExit) {
+/** Run a command on the VM, streaming output. Resolves with the exit code:
+ *  the remote command's code from the `exit` event, or 1 when the server
+ *  reported an `error` event without one. */
+function execStream(appId, cmd, onLine) {
     return new Promise((resolve, reject) => {
+        let exitCode = null;
+        let sawError = false;
         const baseURL = getBaseURL();
         const url = new URL(`${baseURL}/api/apps/${appId}/exec`);
         const token = getToken();
@@ -122,11 +127,12 @@ function execStream(appId, cmd, onLine, onExit) {
                         const data = trimmed.slice(5).trimStart();
                         if (currentEvent === "exit") {
                             try {
-                                onExit(JSON.parse(data).exitCode ?? 0);
+                                exitCode = JSON.parse(data).exitCode ?? 0;
                             }
                             catch { }
                         }
                         else if (currentEvent === "error") {
+                            sawError = true;
                             error(data);
                         }
                         else {
@@ -141,7 +147,7 @@ function execStream(appId, cmd, onLine, onExit) {
                     }
                 }
             });
-            res.on("end", resolve);
+            res.on("end", () => resolve(exitCode ?? (sawError ? 1 : 0)));
             res.on("error", reject);
         });
         req.on("error", reject);

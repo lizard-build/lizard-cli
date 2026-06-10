@@ -88,8 +88,12 @@ export const api = {
     patch: (path, body) => request("PATCH", path, body),
     delete: (path) => request("DELETE", path),
 };
-/** Stream SSE and call handler for each data line. Return false to stop. */
-export function streamSSE(path, handler) {
+/** Stream SSE and call handler for each data line. Return false to stop.
+ *
+ *  `opts.idleTimeoutMs` — stop (resolve) when no *event* arrives for that
+ *  long. Heartbeat comments don't reset the timer. Used by `--tail`-style
+ *  snapshot reads that must not follow a live stream forever. */
+export function streamSSE(path, handler, opts = {}) {
     return new Promise((resolve, reject) => {
         const url = new URL(baseURL + path);
         const token = _accessToken || getToken();
@@ -108,6 +112,21 @@ export function streamSSE(path, handler) {
                 res.on("end", () => reject(new APIError(res.statusCode, `SSE failed: ${body}`)));
                 return;
             }
+            let idleTimer;
+            const finish = () => {
+                if (idleTimer)
+                    clearTimeout(idleTimer);
+                req.destroy();
+                resolve();
+            };
+            const armIdleTimer = () => {
+                if (!opts.idleTimeoutMs)
+                    return;
+                if (idleTimer)
+                    clearTimeout(idleTimer);
+                idleTimer = setTimeout(finish, opts.idleTimeoutMs);
+            };
+            armIdleTimer();
             let buffer = "";
             let currentEvent = "";
             let currentData = "";
@@ -120,10 +139,10 @@ export function streamSSE(path, handler) {
                     const trimmed = line.replace(/\r$/, "");
                     if (trimmed === "") {
                         if (currentData) {
+                            armIdleTimer();
                             const cont = handler(currentEvent, currentData);
                             if (cont === false) {
-                                req.destroy();
-                                resolve();
+                                finish();
                                 return;
                             }
                         }
@@ -138,7 +157,11 @@ export function streamSSE(path, handler) {
                     }
                 }
             });
-            res.on("end", resolve);
+            res.on("end", () => {
+                if (idleTimer)
+                    clearTimeout(idleTimer);
+                resolve();
+            });
             res.on("error", reject);
         });
         req.on("error", reject);

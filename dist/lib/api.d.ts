@@ -30,5 +30,11 @@ export declare const api: {
     patch: <T = any>(path: string, body?: unknown) => Promise<T>;
     delete: <T = any>(path: string) => Promise<T>;
 };
-/** Stream SSE and call handler for each data line. Return false to stop. */
-export declare function streamSSE(path: string, handler: (event: string, data: string) => boolean | void): Promise<void>;
+/** Stream SSE and call handler for each data line. Return false to stop.
+ *
+ *  `opts.idleTimeoutMs` — stop (resolve) when no *event* arrives for that
+ *  long. Heartbeat comments don't reset the timer. Used by `--tail`-style
+ *  snapshot reads that must not follow a live stream forever. */
+export declare function streamSSE(path: string, handler: (event: string, data: string) => boolean | void, opts?: {
+    idleTimeoutMs?: number;
+}): Promise<void>;

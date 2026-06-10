@@ -278,6 +278,14 @@ Notes:
     .option("-s, --service <name>", "Service to scope to (overrides linked)")
     .option("-p, --project <id>", "Project to scope to")
     .action(async (opts, sub) => {
+      // Reading a TTY stdin waits for Ctrl+D forever — fail fast instead.
+      if (process.stdin.isTTY) {
+        throw new Error(
+          "secrets import reads KEY=value lines from stdin. Pipe a file:\n" +
+            "  lizard secrets import < .env",
+        );
+      }
+
       const inherited = sub.parent?.opts() || {};
       const scope = await resolveScope(
         opts.project ?? inherited.project,
