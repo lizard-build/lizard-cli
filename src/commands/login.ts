@@ -4,6 +4,7 @@ import { Command } from "commander";
 import {
   saveCredentials,
   openURL,
+  jwtExpiryMs,
   type Credentials,
 } from "../lib/auth.js";
 import { getBaseURL } from "../lib/api.js";
@@ -86,9 +87,11 @@ export async function performLogin(): Promise<Credentials> {
 
       if (result.status === "complete" && result.accessToken && result.user) {
         spinner.stop();
+        const expMs = jwtExpiryMs(result.accessToken);
         const creds: Credentials = {
           accessToken: result.accessToken,
           refreshToken: result.refreshToken,
+          expiresAt: expMs ? new Date(expMs).toISOString() : undefined,
           userId: result.user.id,
           username: result.user.username,
           email: result.user.email,
@@ -139,8 +142,10 @@ export function registerLogin(program: Command) {
         });
         if (!res.ok) throw new Error("Invalid token");
         const user = (await res.json()) as any;
+        const expMs = jwtExpiryMs(token);
         saveCredentials({
           accessToken: token,
+          expiresAt: expMs ? new Date(expMs).toISOString() : undefined,
           userId: user.id,
           username: user.username,
           email: user.email,

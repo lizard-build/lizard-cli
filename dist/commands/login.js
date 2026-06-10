@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import ora from "ora";
-import { saveCredentials, openURL, } from "../lib/auth.js";
+import { saveCredentials, openURL, jwtExpiryMs, } from "../lib/auth.js";
 import { getBaseURL } from "../lib/api.js";
 import { success, info, isJSONMode, printJSON } from "../lib/format.js";
 const POLL_INTERVAL = 2000;
@@ -52,9 +52,11 @@ export async function performLogin() {
             const result = await pollSession(session.sessionId, session.sessionSecret);
             if (result.status === "complete" && result.accessToken && result.user) {
                 spinner.stop();
+                const expMs = jwtExpiryMs(result.accessToken);
                 const creds = {
                     accessToken: result.accessToken,
                     refreshToken: result.refreshToken,
+                    expiresAt: expMs ? new Date(expMs).toISOString() : undefined,
                     userId: result.user.id,
                     username: result.user.username,
                     email: result.user.email,
@@ -103,8 +105,10 @@ export function registerLogin(program) {
             if (!res.ok)
                 throw new Error("Invalid token");
             const user = (await res.json());
+            const expMs = jwtExpiryMs(token);
             saveCredentials({
                 accessToken: token,
+                expiresAt: expMs ? new Date(expMs).toISOString() : undefined,
                 userId: user.id,
                 username: user.username,
                 email: user.email,

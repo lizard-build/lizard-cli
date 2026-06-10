@@ -7,7 +7,14 @@ export declare function saveCredentials(creds: Credentials): void;
 export declare function clearCredentials(): void;
 export declare function isLoggedIn(): boolean;
 /**
- * Ensure the user is authenticated. If not logged in and TTY, auto-login.
+ * Expiry of a JWT in epoch-ms, decoded from the `exp` claim. Returns null
+ * for opaque/undecodable tokens — those are treated as valid and left for
+ * the server to reject.
+ */
+export declare function jwtExpiryMs(token: string): number | null;
+/**
+ * Ensure the user is authenticated. If not logged in (or the saved token
+ * has expired — there is no refresh endpoint) and TTY, auto-login.
  * Returns credentials or throws.
  */
 export declare function requireAuth(): Promise<Credentials>;

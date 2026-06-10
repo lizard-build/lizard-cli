@@ -26,7 +26,32 @@ function isTTY() {
     return Boolean(process.stdout.isTTY);
 }
 /**
- * Ensure the user is authenticated. If not logged in and TTY, auto-login.
+ * Expiry of a JWT in epoch-ms, decoded from the `exp` claim. Returns null
+ * for opaque/undecodable tokens — those are treated as valid and left for
+ * the server to reject.
+ */
+export function jwtExpiryMs(token) {
+    try {
+        const payload = token.split(".")[1];
+        if (!payload)
+            return null;
+        const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+        return typeof decoded.exp === "number" ? decoded.exp * 1000 : null;
+    }
+    catch {
+        return null;
+    }
+}
+function isExpired(creds) {
+    const expMs = jwtExpiryMs(creds.accessToken) ??
+        (creds.expiresAt ? Date.parse(creds.expiresAt) : null);
+    if (expMs === null || Number.isNaN(expMs))
+        return false;
+    return Date.now() > expMs - 60_000; // 60s margin
+}
+/**
+ * Ensure the user is authenticated. If not logged in (or the saved token
+ * has expired — there is no refresh endpoint) and TTY, auto-login.
  * Returns credentials or throws.
  */
 export async function requireAuth() {
@@ -38,12 +63,17 @@ export async function requireAuth() {
         };
     }
     const creds = loadCredentials();
-    if (creds)
+    if (creds && !isExpired(creds))
         return creds;
     if (!isTTY()) {
-        const err = new Error("Not authenticated. Set LIZARD_TOKEN or run `lizard login` first.");
+        const err = new Error(creds
+            ? "Session expired. Run `lizard login` again or set LIZARD_TOKEN."
+            : "Not authenticated. Set LIZARD_TOKEN or run `lizard login` first.");
         err.code = "NOT_AUTHENTICATED";
         throw err;
+    }
+    if (creds) {
+        process.stderr.write("Session expired — logging in again...\n");
     }
     const { performLogin } = await import("../commands/login.js");
     return performLogin();
