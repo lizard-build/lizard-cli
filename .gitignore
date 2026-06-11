@@ -3,3 +3,4 @@ node_modules/
 *.tsbuildinfo
 bin/
 src/lib/skills-data.generated.ts
+.DS_Store
