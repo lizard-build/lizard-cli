@@ -1,4 +1,4 @@
-export declare const CURRENT_VERSION = "0.3.42";
+export declare const CURRENT_VERSION = "0.3.44";
 /**
  * True only when running as the Bun-compiled standalone binary. Under
  * npm/node, `process.execPath` is the *node* executable — self-update would
