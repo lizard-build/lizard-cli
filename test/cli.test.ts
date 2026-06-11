@@ -6,6 +6,9 @@
  *   - Authed: `lizard login --token <token>` (or any prior session)
  *   - Optionally point at a specific built binary: LIZARD_BIN=./dist/index.js
  *   - Optionally pin a project: LIZARD_TEST_PROJECT_ID=<id>
+ *     Without the pin only read-only/self-contained tests run; suites that
+ *     mutate services (deploy, scale) are skipped so they can never touch
+ *     an arbitrary real project picked from the account.
  *
  * Run: npm test
  *
@@ -258,8 +261,11 @@ describe("ps (service inventory)", () => {
 });
 
 // ── Scale (no-op against existing app) ────────────────────────────────────────
+//
+// Mutates a real app (forces replicas=1) — only safe against a dedicated,
+// explicitly pinned test project.
 
-describe("scale", () => {
+describe.skipIf(!process.env.LIZARD_TEST_PROJECT_ID)("scale", () => {
   test("scale --replicas succeeds when an app exists", async () => {
     const services = await cliJSON("ps", "--project", projectId);
     const apps: Array<{ id: string; name: string }> = services?.apps ?? [];
@@ -284,10 +290,10 @@ describe("domain", () => {
       console.log("  ⚠ no apps, skipping domain test");
       return;
     }
-    const data = await cliJSON("domain", "--service", apps[0].name, "--project", projectId).catch(
-      () => [],
-    );
-    expect(Array.isArray(data)).toBe(true);
+    // `domain` (no subcommand) prints the current domain: { hostname, generated }
+    const data = await cliJSON("domain", "--service", apps[0].name, "--project", projectId);
+    expect(data).toHaveProperty("hostname");
+    expect(typeof data.hostname).toBe("string");
   });
 });
 
@@ -296,22 +302,21 @@ describe("domain", () => {
 // Heavy test: uploads the fixture as a fresh app, waits for it to come up,
 // then exercises service-scope secrets against it. Set LIZARD_SKIP_DEPLOY=1
 // to skip while iterating locally.
+//
+// SAFETY: runs only when LIZARD_TEST_PROJECT_ID explicitly pins a dedicated
+// test project. Without the pin, projectId falls back to an arbitrary real
+// project from the account — deploying into (let alone cleaning up) such a
+// project is never acceptable. The suite must also never mass-delete apps
+// it didn't create: a teardown used to wipe every app in the project and
+// destroyed real services. Cleanup is limited to `createdApps` in afterAll.
 
 let DEPLOY_DIR: string | undefined;
 
-describe.skipIf(process.env.LIZARD_SKIP_DEPLOY === "1")("deploy", () => {
+describe.skipIf(
+  process.env.LIZARD_SKIP_DEPLOY === "1" || !process.env.LIZARD_TEST_PROJECT_ID,
+)("deploy", () => {
   const appName = `cli-test-${Date.now()}`;
   let appId: string;
-
-  beforeAll(async () => {
-    // Tear down any leftover apps in the test project so we deploy clean.
-    // `service rm` requires --project (after the command, per commander).
-    const services = await cliJSON("ps", "--project", projectId).catch(() => ({ apps: [] }));
-    const existing: Array<{ id: string }> = services?.apps ?? [];
-    for (const app of existing) {
-      await cli("service", "rm", app.id, "-y", "--project", projectId).catch(() => {});
-    }
-  }, 60_000);
 
   test(
     "deploy local fixture app (detached)",
