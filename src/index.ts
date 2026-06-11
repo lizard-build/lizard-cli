@@ -151,9 +151,28 @@ const EXIT_CODES: Record<string, string> = {
 };
 
 function isHelpJsonRequest(argv: string[]): boolean {
-  const hasHelp = argv.some((a) => a === "--help" || a === "-h");
   const hasJson = argv.some((a) => a === "--json");
-  return hasHelp && hasJson;
+  if (!hasJson) return false;
+  if (argv.some((a) => a === "--help" || a === "-h")) return true;
+  // `lizard help [cmd] --json` — the built-in help command otherwise ignores
+  // --json and prints the banner. Treat it as a schema-dump request too.
+  const firstPositional = argv.slice(2).find((a) => !a.startsWith("-"));
+  return firstPositional === "help";
+}
+
+/**
+ * Drop the leading `help` command token (commander's built-in) so target
+ * resolution sees the command the user actually asked about
+ * (`lizard help service set --json` → resolve `service set`).
+ */
+function stripHelpToken(argv: string[]): string[] {
+  const out = argv.slice();
+  for (let i = 2; i < out.length; i++) {
+    if (out[i].startsWith("-")) continue;
+    if (out[i] === "help") out.splice(i, 1);
+    break;
+  }
+  return out;
 }
 
 function collectValueFlags(cmd: Command, acc: Set<string>) {
@@ -166,7 +185,10 @@ function collectValueFlags(cmd: Command, acc: Set<string>) {
   for (const sub of cmd.commands) collectValueFlags(sub, acc);
 }
 
-function findTargetCommand(argv: string[], root: Command): Command {
+function findTargetCommand(
+  argv: string[],
+  root: Command,
+): { target: Command; unknown: string | null } {
   const valueFlags = new Set<string>();
   collectValueFlags(root, valueFlags);
 
@@ -182,10 +204,18 @@ function findTargetCommand(argv: string[], root: Command): Command {
     const sub = cur.commands.find(
       (c) => c.name() === tok || c.aliases().includes(tok),
     );
-    if (!sub) break;
+    if (!sub) {
+      // Token isn't a subcommand. If `cur` takes positional arguments it's one
+      // of those (`domain <hostname>`, `scale <service>`) — return cur's
+      // schema. Otherwise it's an unknown command (the root has no positionals,
+      // so `lizard deploy` lands here) — flag it so the caller errors instead
+      // of silently dumping the root schema with exit 0.
+      const acceptsArgs = ((cur as any).registeredArguments ?? []).length > 0;
+      return { target: cur, unknown: acceptsArgs ? null : tok };
+    }
     cur = sub;
   }
-  return cur;
+  return { target: cur, unknown: null };
 }
 
 function dumpOption(o: any) {
@@ -243,7 +273,27 @@ async function main() {
   }
 
   if (isHelpJsonRequest(process.argv)) {
-    const target = findTargetCommand(process.argv, program);
+    const { target, unknown } = findTargetCommand(
+      stripHelpToken(process.argv),
+      program,
+    );
+    if (unknown) {
+      process.stdout.write(
+        JSON.stringify(
+          {
+            error: {
+              code: "UNKNOWN_COMMAND",
+              status: null,
+              message: `Unknown command '${unknown}'. Run \`lizard --help --json\` to list available commands.`,
+              body: null,
+            },
+          },
+          null,
+          2,
+        ) + "\n",
+      );
+      process.exit(3);
+    }
     const isRoot = target === program;
     const out = {
       cli: "lizard",
