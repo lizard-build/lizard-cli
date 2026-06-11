@@ -6,6 +6,23 @@ import { resolveProjectScope, resolveService, getActiveServiceWithKind } from ".
 import { getProjectLink } from "../lib/config.js";
 import { info, error, warn, isTTY, isJSONMode, printJSON, table, statusColor, timeAgo } from "../lib/format.js";
 
+// Levels assigned by the platform's log collector (regex over the message
+// text — apps that log errors without an "error"-like keyword come as info).
+const LOG_LEVELS = ["error", "warn", "info", "debug"];
+
+/** Client-side level filter for SSE streams — the live endpoints have no
+ *  server-side `level` param (only the historical query does). Entries
+ *  without a level field default to "info", matching the server's parser. */
+function matchesLevel(data: string, level?: string): boolean {
+  if (!level) return true;
+  try {
+    const e = JSON.parse(data);
+    return ((e && e.level) ?? "info") === level;
+  } catch {
+    return level === "info";
+  }
+}
+
 export function registerLogs(program: Command) {
   program
     .command("logs")
@@ -14,6 +31,7 @@ export function registerLogs(program: Command) {
     .option("-s, --service <id>", "Only show logs for a specific service")
     .option("-p, --project <id>", "Project name, slug, or ID")
     .option("--tail <n>", "Print last N log lines and exit (no follow)")
+    .option("-l, --level <level>", `Only show logs at this level (${LOG_LEVELS.join("|")})`)
     .option("--restarts [n]", "List last N restart events (default 20) and exit")
     .option("--restart <id>", "Print log tail of a specific restart event (or 'latest')")
     .action(async (opts) => {
@@ -23,6 +41,14 @@ export function registerLogs(program: Command) {
       }
       if (opts.tail !== undefined && (opts.restarts !== undefined || opts.restart !== undefined)) {
         error("--tail cannot be combined with --restarts/--restart");
+        process.exit(1);
+      }
+      if (opts.level && !LOG_LEVELS.includes(opts.level)) {
+        error(`Invalid --level "${opts.level}". Choose one of: ${LOG_LEVELS.join(", ")}`);
+        process.exit(1);
+      }
+      if (opts.level && (opts.build || opts.restarts !== undefined || opts.restart !== undefined)) {
+        error("--level applies to runtime logs only (not --build/--restarts/--restart)");
         process.exit(1);
       }
 
@@ -78,6 +104,7 @@ export function registerLogs(program: Command) {
             withQuery(`/api/projects/${projectId}/logs`, {
               limit: tailN,
               service: serviceName,
+              level: opts.level,
             }),
             scope,
           ),
@@ -125,6 +152,7 @@ export function registerLogs(program: Command) {
           process.exitCode = 1;
           return false;
         }
+        if (!matchesLevel(data, opts.level)) return true;
         printLogLine(data);
         return true;
       };
@@ -136,13 +164,14 @@ export function registerLogs(program: Command) {
           serviceKind === "addon"
             ? withScope(`/api/projects/${projectId}/addons/${serviceId}/logs`, scope)
             : `/api/apps/${serviceId}/logs`;
-        info(chalk.dim("Streaming logs... (Ctrl+C to stop)\n"));
+        const filterNote = opts.level ? ` [level=${opts.level}]` : "";
+        info(chalk.dim(`Streaming logs...${filterNote} (Ctrl+C to stop)\n`));
         await streamSSE(streamPath, streamHandler, { reconnect: true, onReconnect });
         return;
       }
 
       // Stream all project logs
-      info(chalk.dim("Streaming project logs... (Ctrl+C to stop)\n"));
+      info(chalk.dim(`Streaming project logs...${opts.level ? ` [level=${opts.level}]` : ""} (Ctrl+C to stop)\n`));
       await streamSSE(
         withScope(`/api/projects/${projectId}/logs/stream`, scope),
         streamHandler,
