@@ -49,18 +49,22 @@ export function registerLogs(program: Command) {
       // Resolve -s flag (may be name, slug, or ID) once up front so every
       // branch below talks to the API with a real service ID.
       let serviceId: string | undefined;
+      let serviceName: string | undefined;
       if (opts.service) {
         const svc = await resolveService(projectId, opts.service);
         serviceId = svc.id;
+        serviceName = svc.name;
       }
 
       // --tail: fetch historical logs and exit
       if (tailN !== undefined) {
+        // The project log stream tags entries with the service *name*
+        // (not ID), so the historical filter must use the name too.
         const entries = await api.get<any[]>(
           withScope(
             withQuery(`/api/projects/${projectId}/logs`, {
               limit: tailN,
-              service: serviceId,
+              service: serviceName,
             }),
             scope,
           ),
