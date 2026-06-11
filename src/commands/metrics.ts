@@ -44,7 +44,7 @@ export function registerMetrics(program: Command) {
     .option("-p, --project <id>", "Project name, slug, or ID")
     .option("-r, --range <range>", `Time range: ${RANGES.join("|")}`, "1h")
     .option("-w, --watch", "Live view, refreshed every 3s (Ctrl+C to stop)")
-    .option("--cost", "Show running resources and cost per hour instead of metrics")
+    .option("--cost", "Show running resources, cost per hour, and current billing-period usage (incl. egress)")
     .action(async (opts) => {
       if (!RANGES.includes(opts.range)) {
         error(`Invalid --range "${opts.range}". Choose one of: ${RANGES.join(", ")}`);
@@ -335,6 +335,156 @@ interface BillingResource {
   costPerHour: number;
 }
 
+interface UsagePrices {
+  cpuPerVcpuPerSec: number;
+  memoryPerGbPerSec: number;
+  storagePerGbPerSec: number;
+  objectStoragePerGbMonth?: number;
+  egressPerGb: number;
+}
+
+interface ProjectUsageSummary {
+  projectId: string;
+  cpuVcpuSeconds: number;
+  memoryGbSeconds: number;
+  storageGbSeconds: number;
+  objectStorageGbSeconds?: number;
+  egressBytes: number;
+  costUsd: number;
+}
+
+interface BillingSummary {
+  projects: ProjectUsageSummary[];
+  periodStart: number;
+  periodEnd: number;
+  currentAvgsByProject?: Record<string, { vcpu: number; memGb: number; storageGb: number }>;
+  prices: UsagePrices;
+}
+
+interface UsageRow {
+  key: "cpu" | "memory" | "volumes" | "egress" | "object";
+  label: string;
+  usage: number;
+  usageUnit: string;
+  costUsd: number;
+  estimatedUsd: number;
+}
+
+interface PeriodUsage {
+  periodStart: number;
+  periodEnd: number;
+  rows: UsageRow[];
+  totalCostUsd: number;
+  totalEstimatedUsd: number;
+}
+
+const HOUR_MS = 3_600_000;
+// Object storage is priced per GB/month on a 30-day basis (matches the backend).
+const OBJECT_MONTH_SECONDS = 2_592_000;
+
+// Current-period usage and cost, mirroring the web Usage page
+// (ProjectUsageView's resource breakdown): quantities × prices straight from
+// /api/billing/summary; CPU/memory/volumes estimates ride the project's
+// current measured rates, while egress and object storage — cumulative
+// throughput with no steady-state hourly rate — extrapolate linearly from
+// usage so far. The extrapolation anchor is the later of the billing-period
+// start and the oldest service's createdAt, so a mid-period project's burst
+// isn't smeared across time it didn't exist. A frozen workspace accrues
+// nothing — estimates collapse to the actuals.
+async function fetchPeriodUsage(projectId: string, workspaceId: string): Promise<PeriodUsage | null> {
+  const [summaryR, servicesR, accountR] = await Promise.allSettled([
+    api.get<BillingSummary>(withQuery("/api/billing/summary", { workspaceId })),
+    api.get<{ apps?: { createdAt?: number }[]; addons?: { createdAt?: number }[] }>(
+      withScope(`/api/projects/${projectId}/services`, { workspaceId }),
+    ),
+    api.get<{ status?: string }>(withQuery("/api/billing/account", { workspaceId })),
+  ]);
+  if (summaryR.status !== "fulfilled") return null;
+  const summary = summaryR.value;
+  const mine = summary.projects?.find((p) => p.projectId === projectId);
+  const prices = summary.prices;
+  if (!mine || !prices) return null;
+
+  const isFrozen = accountR.status === "fulfilled" && accountR.value.status === "frozen";
+  const now = Date.now();
+  const remainingHours = isFrozen ? 0 : Math.max(0, (summary.periodEnd - now) / HOUR_MS);
+
+  const services = servicesR.status === "fulfilled" ? servicesR.value : {};
+  const createdAts = [...(services.apps ?? []), ...(services.addons ?? [])]
+    .map((s) => s.createdAt)
+    .filter((t): t is number => typeof t === "number" && t > 0);
+  const projectStart = createdAts.length > 0 ? Math.min(...createdAts) : summary.periodStart;
+  const throughputStart = Math.max(summary.periodStart, projectStart);
+  const elapsedHrs = Math.max(0.001, (now - throughputStart) / HOUR_MS);
+  const monthHrs = Math.max(elapsedHrs, (summary.periodEnd - summary.periodStart) / HOUR_MS);
+  const linearFactor = isFrozen ? 1 : monthHrs / elapsedHrs;
+
+  const avgs = summary.currentAvgsByProject?.[projectId];
+  const cpuCost = (mine.cpuVcpuSeconds ?? 0) * prices.cpuPerVcpuPerSec;
+  const memCost = (mine.memoryGbSeconds ?? 0) * prices.memoryPerGbPerSec;
+  const volCost = (mine.storageGbSeconds ?? 0) * prices.storagePerGbPerSec;
+  const egressGb = (mine.egressBytes ?? 0) / 1e9;
+  const egressCost = egressGb * prices.egressPerGb;
+  const objCost =
+    ((mine.objectStorageGbSeconds ?? 0) / OBJECT_MONTH_SECONDS) * (prices.objectStoragePerGbMonth ?? 0);
+
+  const allRows: UsageRow[] = [
+    {
+      key: "cpu",
+      label: "CPU",
+      usage: (mine.cpuVcpuSeconds ?? 0) / 3600,
+      usageUnit: "vCPU·hr",
+      costUsd: cpuCost,
+      estimatedUsd: cpuCost + (avgs?.vcpu ?? 0) * prices.cpuPerVcpuPerSec * 3600 * remainingHours,
+    },
+    {
+      key: "memory",
+      label: "Memory",
+      usage: (mine.memoryGbSeconds ?? 0) / 3600,
+      usageUnit: "GB·hr",
+      costUsd: memCost,
+      estimatedUsd: memCost + (avgs?.memGb ?? 0) * prices.memoryPerGbPerSec * 3600 * remainingHours,
+    },
+    {
+      key: "volumes",
+      label: "Volumes",
+      usage: (mine.storageGbSeconds ?? 0) / 3600,
+      usageUnit: "GB·hr",
+      costUsd: volCost,
+      estimatedUsd: volCost + (avgs?.storageGb ?? 0) * prices.storagePerGbPerSec * 3600 * remainingHours,
+    },
+    {
+      key: "egress",
+      label: "Egress",
+      usage: egressGb,
+      usageUnit: "GB",
+      costUsd: egressCost,
+      estimatedUsd: egressCost > 0 ? egressCost * linearFactor : 0,
+    },
+    {
+      key: "object",
+      label: "Object Storage",
+      usage: (mine.objectStorageGbSeconds ?? 0) / 3600,
+      usageUnit: "GB·hr",
+      costUsd: objCost,
+      estimatedUsd: objCost > 0 ? objCost * linearFactor : 0,
+    },
+  ];
+  const rows = allRows.filter((r) => r.key === "object" || r.costUsd > 0 || r.usage > 0);
+
+  return {
+    periodStart: summary.periodStart,
+    periodEnd: summary.periodEnd,
+    rows,
+    totalCostUsd: rows.reduce((s, r) => s + r.costUsd, 0),
+    totalEstimatedUsd: rows.reduce((s, r) => s + r.estimatedUsd, 0),
+  };
+}
+
+function fmtPeriodDate(ms: number): string {
+  return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
 async function showCost(projectId: string, scope: ResourceScope) {
   if (!scope.workspaceId) {
     error("Could not resolve the workspace for this project. Run `lizard link` first.");
@@ -342,8 +492,12 @@ async function showCost(projectId: string, scope: ResourceScope) {
   }
 
   let data: { resources: BillingResource[]; costPerHour: number };
+  let usage: PeriodUsage | null;
   try {
-    data = await api.get(withQuery("/api/billing/live", { workspaceId: scope.workspaceId }));
+    [data, usage] = await Promise.all([
+      api.get(withQuery("/api/billing/live", { workspaceId: scope.workspaceId })),
+      fetchPeriodUsage(projectId, scope.workspaceId),
+    ]);
   } catch (e) {
     if (e instanceof APIError && e.status === 403) {
       error("Billing is only visible to the workspace owner.");
@@ -361,6 +515,7 @@ async function showCost(projectId: string, scope: ResourceScope) {
       resources: mine,
       projectCostPerHour: projectCost,
       workspaceCostPerHour: data.costPerHour,
+      currentPeriod: usage,
     });
     return;
   }
@@ -387,4 +542,29 @@ async function showCost(projectId: string, scope: ResourceScope) {
     );
   }
   console.log(chalk.dim("Workspace ") + `$${data.costPerHour.toFixed(4)}/hr`);
+
+  if (usage && usage.rows.length > 0) {
+    console.log();
+    console.log(
+      chalk.bold("This billing period") +
+        chalk.dim(` (${fmtPeriodDate(usage.periodStart)} – ${fmtPeriodDate(usage.periodEnd)})`),
+    );
+    table(
+      ["Resource", "Usage", "Cost so far", "Est. period total"],
+      [
+        ...usage.rows.map((r) => [
+          r.label,
+          `${r.usage.toFixed(2)} ${r.usageUnit}`,
+          `$${r.costUsd.toFixed(4)}`,
+          `$${r.estimatedUsd.toFixed(2)}`,
+        ]),
+        [
+          chalk.bold("Total"),
+          "",
+          chalk.bold(`$${usage.totalCostUsd.toFixed(4)}`),
+          chalk.bold(`$${usage.totalEstimatedUsd.toFixed(2)}`),
+        ],
+      ],
+    );
+  }
 }
