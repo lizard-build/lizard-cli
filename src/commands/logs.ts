@@ -2,8 +2,9 @@ import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { streamSSE, api, withScope, withQuery, type ResourceScope } from "../lib/api.js";
-import { resolveProjectScope, resolveService, getActiveService } from "../lib/resolve.js";
-import { info, error, isTTY, isJSONMode, printJSON, table, statusColor, timeAgo } from "../lib/format.js";
+import { resolveProjectScope, resolveService, getActiveServiceWithKind } from "../lib/resolve.js";
+import { getProjectLink } from "../lib/config.js";
+import { info, error, warn, isTTY, isJSONMode, printJSON, table, statusColor, timeAgo } from "../lib/format.js";
 
 export function registerLogs(program: Command) {
   program
@@ -18,6 +19,10 @@ export function registerLogs(program: Command) {
     .action(async (opts) => {
       if (opts.restarts !== undefined && opts.restart !== undefined) {
         error("Use --restarts (list) or --restart <id> (detail), not both");
+        process.exit(1);
+      }
+      if (opts.tail !== undefined && (opts.restarts !== undefined || opts.restart !== undefined)) {
+        error("--tail cannot be combined with --restarts/--restart");
         process.exit(1);
       }
 
@@ -50,14 +55,22 @@ export function registerLogs(program: Command) {
       // branch below talks to the API with a real service ID.
       let serviceId: string | undefined;
       let serviceName: string | undefined;
+      let serviceKind: "app" | "addon" | undefined;
       if (opts.service) {
         const svc = await resolveService(projectId, opts.service);
         serviceId = svc.id;
         serviceName = svc.name;
+        serviceKind = svc.kind;
       }
 
       // --tail: fetch historical logs and exit
       if (tailN !== undefined) {
+        if (opts.service && !serviceName) {
+          // An empty name would be dropped from the query string and the
+          // filter would silently match every service.
+          error(`Service "${opts.service}" has no name to filter logs by`);
+          process.exit(1);
+        }
         // The project log stream tags entries with the service *name*
         // (not ID), so the historical filter must use the name too.
         const entries = await api.get<any[]>(
@@ -75,12 +88,13 @@ export function registerLogs(program: Command) {
 
       if (!serviceId && isTTY() && !isJSONMode()) {
         // Offer to pick a specific service or stream all
-        const data = await api.get<{ apps: any[] }>(
+        const data = await api.get<{ apps: any[]; addons?: any[] }>(
           withScope(`/api/projects/${projectId}/services`, scope),
         );
         const apps = data.apps || [];
+        const addons = data.addons || [];
 
-        if (apps.length > 1) {
+        if (apps.length + addons.length > 1) {
           const choices = [
             { value: "all", label: "All services", hint: "stream combined logs" },
             ...apps.map((a: any) => ({
@@ -88,24 +102,42 @@ export function registerLogs(program: Command) {
               label: a.name || a.id,
               hint: a.status,
             })),
+            ...addons.map((a: any) => ({
+              value: a.id,
+              label: a.name || a.addonType || a.id,
+              hint: a.status,
+            })),
           ];
           const selected = await p.select({ message: "Show logs for", options: choices });
           if (p.isCancel(selected)) process.exit(5);
-          if (selected !== "all") serviceId = selected as string;
+          if (selected !== "all") {
+            serviceId = selected as string;
+            serviceKind = addons.some((a: any) => a.id === selected) ? "addon" : "app";
+          }
         }
       }
 
+      const onReconnect = (attempt: number) =>
+        warn(`log stream lost — reconnecting (attempt ${attempt}/5)`);
+      const streamHandler = (event: string, data: string) => {
+        if (event === "error") {
+          error(data);
+          process.exitCode = 1;
+          return false;
+        }
+        printLogLine(data);
+        return true;
+      };
+
       if (serviceId) {
-        // Stream logs for a specific app
+        // Stream logs for a specific service. Addons live on a different
+        // endpoint — the app one 404s for them.
+        const streamPath =
+          serviceKind === "addon"
+            ? withScope(`/api/projects/${projectId}/addons/${serviceId}/logs`, scope)
+            : `/api/apps/${serviceId}/logs`;
         info(chalk.dim("Streaming logs... (Ctrl+C to stop)\n"));
-        await streamSSE(`/api/apps/${serviceId}/logs`, (event, data) => {
-          if (event === "error") {
-            error(data);
-            return false;
-          }
-          printLogLine(data);
-          return true;
-        });
+        await streamSSE(streamPath, streamHandler, { reconnect: true, onReconnect });
         return;
       }
 
@@ -113,14 +145,8 @@ export function registerLogs(program: Command) {
       info(chalk.dim("Streaming project logs... (Ctrl+C to stop)\n"));
       await streamSSE(
         withScope(`/api/projects/${projectId}/logs/stream`, scope),
-        (event, data) => {
-          if (event === "error") {
-            error(data);
-            return false;
-          }
-          printLogLine(data);
-          return true;
-        },
+        streamHandler,
+        { reconnect: true, onReconnect },
       );
     });
 }
@@ -174,6 +200,19 @@ type FlatEvent = DeployEvent["events"][number] & {
 
 async function fetchFlatRestarts(appId: string): Promise<FlatEvent[]> {
   const builds = await api.get<DeployEvent[]>(`/api/apps/${appId}/deploy-events`);
+  // The plain listing is DB-only; crash events still held by vm-agent are
+  // merged in by the server only when a buildId is given. Refetch the newest
+  // build so `--restart latest` sees crashes that haven't been persisted yet.
+  if (builds.length > 0) {
+    try {
+      const [withLive] = await api.get<DeployEvent[]>(
+        withQuery(`/api/apps/${appId}/deploy-events`, { buildId: builds[0].buildId }),
+      );
+      if (withLive && withLive.buildId === builds[0].buildId) builds[0] = withLive;
+    } catch {
+      // node unreachable — the DB-only list is still useful
+    }
+  }
   const flat: FlatEvent[] = [];
   for (const b of builds) {
     for (const e of b.events) {
@@ -228,12 +267,27 @@ function printLogLine(data: string) {
   }
 }
 
+/** Resolve the target for app-only subcommands; addons have no builds or
+ *  restart events, so fail with a clear message instead of a server 404. */
+async function getActiveApp(
+  serviceRef: string | undefined,
+  projectId: string,
+  what: string,
+): Promise<{ id: string; name: string }> {
+  const svc = await getActiveServiceWithKind(serviceRef, projectId);
+  if (svc.kind === "addon") {
+    error(`${what} are only available for apps — "${svc.name}" is an addon`);
+    process.exit(1);
+  }
+  return { id: svc.id, name: svc.name };
+}
+
 async function showRestartList(
   serviceRef: string | undefined,
   projectId: string,
   n: number,
 ) {
-  const svc = await getActiveService(serviceRef, projectId);
+  const svc = await getActiveApp(serviceRef, projectId, "Restart events");
   const events = await fetchFlatRestarts(svc.id);
   const slice = events.slice(0, n);
 
@@ -272,7 +326,7 @@ async function showRestartLogTail(
   projectId: string,
   ref: string,
 ) {
-  const svc = await getActiveService(serviceRef, projectId);
+  const svc = await getActiveApp(serviceRef, projectId, "Restart events");
   const events = await fetchFlatRestarts(svc.id);
 
   let evt: FlatEvent | undefined;
@@ -319,13 +373,11 @@ async function showBuildLogs(
   tailN?: number,
 ) {
   let appId: string | undefined;
-  if (serviceRef) {
-    const svc = await resolveService(projectId, serviceRef);
+  if (serviceRef || getProjectLink()?.serviceId) {
+    // Explicit -s flag, or the service linked to this cwd.
+    const svc = await getActiveApp(serviceRef, projectId, "Build logs");
     appId = svc.id;
-  }
-
-  if (!appId) {
-    // Get first app in project
+  } else {
     const data = await api.get<{ apps: Array<{ id: string; name: string }> }>(
       withScope(`/api/projects/${projectId}/services`, scope),
     );
@@ -335,6 +387,9 @@ async function showBuildLogs(
       );
     }
     appId = data.apps[0].id;
+    if (data.apps.length > 1) {
+      info(chalk.dim(`Multiple apps — showing ${data.apps[0].name}. Use -s to pick another.`));
+    }
   }
 
   // Get latest build
@@ -354,24 +409,45 @@ async function showBuildLogs(
     // Snapshot semantics: the server replays history immediately; if the
     // build is still running the stream would otherwise follow it forever.
     // Stop after 3s without new events and print what we have.
-    const lines: string[] = [];
+    //
+    // Each SSE event carries a multi-line *chunk* (a logSnippet delta), not a
+    // single line — for a finished build the whole log arrives as one event.
+    // Reassemble the text first, then tail by line.
+    const chunks: string[] = [];
     await streamSSE(
       `/api/builds/${buildId}/logs`,
       (event, data) => {
         if (event === "done" || event === "error") return false;
-        lines.push(data);
+        try {
+          const parsed = JSON.parse(data);
+          chunks.push(typeof parsed === "string" ? parsed : data);
+        } catch {
+          chunks.push(data);
+        }
         return true;
       },
       { idleTimeoutMs: 3000 },
     );
-    for (const line of lines.slice(-tailN)) printLogLine(line);
+    const lines = chunks.join("").split("\n");
+    while (lines.length && lines[lines.length - 1] === "") lines.pop();
+    for (const line of lines.slice(-tailN)) {
+      if (isJSONMode()) {
+        process.stdout.write(JSON.stringify({ message: line }) + "\n");
+      } else {
+        process.stdout.write(line + "\n");
+      }
+    }
     return;
   }
 
   await streamSSE(`/api/builds/${buildId}/logs`, (event, data) => {
-    if (event === "done" || event === "error") {
+    if (event === "error") {
+      // The human-readable "--- Build failed ---" line already arrived as a
+      // data event; just make the failure visible to scripts.
+      process.exitCode = 1;
       return false;
     }
+    if (event === "done") return false;
     printLogLine(data);
     return true;
   });

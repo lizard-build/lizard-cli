@@ -30,11 +30,22 @@ export declare const api: {
     patch: <T = any>(path: string, body?: unknown) => Promise<T>;
     delete: <T = any>(path: string) => Promise<T>;
 };
-/** Stream SSE and call handler for each data line. Return false to stop.
+/** Stream SSE and call handler for each event. Return false to stop.
  *
  *  `opts.idleTimeoutMs` — stop (resolve) when no *event* arrives for that
  *  long. Heartbeat comments don't reset the timer. Used by `--tail`-style
- *  snapshot reads that must not follow a live stream forever. */
+ *  snapshot reads that must not follow a live stream forever.
+ *
+ *  `opts.reconnect` — re-establish the connection when the server drops it
+ *  (API deploys, proxy idle timeouts). Resumes via `Last-Event-ID` and
+ *  suppresses events the server replays from before the drop. Rejects after
+ *  MAX_RECONNECT_ATTEMPTS consecutive failures so callers exit non-zero
+ *  instead of pretending the stream ended cleanly. `opts.onReconnect` fires
+ *  before each attempt. */
 export declare function streamSSE(path: string, handler: (event: string, data: string) => boolean | void, opts?: {
     idleTimeoutMs?: number;
+    reconnect?: boolean;
+    onReconnect?: (attempt: number) => void;
+    /** Base backoff between reconnect attempts; scaled by attempt number. */
+    reconnectBaseDelayMs?: number;
 }): Promise<void>;

@@ -88,84 +88,165 @@ export const api = {
     patch: (path, body) => request("PATCH", path, body),
     delete: (path) => request("DELETE", path),
 };
-/** Stream SSE and call handler for each data line. Return false to stop.
+/** Compare two Redis-stream-style event ids (`<ms>-<seq>`). Returns true when
+ *  `id` is at or before `last` — i.e. a replayed event we've already shown.
+ *  Ids in any other format never count as replays. */
+function isReplayedId(id, last) {
+    const a = id.split("-").map(Number);
+    const b = last.split("-").map(Number);
+    if (a.length !== 2 || b.length !== 2 || a.some(Number.isNaN) || b.some(Number.isNaN)) {
+        return false;
+    }
+    return a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1]);
+}
+const MAX_RECONNECT_ATTEMPTS = 5;
+/** Stream SSE and call handler for each event. Return false to stop.
  *
  *  `opts.idleTimeoutMs` — stop (resolve) when no *event* arrives for that
  *  long. Heartbeat comments don't reset the timer. Used by `--tail`-style
- *  snapshot reads that must not follow a live stream forever. */
+ *  snapshot reads that must not follow a live stream forever.
+ *
+ *  `opts.reconnect` — re-establish the connection when the server drops it
+ *  (API deploys, proxy idle timeouts). Resumes via `Last-Event-ID` and
+ *  suppresses events the server replays from before the drop. Rejects after
+ *  MAX_RECONNECT_ATTEMPTS consecutive failures so callers exit non-zero
+ *  instead of pretending the stream ended cleanly. `opts.onReconnect` fires
+ *  before each attempt. */
 export function streamSSE(path, handler, opts = {}) {
     return new Promise((resolve, reject) => {
         const url = new URL(baseURL + path);
         const token = _accessToken || getToken();
-        const reqHeaders = {
-            "User-Agent": USER_AGENT,
-            Accept: "text/event-stream",
-        };
-        if (token)
-            reqHeaders["Authorization"] = `Bearer ${token}`;
         const transport = url.protocol === "https:" ? https : http;
-        const req = transport.request({ hostname: url.hostname, port: url.port || (url.protocol === "https:" ? 443 : 80),
-            path: url.pathname + url.search, method: "GET", headers: reqHeaders }, (res) => {
-            if (res.statusCode && res.statusCode >= 400) {
-                let body = "";
-                res.on("data", (c) => body += c.toString());
-                res.on("end", () => reject(new APIError(res.statusCode, `SSE failed: ${body}`)));
+        let finished = false;
+        let attempts = 0;
+        let lastEventId;
+        // Id of the last event handed to the handler — replay marker across reconnects.
+        let lastDispatchedId;
+        const settle = (err) => {
+            if (finished)
+                return;
+            finished = true;
+            if (err)
+                reject(err);
+            else
+                resolve();
+        };
+        // Connection dropped without the handler asking to stop.
+        const dropped = (err) => {
+            if (finished)
+                return;
+            if (!opts.reconnect) {
+                settle(err);
                 return;
             }
-            let idleTimer;
-            const finish = () => {
-                if (idleTimer)
-                    clearTimeout(idleTimer);
-                req.destroy();
-                resolve();
+            attempts++;
+            if (attempts > MAX_RECONNECT_ATTEMPTS) {
+                settle(err instanceof Error
+                    ? err
+                    : new Error("SSE stream disconnected and reconnect attempts failed"));
+                return;
+            }
+            opts.onReconnect?.(attempts);
+            const base = opts.reconnectBaseDelayMs ?? 1000;
+            setTimeout(connect, Math.min(base * attempts, base * 5));
+        };
+        const connect = () => {
+            if (finished)
+                return;
+            const reqHeaders = {
+                "User-Agent": USER_AGENT,
+                Accept: "text/event-stream",
             };
-            const armIdleTimer = () => {
-                if (!opts.idleTimeoutMs)
+            if (token)
+                reqHeaders["Authorization"] = `Bearer ${token}`;
+            if (lastEventId)
+                reqHeaders["Last-Event-ID"] = lastEventId;
+            const req = transport.request({ hostname: url.hostname, port: url.port || (url.protocol === "https:" ? 443 : 80),
+                path: url.pathname + url.search, method: "GET", headers: reqHeaders }, (res) => {
+                if (res.statusCode && res.statusCode >= 400) {
+                    let body = "";
+                    res.on("data", (c) => body += c.toString());
+                    res.on("end", () => settle(new APIError(res.statusCode, `SSE failed: ${body}`)));
                     return;
-                if (idleTimer)
-                    clearTimeout(idleTimer);
-                idleTimer = setTimeout(finish, opts.idleTimeoutMs);
-            };
-            armIdleTimer();
-            let buffer = "";
-            let currentEvent = "";
-            let currentData = "";
-            res.setEncoding("utf8");
-            res.on("data", (chunk) => {
-                buffer += chunk;
-                const lines = buffer.split("\n");
-                buffer = lines.pop() ?? "";
-                for (const line of lines) {
-                    const trimmed = line.replace(/\r$/, "");
-                    if (trimmed === "") {
-                        if (currentData) {
-                            armIdleTimer();
-                            const cont = handler(currentEvent, currentData);
-                            if (cont === false) {
-                                finish();
-                                return;
-                            }
-                        }
-                        currentEvent = "";
-                        currentData = "";
-                    }
-                    else if (trimmed.startsWith("event:")) {
-                        currentEvent = trimmed.slice(6).trim();
-                    }
-                    else if (trimmed.startsWith("data:")) {
-                        currentData = trimmed.slice(5).trimStart();
-                    }
                 }
+                let idleTimer;
+                const finish = () => {
+                    if (idleTimer)
+                        clearTimeout(idleTimer);
+                    finished = true;
+                    req.destroy();
+                    resolve();
+                };
+                const armIdleTimer = () => {
+                    if (!opts.idleTimeoutMs)
+                        return;
+                    if (idleTimer)
+                        clearTimeout(idleTimer);
+                    idleTimer = setTimeout(finish, opts.idleTimeoutMs);
+                };
+                armIdleTimer();
+                let buffer = "";
+                let currentEvent = "";
+                let currentId;
+                let dataLines = [];
+                res.setEncoding("utf8");
+                res.on("data", (chunk) => {
+                    buffer += chunk;
+                    const lines = buffer.split("\n");
+                    buffer = lines.pop() ?? "";
+                    for (const line of lines) {
+                        const trimmed = line.replace(/\r$/, "");
+                        if (trimmed === "") {
+                            const data = dataLines.join("\n");
+                            if (data) {
+                                attempts = 0; // stream is healthy — reset the reconnect budget
+                                armIdleTimer();
+                                // After a reconnect the app-log endpoint replays recent
+                                // history; skip entries we already printed.
+                                const replay = opts.reconnect && currentId && lastDispatchedId
+                                    ? isReplayedId(currentId, lastDispatchedId)
+                                    : false;
+                                if (!replay) {
+                                    if (currentId)
+                                        lastDispatchedId = currentId;
+                                    const cont = handler(currentEvent, data);
+                                    if (cont === false) {
+                                        finish();
+                                        return;
+                                    }
+                                }
+                            }
+                            currentEvent = "";
+                            currentId = undefined;
+                            dataLines = [];
+                        }
+                        else if (trimmed.startsWith("event:")) {
+                            currentEvent = trimmed.slice(6).trim();
+                        }
+                        else if (trimmed.startsWith("data:")) {
+                            dataLines.push(trimmed.slice(5).trimStart());
+                        }
+                        else if (trimmed.startsWith("id:")) {
+                            currentId = trimmed.slice(3).trim();
+                            lastEventId = currentId;
+                        }
+                    }
+                });
+                res.on("end", () => {
+                    if (idleTimer)
+                        clearTimeout(idleTimer);
+                    dropped();
+                });
+                res.on("error", (err) => {
+                    if (idleTimer)
+                        clearTimeout(idleTimer);
+                    dropped(err);
+                });
             });
-            res.on("end", () => {
-                if (idleTimer)
-                    clearTimeout(idleTimer);
-                resolve();
-            });
-            res.on("error", reject);
-        });
-        req.on("error", reject);
-        req.end();
+            req.on("error", dropped);
+            req.end();
+        };
+        connect();
     });
 }
 //# sourceMappingURL=api.js.map
