@@ -87,24 +87,19 @@ async function withMockedApi(handlers: {
 }
 
 describe("ensureLinked — Railway-style workspace flow", () => {
-  test("non-TTY, single workspace, no flags → creates project in personal", async () => {
+  test("non-TTY, no --name → refuses to auto-create, no POST", async () => {
     const { init, calls } = await withMockedApi({
       get: (p) => (p === "/api/workspaces" ? [personalWs] : []),
-      post: (p) =>
-        p === "/api/projects"
-          ? { id: "proj_new", name: path.basename(tmpDir), slug: "demo" }
-          : null,
+      post: () => {
+        throw new Error("should not POST in headless without a name");
+      },
     });
-    const link = await init.ensureLinked({});
 
-    expect(link.workspaceId).toBe("ws_personal");
-    expect(link.workspaceName).toBe("personal");
-    expect(link.projectId).toBe("proj_new");
-
-    // Backend got workspaceId in the POST body.
-    const post = calls.find((c) => c.method === "POST" && c.path === "/api/projects");
-    expect(post).toBeDefined();
-    expect((post!.body as any).workspaceId).toBe("ws_personal");
+    await expect(init.ensureLinked({})).rejects.toThrow(
+      /no project name was given/i,
+    );
+    // No project was created.
+    expect(calls.find((c) => c.method === "POST")).toBeUndefined();
   });
 
   test("non-TTY with --name and multiple workspaces: unique hint auto-resolves ws", async () => {

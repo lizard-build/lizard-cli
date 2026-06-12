@@ -58,10 +58,9 @@ export async function ensureLinked(opts = {}) {
                 }));
     }
     else if (!isTTY()) {
-        project = await api.post("/api/projects", {
-            name: path.basename(process.cwd()),
-            workspaceId: workspace.id,
-        });
+        throw new Error(`No project is linked to ${process.cwd()} and no project name was given.\n` +
+            `Run \`lizard init --name <project>\` to create or select one first, then re-run.\n` +
+            `(Refusing to auto-create a project named "${path.basename(process.cwd())}" in a non-interactive shell — a cwd typo would otherwise spawn an empty project.)`);
     }
     else {
         let action = "create";
