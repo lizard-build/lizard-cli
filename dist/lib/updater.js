@@ -4,7 +4,7 @@ import { Readable } from "node:stream";
 import { join, dirname } from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
-export const CURRENT_VERSION = "0.3.53";
+export const CURRENT_VERSION = "0.3.54";
 const RELEASES_API = "https://api.github.com/repos/lizard-build/lizard-cli/releases/latest";
 const RELEASE_BASE = "https://github.com/lizard-build/lizard-cli/releases/latest/download";
 /** Minimum gap between background update checks. */
@@ -51,7 +51,17 @@ export async function getLatestVersion() {
             return { kind: "error" };
         const data = (await res.json());
         const version = data.tag_name?.replace(/^v/, "");
-        return version ? { kind: "ok", version } : { kind: "error" };
+        if (!version)
+            return { kind: "error" };
+        // Verify the version is actually published to npm before advertising it —
+        // CI tags GitHub before npm publish completes, causing a race window where
+        // `npx @lizard-build/cli@{version}` fails with ETARGET.
+        const npmRes = await fetch(`https://registry.npmjs.org/@lizard-build/cli/${version}`, {
+            signal: AbortSignal.timeout(5000),
+        });
+        if (!npmRes.ok)
+            return { kind: "error" };
+        return { kind: "ok", version };
     }
     catch {
         return { kind: "error" };

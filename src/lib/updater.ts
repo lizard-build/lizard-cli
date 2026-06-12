@@ -57,7 +57,17 @@ export async function getLatestVersion(): Promise<LatestVersionResult> {
     if (!res.ok) return { kind: "error" };
     const data = (await res.json()) as { tag_name?: string };
     const version = data.tag_name?.replace(/^v/, "");
-    return version ? { kind: "ok", version } : { kind: "error" };
+    if (!version) return { kind: "error" };
+
+    // Verify the version is actually published to npm before advertising it —
+    // CI tags GitHub before npm publish completes, causing a race window where
+    // `npx @lizard-build/cli@{version}` fails with ETARGET.
+    const npmRes = await fetch(`https://registry.npmjs.org/@lizard-build/cli/${version}`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!npmRes.ok) return { kind: "error" };
+
+    return { kind: "ok", version };
   } catch {
     return { kind: "error" };
   }
