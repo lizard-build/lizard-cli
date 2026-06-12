@@ -186,6 +186,69 @@ describe("error JSON to stdout", () => {
   });
 });
 
+// ── error path: commander usage errors ──────────────────────────────────────
+// Subcommands inherit exitOverride only when it's set before registration;
+// these guard against regressing to commander's bare process.exit (empty
+// stdout) on usage errors in JSON mode.
+
+describe("commander usage errors emit JSON envelopes", () => {
+  test("missing required argument (`up status --json`)", async () => {
+    const { stdout, exitCode } = await run(["up", "status", "--json"]);
+    expect(exitCode).toBe(1);
+    const out = parseJSON(stdout);
+    expect(out.error.code).toBe("commander.missingArgument");
+    expect(out.error.message).toContain("id");
+  });
+
+  test("unknown option (`status --nope --json`)", async () => {
+    const { stdout, exitCode } = await run(["status", "--nope", "--json"]);
+    expect(exitCode).toBe(1);
+    const out = parseJSON(stdout);
+    expect(out.error.code).toBe("commander.unknownOption");
+  });
+
+  test("bare group command (`workspace --json`) reports MISSING_SUBCOMMAND", async () => {
+    const { stdout, exitCode } = await run(["workspace", "--json"]);
+    expect(exitCode).toBe(1);
+    const out = parseJSON(stdout);
+    expect(out.error.code).toBe("MISSING_SUBCOMMAND");
+  });
+
+  test("without --json on a TTY-less stderr path, exit code is still 1", async () => {
+    const { exitCode } = await run(["up", "status"]);
+    expect(exitCode).toBe(1);
+  });
+
+  test("explicit `help` still exits 0", async () => {
+    const { exitCode } = await run(["help"]);
+    expect(exitCode).toBe(0);
+  });
+});
+
+// ── --version --json ─────────────────────────────────────────────────────────
+
+describe("--version --json", () => {
+  test("emits a JSON payload instead of a raw string", async () => {
+    const { stdout, exitCode } = await run(["--version", "--json"]);
+    expect(exitCode).toBe(0);
+    const out = parseJSON(stdout);
+    expect(out.cli).toBe("lizard");
+    expect(typeof out.version).toBe("string");
+  });
+});
+
+// ── docs (no auth, must not open a browser in JSON mode) ────────────────────
+
+describe("docs --json", () => {
+  test("prints the URL instead of opening a browser", async () => {
+    const { stdout, exitCode } = await run(["docs", "--json"]);
+    expect(exitCode).toBe(0);
+    const out = parseJSON(stdout);
+    expect(out.url).toContain("docs.lizard.build");
+    expect(out.opened).toBe(false);
+  });
+});
+
 // ── stdout cleanliness ───────────────────────────────────────────────────────
 
 describe("stdout cleanliness in JSON mode", () => {

@@ -3,7 +3,7 @@ import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { api, getBaseURL, streamSSE, withScope } from "../lib/api.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
-import { error, isTTY } from "../lib/format.js";
+import { error, isTTY, isJSONMode } from "../lib/format.js";
 import { getToken } from "../lib/auth.js";
 import * as https from "node:https";
 import * as http from "node:http";
@@ -67,7 +67,11 @@ Examples:
       // shell-quoted before being joined — otherwise `bash -c "ps | head"`
       // collapses to `bash -c ps | head` (quotes lost, `|` becomes a real pipe).
       const cmd = cmdArgs.map(shellQuote).join(" ");
-      process.stdout.write(chalk.dim(`$ ${cmd}\n`));
+      // The `$ cmd` echo is a human nicety — keep stdout pure passthrough
+      // for machine consumers (--json / piped output).
+      if (!isJSONMode()) {
+        process.stdout.write(chalk.dim(`$ ${cmd}\n`));
+      }
 
       const exitCode = await execStream(serviceId!, cmd, (stream, line) => {
         if (stream === "stderr") {

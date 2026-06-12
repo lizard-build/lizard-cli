@@ -93,6 +93,12 @@ program
     const creds = await requireAuth();
     setAccessToken(creds.accessToken);
 });
+// Throw instead of process.exit so the catch in main() can emit JSON error
+// envelopes. Must run BEFORE command registration: commander copies inherited
+// settings (including the exit callback) at .command() creation time, so
+// subcommands registered earlier would still process.exit() directly and
+// bypass the JSON contract (empty stdout on `lizard up status --json` etc.).
+program.exitOverride();
 // Register all commands (alphabetical)
 registerAdd(program);
 registerConfig(program);
@@ -125,8 +131,6 @@ registerUp(program);
 registerUpgrade(program);
 registerWhoami(program);
 registerWorkspace(program);
-// Error handling
-program.exitOverride();
 const EXIT_CODES = {
     "0": "success",
     "1": "generic error",
@@ -253,6 +257,13 @@ async function main() {
     if (process.argv.includes("--json")) {
         setJSONMode(true);
     }
+    // `lizard --version --json` — commander handles -V/--version itself with a
+    // raw string; agents asking for JSON should get JSON.
+    if (process.argv.includes("--json") &&
+        (process.argv.includes("--version") || process.argv.includes("-V"))) {
+        process.stdout.write(JSON.stringify({ cli: "lizard", version: CURRENT_VERSION }, null, 2) + "\n");
+        process.exit(0);
+    }
     if (isHelpJsonRequest(process.argv)) {
         const { target, unknown } = findTargetCommand(stripHelpToken(process.argv), program);
         if (unknown) {
@@ -287,8 +298,25 @@ async function main() {
         if (err.code === "commander.helpDisplayed" || err.code === "commander.version") {
             process.exit(0);
         }
-        if (err.code === "commander.help") {
-            process.exit(0);
+        // Commander usage errors (missing argument, unknown option, bare group
+        // command). Commander has already written its message / help text to
+        // stderr; in JSON mode also emit a parseable envelope on stdout.
+        if (typeof err.code === "string" && err.code.startsWith("commander.")) {
+            const exitCode = err.exitCode ?? 1;
+            const bareGroup = err.code === "commander.help"; // help({error:true}) — no subcommand given
+            if (isJSONMode() && exitCode !== 0) {
+                console.log(JSON.stringify({
+                    error: {
+                        code: bareGroup ? "MISSING_SUBCOMMAND" : err.code,
+                        status: null,
+                        message: bareGroup
+                            ? "Missing subcommand. Run the command with --help --json to list available subcommands."
+                            : err.message || String(err),
+                        body: null,
+                    },
+                }, null, 2));
+            }
+            process.exit(exitCode);
         }
         const msg = err.message || String(err);
         const apiErr = err instanceof APIError ? err : undefined;

@@ -21,17 +21,17 @@ export function registerConfig(program: Command) {
         ? path.resolve(opts.file)
         : path.join(process.cwd(), "lizard-config.json");
 
+      // Throw instead of error()+exit so the central handler in index.ts
+      // emits a JSON error envelope in --json / non-TTY mode.
       if (!fs.existsSync(filePath)) {
-        error(`Config file not found: ${filePath}`);
-        process.exit(1);
+        throw new Error(`Config file not found: ${filePath}`);
       }
 
       let config: any;
       try {
         config = JSON.parse(fs.readFileSync(filePath, "utf-8"));
       } catch (e: any) {
-        error(`Failed to parse config file: ${e.message}`);
-        process.exit(1);
+        throw new Error(`Failed to parse config file: ${e.message}`);
       }
 
       const { projectId, scope } = await resolveProjectScope(opts.project);

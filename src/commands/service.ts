@@ -171,7 +171,7 @@ export function registerService(program: Command) {
         info(chalk.dim(`Streaming build logs for ${svcInfo.name}...\n`));
         await streamSSE(`/api/builds/${app.builds[0].id}/logs`, (event, data) => {
           if (event === "done" || event === "error") return false;
-          process.stdout.write(safeLogLine(data) + "\n");
+          writeLogLine(data);
           return true;
         });
         return;
@@ -198,7 +198,7 @@ export function registerService(program: Command) {
               info(chalk.dim("No more logs."));
             } else {
               info(chalk.dim(`Page ${pageNum} (${result.entries.length} lines):\n`));
-              for (const e of result.entries) process.stdout.write(safeLogLine(JSON.stringify(e)) + "\n");
+              for (const e of result.entries) writeLogEntry(e);
               if (result.oldest) info(chalk.dim(`\n  --page ${pageNum + 1}  for older logs`));
             }
           } else {
@@ -219,7 +219,7 @@ export function registerService(program: Command) {
             scope,
           ),
         );
-        for (const e of result.entries) process.stdout.write(safeLogLine(JSON.stringify(e)) + "\n");
+        for (const e of result.entries) writeLogEntry(e);
         if (result.oldest && result.entries.length === limit) {
           info(chalk.dim(`\n  Showing last ${limit} lines. Use --tail all or --page 2 to see older logs.`));
         }
@@ -234,7 +234,7 @@ export function registerService(program: Command) {
         ),
         (event, data) => {
           if (event === "error") return false;
-          process.stdout.write(safeLogLine(data) + "\n");
+          writeLogLine(data);
           return true;
         },
       );
@@ -295,4 +295,29 @@ function safeLogLine(data: string): string {
   } catch {
     return data;
   }
+}
+
+/** SSE payload → one log line: JSON object per line in JSON mode (same shape
+ *  as `lizard logs --json`), human-readable text otherwise. */
+function writeLogLine(data: string) {
+  if (isJSONMode()) {
+    let parsed: any;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      parsed = { message: data };
+    }
+    if (typeof parsed === "string") parsed = { message: parsed };
+    process.stdout.write(JSON.stringify(parsed) + "\n");
+    return;
+  }
+  process.stdout.write(safeLogLine(data) + "\n");
+}
+
+function writeLogEntry(e: unknown) {
+  if (isJSONMode()) {
+    process.stdout.write(JSON.stringify(e) + "\n");
+    return;
+  }
+  process.stdout.write(safeLogLine(JSON.stringify(e)) + "\n");
 }

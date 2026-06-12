@@ -1,7 +1,7 @@
 import open from "open";
 import { resolveProjectId } from "../lib/config.js";
 import { getBaseURL } from "../lib/api.js";
-import { success } from "../lib/format.js";
+import { success, isJSONMode, printJSON } from "../lib/format.js";
 export function registerOpen(program) {
     program
         .command("open")
@@ -10,6 +10,11 @@ export function registerOpen(program) {
         .action(async (opts) => {
         const projectId = await resolveProjectId(opts.project);
         const url = `${getBaseURL()}/projects/${projectId}`;
+        // JSON / headless mode: report the URL instead of popping a browser
+        if (isJSONMode()) {
+            printJSON({ url, opened: false });
+            return;
+        }
         await open(url);
         success("Opened in browser");
     });
