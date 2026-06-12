@@ -1,8 +1,10 @@
 import open from "open";
+import chalk from "chalk";
 import {
   loadConfig,
   saveConfig,
   type Credentials,
+  type PendingAuth,
 } from "./config.js";
 
 export type { Credentials } from "./config.js";
@@ -26,6 +28,22 @@ export function saveCredentials(creds: Credentials) {
 export function clearCredentials() {
   const config = loadConfig();
   delete config.credentials;
+  saveConfig(config);
+}
+
+export function loadPendingAuth(): PendingAuth | null {
+  return loadConfig().pendingAuth ?? null;
+}
+
+export function savePendingAuth(pending: PendingAuth) {
+  const config = loadConfig();
+  config.pendingAuth = pending;
+  saveConfig(config);
+}
+
+export function clearPendingAuth() {
+  const config = loadConfig();
+  delete config.pendingAuth;
   saveConfig(config);
 }
 
@@ -62,17 +80,20 @@ function isExpired(creds: Credentials): boolean {
 }
 
 /**
- * Ensure the user is authenticated. If not logged in (or the saved token
- * has expired — there is no refresh endpoint) and TTY, auto-login.
- * Returns credentials or throws.
+ * Ensure the user is authenticated.
+ *
+ * On first call with no credentials: creates a CLI auth session, saves it to
+ * disk, opens the browser, prints the URL, and exits. The user authenticates
+ * in the browser, then re-runs their command.
+ *
+ * On subsequent calls while a session is pending: checks once (no loop) if
+ * the user has completed authentication. If yes, stores credentials and
+ * returns them. If still pending, prints the URL and exits. If the session
+ * expired, starts a fresh one.
  */
 export async function requireAuth(): Promise<Credentials> {
   if (process.env.LIZARD_TOKEN) {
-    return {
-      accessToken: process.env.LIZARD_TOKEN,
-      userId: "",
-      username: "",
-    };
+    return { accessToken: process.env.LIZARD_TOKEN, userId: "", username: "" };
   }
 
   const creds = loadCredentials();
@@ -88,11 +109,60 @@ export async function requireAuth(): Promise<Credentials> {
     throw err;
   }
 
-  if (creds) {
-    process.stderr.write("Session expired — logging in again...\n");
+  // Check if we already have a pending auth session
+  const pending = loadPendingAuth();
+  if (pending) {
+    const { checkSession } = await import("../commands/login.js");
+    try {
+      const result = await checkSession(pending.sessionId, pending.sessionSecret);
+      if (result.status === "complete" && result.accessToken && result.user) {
+        const expMs = jwtExpiryMs(result.accessToken);
+        saveCredentials({
+          accessToken: result.accessToken,
+          expiresAt: expMs ? new Date(expMs).toISOString() : undefined,
+          userId: result.user.id,
+          username: result.user.username,
+          email: result.user.email,
+          avatarUrl: result.user.avatarUrl,
+        });
+        clearPendingAuth();
+        return loadCredentials()!;
+      }
+      if (result.status === "expired") {
+        clearPendingAuth();
+        // Fall through to start a fresh session below
+      } else {
+        // Still pending — user hasn't authenticated yet
+        printAuthPrompt(pending.authUrl);
+        process.exit(0);
+      }
+    } catch {
+      // Network error — assume still pending, show URL
+      printAuthPrompt(pending.authUrl);
+      process.exit(0);
+    }
   }
-  const { performLogin } = await import("../commands/login.js");
-  return performLogin();
+
+  // No credentials and no pending session — start a new auth flow
+  const { createSession } = await import("../commands/login.js");
+  const { getBaseURL } = await import("./api.js");
+  const session = await createSession();
+  const authUrl = `${getBaseURL()}/auth/cli?session=${session.sessionId}`;
+  savePendingAuth({
+    sessionId: session.sessionId,
+    sessionSecret: session.sessionSecret,
+    authUrl,
+    createdAt: Date.now(),
+  });
+  await openURL(authUrl);
+  printAuthPrompt(authUrl);
+  process.exit(0);
+}
+
+function printAuthPrompt(authUrl: string) {
+  process.stderr.write(
+    `\nAuthenticate with Lizard:\n  ${chalk.cyan(authUrl)}\n\nThen run your command again.\n\n`,
+  );
 }
 
 /** Open a URL in the default browser, or print it if headless. */

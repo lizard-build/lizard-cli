@@ -22,8 +22,15 @@ export interface ProjectLink {
     /** @deprecated use serviceName */
     appName?: string;
 }
+export interface PendingAuth {
+    sessionId: string;
+    sessionSecret: string;
+    authUrl: string;
+    createdAt: number;
+}
 export interface Config {
     credentials?: Credentials;
+    pendingAuth?: PendingAuth;
     projects?: Record<string, ProjectLink>;
 }
 export declare function loadConfig(): Config;

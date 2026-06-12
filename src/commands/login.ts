@@ -1,17 +1,15 @@
 import chalk from "chalk";
-import ora from "ora";
 import { Command } from "commander";
 import {
   saveCredentials,
+  savePendingAuth,
+  clearPendingAuth,
   openURL,
   jwtExpiryMs,
   type Credentials,
 } from "../lib/auth.js";
 import { getBaseURL } from "../lib/api.js";
-import { success, info, isJSONMode, printJSON } from "../lib/format.js";
-
-const POLL_INTERVAL = 2000;
-const SESSION_TIMEOUT = 300_000; // 5 min
+import { success, isJSONMode, printJSON } from "../lib/format.js";
 
 interface SessionResponse {
   sessionId: string;
@@ -19,10 +17,9 @@ interface SessionResponse {
   expiresIn: number;
 }
 
-interface PollResponse {
+export interface CheckResponse {
   status: "pending" | "complete" | "expired";
   accessToken?: string;
-  refreshToken?: string;
   user?: {
     id: string;
     username: string;
@@ -32,100 +29,50 @@ interface PollResponse {
 }
 
 /** Create a CLI login session on the server */
-async function createSession(): Promise<SessionResponse> {
+export async function createSession(): Promise<SessionResponse> {
   const res = await fetch(`${getBaseURL()}/api/auth/cli/session`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
   });
-  if (!res.ok) {
-    throw new Error(`Failed to create login session: ${res.statusText}`);
-  }
+  if (!res.ok) throw new Error(`Failed to create login session: ${res.statusText}`);
   return res.json() as Promise<SessionResponse>;
 }
 
-/** Poll the server to check if the user completed login */
-async function pollSession(
+/** Check once if the user has completed authentication (no polling loop) */
+export async function checkSession(
   sessionId: string,
   sessionSecret: string,
-): Promise<PollResponse> {
+): Promise<CheckResponse> {
   const res = await fetch(`${getBaseURL()}/api/auth/cli/poll`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ sessionId, sessionSecret }),
   });
-  if (!res.ok) {
-    throw new Error(`Poll failed: ${res.statusText}`);
-  }
-  return res.json() as Promise<PollResponse>;
+  if (!res.ok) throw new Error(`Auth check failed: ${res.statusText}`);
+  return res.json() as Promise<CheckResponse>;
 }
 
 /**
- * Perform the login flow. Used by the login command and by auto-login in requireAuth.
+ * Start the login flow: creates a session, saves it to disk, opens the
+ * browser, prints the URL, then exits. The user authenticates in the browser
+ * and re-runs their original command — requireAuth will pick up the session.
  */
-export async function performLogin(): Promise<Credentials> {
-  // 1. Create session
+export async function performLogin(): Promise<never> {
   const session = await createSession();
-  const loginURL = `${getBaseURL()}/auth/cli?session=${session.sessionId}`;
+  const authUrl = `${getBaseURL()}/auth/cli?session=${session.sessionId}`;
 
-  // 2. Try to open browser
-  const opened = await openURL(loginURL);
-  if (opened) {
-    info("Opening browser to log in...");
-  } else {
-    info(`Open this URL in your browser to log in:\n  ${chalk.cyan(loginURL)}`);
-  }
+  savePendingAuth({
+    sessionId: session.sessionId,
+    sessionSecret: session.sessionSecret,
+    authUrl,
+    createdAt: Date.now(),
+  });
 
-  // 3. Poll until complete
-  const spinner = ora("Waiting for login...").start();
-  const deadline = Date.now() + SESSION_TIMEOUT;
-
-  while (Date.now() < deadline) {
-    await sleep(POLL_INTERVAL);
-
-    try {
-      const result = await pollSession(session.sessionId, session.sessionSecret);
-
-      if (result.status === "complete" && result.accessToken && result.user) {
-        spinner.stop();
-        const expMs = jwtExpiryMs(result.accessToken);
-        const creds: Credentials = {
-          accessToken: result.accessToken,
-          refreshToken: result.refreshToken,
-          expiresAt: expMs ? new Date(expMs).toISOString() : undefined,
-          userId: result.user.id,
-          username: result.user.username,
-          email: result.user.email,
-          avatarUrl: result.user.avatarUrl,
-        };
-        saveCredentials(creds);
-
-        if (isJSONMode()) {
-          printJSON({ username: creds.username, email: creds.email });
-        } else {
-          success(`Logged in as ${chalk.bold(creds.username)}`);
-        }
-        return creds;
-      }
-
-      if (result.status === "expired") {
-        spinner.stop();
-        throw new Error("Login session expired. Please try again.");
-      }
-    } catch (err: any) {
-      if (err.message?.includes("expired")) {
-        spinner.stop();
-        throw err;
-      }
-      // Network error — keep trying
-    }
-  }
-
-  spinner.stop();
-  throw new Error("Login timed out. Please try again.");
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+  await openURL(authUrl);
+  process.stderr.write(
+    `\nAuthenticate with Lizard:\n  ${chalk.cyan(authUrl)}\n\nOnce authenticated, run your command again.\n\n`,
+  );
+  process.exit(0);
 }
 
 export function registerLogin(program: Command) {
