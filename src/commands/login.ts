@@ -3,7 +3,6 @@ import { Command } from "commander";
 import {
   saveCredentials,
   savePendingAuth,
-  clearPendingAuth,
   openURL,
   jwtExpiryMs,
   type Credentials,
