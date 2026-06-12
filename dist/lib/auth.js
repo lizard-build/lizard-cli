@@ -82,14 +82,7 @@ export async function requireAuth() {
     const creds = loadCredentials();
     if (creds && !isExpired(creds))
         return creds;
-    if (!isTTY()) {
-        const err = new Error(creds
-            ? "Session expired. Run `lizard login` again or set LIZARD_TOKEN."
-            : "Not authenticated. Set LIZARD_TOKEN or run `lizard login` first.");
-        err.code = "NOT_AUTHENTICATED";
-        throw err;
-    }
-    // Check if we already have a pending auth session
+    // Check pending session before the TTY guard — completing auth doesn't need interactivity
     const pending = loadPendingAuth();
     if (pending) {
         const { checkSession } = await import("../commands/login.js");
@@ -124,7 +117,14 @@ export async function requireAuth() {
             process.exit(0);
         }
     }
-    // No credentials and no pending session — start a new auth flow
+    // No credentials and no pending session — need to start a new auth flow
+    if (!isTTY()) {
+        const err = new Error(creds
+            ? "Session expired. Run `lizard login` again or set LIZARD_TOKEN."
+            : "Not authenticated. Set LIZARD_TOKEN or run `lizard login` first.");
+        err.code = "NOT_AUTHENTICATED";
+        throw err;
+    }
     const { createSession } = await import("../commands/login.js");
     const { getBaseURL } = await import("./api.js");
     const session = await createSession();
