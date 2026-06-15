@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { api, withScope } from "../lib/api.js";
 import { getProjectLink } from "../lib/config.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
+import { warn, fail } from "../lib/format.js";
 /**
  * `lizard run <command...>` — run a local command with platform secrets in
  * the environment. Project-scope secrets are loaded first, then the linked
@@ -38,7 +39,7 @@ export function registerRun(program) {
                 const serviceSecrets = await api.get(path).catch((err) => {
                     if (err?.status === 404) {
                         if (svc.kind === "addon") {
-                            console.warn(`warning: addon "${svc.name}" exposes no secrets endpoint yet ` +
+                            warn(`addon "${svc.name}" exposes no secrets endpoint yet ` +
                                 `(needs GET ${path}). Falling back to project-only env.`);
                         }
                         return [];
@@ -57,14 +58,15 @@ export function registerRun(program) {
             env,
             stdio: "inherit",
         });
+        // The child's own stdout/stderr is inherited verbatim; only the CLI's
+        // own spawn failures go through the error contract (JSON envelope in
+        // --json/non-TTY mode), preserving conventional exit codes.
         if (result.error) {
             const code = result.error.code;
             if (code === "ENOENT") {
-                console.error(`lizard run: command not found: ${args[0]}`);
-                process.exit(127);
+                fail(`lizard run: command not found: ${args[0]}`, 127, "ENOENT");
             }
-            console.error(`lizard run: ${result.error.message}`);
-            process.exit(1);
+            fail(`lizard run: ${result.error.message}`, 1, "SPAWN_ERROR");
         }
         process.exit(result.status ?? 1);
     });

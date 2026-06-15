@@ -5,7 +5,7 @@ import ora from "ora";
 import { Command } from "commander";
 import { api, withScope } from "../lib/api.js";
 import { resolveProjectScope } from "../lib/resolve.js";
-import { success, error, isJSONMode, printJSON } from "../lib/format.js";
+import { success, isJSONMode, printJSON } from "../lib/format.js";
 
 export function registerConfig(program: Command) {
   const config = program.command("config").description("Manage project configuration");
@@ -73,8 +73,9 @@ export function registerConfig(program: Command) {
         }
       } catch (e: any) {
         spinner.stop();
-        error(`Failed to apply config: ${e.message}`);
-        process.exit(1);
+        // Throw to the central handler so --json / non-TTY callers get the
+        // error envelope instead of a bare human line (matches the guards above).
+        throw new Error(`Failed to apply config: ${e.message}`);
       }
     });
 }

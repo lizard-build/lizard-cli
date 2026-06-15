@@ -4,7 +4,7 @@ import { Command } from "commander";
 import { streamSSE, api, withScope, withQuery, type ResourceScope } from "../lib/api.js";
 import { resolveProjectScope, resolveService, getActiveServiceWithKind } from "../lib/resolve.js";
 import { getProjectLink } from "../lib/config.js";
-import { info, error, warn, isTTY, isJSONMode, printJSON, table, statusColor, timeAgo } from "../lib/format.js";
+import { info, error, warn, fail, isTTY, isJSONMode, printJSON, table, statusColor, timeAgo } from "../lib/format.js";
 
 // Levels assigned by the platform's log collector (regex over the message
 // text — apps that log errors without an "error"-like keyword come as info).
@@ -36,20 +36,16 @@ export function registerLogs(program: Command) {
     .option("--restart <id>", "Print log tail of a specific restart event (or 'latest')")
     .action(async (opts) => {
       if (opts.restarts !== undefined && opts.restart !== undefined) {
-        error("Use --restarts (list) or --restart <id> (detail), not both");
-        process.exit(1);
+        fail("Use --restarts (list) or --restart <id> (detail), not both");
       }
       if (opts.tail !== undefined && (opts.restarts !== undefined || opts.restart !== undefined)) {
-        error("--tail cannot be combined with --restarts/--restart");
-        process.exit(1);
+        fail("--tail cannot be combined with --restarts/--restart");
       }
       if (opts.level && !LOG_LEVELS.includes(opts.level)) {
-        error(`Invalid --level "${opts.level}". Choose one of: ${LOG_LEVELS.join(", ")}`);
-        process.exit(1);
+        fail(`Invalid --level "${opts.level}". Choose one of: ${LOG_LEVELS.join(", ")}`);
       }
       if (opts.level && (opts.build || opts.restarts !== undefined || opts.restart !== undefined)) {
-        error("--level applies to runtime logs only (not --build/--restarts/--restart)");
-        process.exit(1);
+        fail("--level applies to runtime logs only (not --build/--restarts/--restart)");
       }
 
       const { projectId, scope } = await resolveProjectScope(opts.project);
@@ -94,8 +90,7 @@ export function registerLogs(program: Command) {
         if (opts.service && !serviceName) {
           // An empty name would be dropped from the query string and the
           // filter would silently match every service.
-          error(`Service "${opts.service}" has no name to filter logs by`);
-          process.exit(1);
+          fail(`Service "${opts.service}" has no name to filter logs by`);
         }
         // The project log stream tags entries with the service *name*
         // (not ID), so the historical filter must use the name too.
@@ -183,8 +178,7 @@ export function registerLogs(program: Command) {
 function parseTail(raw: string): number {
   const n = parseInt(raw, 10);
   if (isNaN(n) || n < 1) {
-    error("--tail must be a positive integer");
-    process.exit(1);
+    fail("--tail must be a positive integer");
   }
   if (n > 1000) {
     info(chalk.yellow("--tail capped at 1000 (server limit)"));
@@ -197,8 +191,7 @@ function parseRestartsN(raw: unknown): number {
   if (raw === true || raw === "" || raw === undefined) return 20;
   const n = parseInt(String(raw), 10);
   if (isNaN(n) || n < 1) {
-    error("--restarts must be a positive integer");
-    process.exit(1);
+    fail("--restarts must be a positive integer");
   }
   return n;
 }
@@ -305,8 +298,7 @@ async function getActiveApp(
 ): Promise<{ id: string; name: string }> {
   const svc = await getActiveServiceWithKind(serviceRef, projectId);
   if (svc.kind === "addon") {
-    error(`${what} are only available for apps — "${svc.name}" is an addon`);
-    process.exit(1);
+    fail(`${what} are only available for apps — "${svc.name}" is an addon`);
   }
   return { id: svc.id, name: svc.name };
 }
@@ -362,14 +354,12 @@ async function showRestartLogTail(
   if (ref === "latest") {
     evt = events[0];
     if (!evt) {
-      error(`No restart events for ${svc.name}.`);
-      process.exit(1);
+      fail(`No restart events for ${svc.name}.`);
     }
   } else {
     evt = events.find((e) => e.id === ref);
     if (!evt) {
-      error(`Restart event "${ref}" not found for ${svc.name}.`);
-      process.exit(1);
+      fail(`Restart event "${ref}" not found for ${svc.name}.`);
     }
   }
 

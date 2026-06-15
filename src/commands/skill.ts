@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { error, info, isJSONMode, printJSON, table } from "../lib/format.js";
+import { fail, info, isJSONMode, printJSON, table } from "../lib/format.js";
 import { EMBEDDED_SKILLS } from "../lib/skills-data.generated.js";
 
 // Skills are embedded into the JS bundle at build time (see scripts/gen-skills.mjs).
@@ -166,8 +166,7 @@ export function registerSkill(program: Command) {
         }
         process.stdout.write(md.endsWith("\n") ? md : md + "\n");
       } catch (e: any) {
-        error(e.message);
-        process.exit(3);
+        fail(e.message, 3);
       }
     });
 

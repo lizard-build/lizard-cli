@@ -16,6 +16,24 @@ export function printJSON(data: unknown) {
   console.log(JSON.stringify(data, null, 2));
 }
 
+/**
+ * Terminate with a stable error contract. In JSON mode emit the same
+ * `{ error: { code, status, message, body } }` envelope on stdout that the
+ * top-level catch in index.ts produces; otherwise print a human "Error:" line
+ * on stderr. Use for validation/guard exits that would otherwise bypass the
+ * envelope by calling error() + process.exit() directly, leaving agents with
+ * empty stdout. `exitCode` is preserved verbatim so callers keep their
+ * semantics (2 = auth, 3 = not found, 127 = command not found, …).
+ */
+export function fail(msg: string, exitCode = 1, code = "ERROR"): never {
+  if (jsonMode) {
+    printJSON({ error: { code, status: null, message: msg, body: null } });
+  } else {
+    error(msg);
+  }
+  process.exit(exitCode);
+}
+
 export function success(msg: string) {
   if (jsonMode) return;
   process.stderr.write(chalk.green("✓") + " " + msg + "\n");

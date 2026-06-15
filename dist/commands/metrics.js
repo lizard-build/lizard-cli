@@ -2,7 +2,7 @@ import chalk from "chalk";
 import { api, withScope, withQuery, APIError } from "../lib/api.js";
 import { getProjectLink } from "../lib/config.js";
 import { resolveProjectScope, getActiveServiceWithKind } from "../lib/resolve.js";
-import { info, error, isJSONMode, printJSON, table, timeAgo } from "../lib/format.js";
+import { info, fail, isJSONMode, printJSON, table, timeAgo } from "../lib/format.js";
 const RANGES = ["1h", "6h", "24h", "7d", "14d", "30d"];
 export function registerMetrics(program) {
     program
@@ -15,12 +15,10 @@ export function registerMetrics(program) {
         .option("--cost", "Show running resources, cost per hour, and current billing-period usage (incl. egress)")
         .action(async (opts) => {
         if (!RANGES.includes(opts.range)) {
-            error(`Invalid --range "${opts.range}". Choose one of: ${RANGES.join(", ")}`);
-            process.exit(1);
+            fail(`Invalid --range "${opts.range}". Choose one of: ${RANGES.join(", ")}`);
         }
         if (opts.watch && isJSONMode()) {
-            error("--watch is interactive and cannot be combined with --json (poll without --watch instead)");
-            process.exit(1);
+            fail("--watch is interactive and cannot be combined with --json (poll without --watch instead)");
         }
         const { projectId, scope } = await resolveProjectScope(opts.project);
         if (opts.cost) {
@@ -214,8 +212,7 @@ async function watchLive(projectId, scope, serviceId) {
             services = await fetchLive(projectId, scope);
         }
         catch (e) {
-            error(e.message || String(e));
-            process.exit(1);
+            fail(e.message || String(e));
         }
         if (serviceId)
             services = services.filter((s) => s.id === serviceId);
@@ -331,8 +328,7 @@ function fmtPeriodDate(ms) {
 }
 async function showCost(projectId, scope) {
     if (!scope.workspaceId) {
-        error("Could not resolve the workspace for this project. Run `lizard link` first.");
-        process.exit(1);
+        fail("Could not resolve the workspace for this project. Run `lizard link` first.");
     }
     let data;
     let usage;
@@ -344,8 +340,7 @@ async function showCost(projectId, scope) {
     }
     catch (e) {
         if (e instanceof APIError && e.status === 403) {
-            error("Billing is only visible to the workspace owner.");
-            process.exit(2);
+            fail("Billing is only visible to the workspace owner.", 2);
         }
         throw e;
     }

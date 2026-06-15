@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import { api } from "../lib/api.js";
 import { resolveProjectScope, getActiveServiceWithKind } from "../lib/resolve.js";
-import { info, error, isJSONMode, printJSON, table, statusColor, timeAgo } from "../lib/format.js";
+import { info, fail, isJSONMode, printJSON, table, statusColor, timeAgo } from "../lib/format.js";
 export function registerEvents(program) {
     program
         .command("events")
@@ -12,14 +12,12 @@ export function registerEvents(program) {
         .action(async (opts) => {
         const n = parseInt(opts.limit, 10);
         if (isNaN(n) || n < 1) {
-            error("--limit must be a positive integer");
-            process.exit(1);
+            fail("--limit must be a positive integer");
         }
         const { projectId } = await resolveProjectScope(opts.project);
         const svc = await getActiveServiceWithKind(opts.service, projectId);
         if (svc.kind === "addon") {
-            error(`Deploy events are only available for apps — "${svc.name}" is an addon`);
-            process.exit(1);
+            fail(`Deploy events are only available for apps — "${svc.name}" is an addon`);
         }
         const [builds, podStatus] = await Promise.all([
             api.get(`/api/apps/${svc.id}/deploy-events`),

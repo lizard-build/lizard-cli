@@ -225,6 +225,48 @@ describe("commander usage errors emit JSON envelopes", () => {
   });
 });
 
+// ── error path: in-command validation guards (fail()) ───────────────────────
+// These guards live inside the action, behind requireAuth, so a dummy
+// LIZARD_TOKEN gets us past auth to the pre-network validation without
+// touching the API. They must emit the same `{error:{...}}` envelope to
+// stdout (via fail()) instead of a bare human line + process.exit.
+
+describe("in-command guards emit JSON envelopes (fail())", () => {
+  const AUTHED = { env: { LIZARD_TOKEN: "dummy-token-for-guard-tests" } };
+
+  test("metrics --range bogus --json", async () => {
+    const { stdout, exitCode } = await run(["metrics", "--range", "bogus", "--json"], AUTHED);
+    expect(exitCode).toBe(1);
+    const out = parseJSON(stdout);
+    expect(out.error.code).toBe("ERROR");
+    expect(out.error.message).toContain("Invalid --range");
+  });
+
+  test("metrics --watch --json (interactive + json conflict)", async () => {
+    const { stdout, exitCode } = await run(["metrics", "--watch", "--json"], AUTHED);
+    expect(exitCode).toBe(1);
+    const out = parseJSON(stdout);
+    expect(out.error.message).toContain("--watch is interactive");
+  });
+
+  test("logs --restarts --restart together --json", async () => {
+    const { stdout, exitCode } = await run(
+      ["logs", "--restarts", "5", "--restart", "latest", "--json"],
+      AUTHED,
+    );
+    expect(exitCode).toBe(1);
+    const out = parseJSON(stdout);
+    expect(out.error.message).toContain("not both");
+  });
+
+  test("events --limit 0 --json", async () => {
+    const { stdout, exitCode } = await run(["events", "--limit", "0", "--json"], AUTHED);
+    expect(exitCode).toBe(1);
+    const out = parseJSON(stdout);
+    expect(out.error.message).toContain("--limit must be a positive integer");
+  });
+});
+
 // ── --version --json ─────────────────────────────────────────────────────────
 
 describe("--version --json", () => {

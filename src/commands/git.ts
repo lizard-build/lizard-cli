@@ -6,7 +6,7 @@ import { Command } from "commander";
 import { api, getBaseURL, streamSSE, withScope } from "../lib/api.js";
 import { openURL } from "../lib/auth.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
-import { success, error, info, isJSONMode, printJSON, isTTY, link } from "../lib/format.js";
+import { success, error, info, fail, isJSONMode, printJSON, isTTY, link } from "../lib/format.js";
 
 interface GitHubInstallation {
   id: number;
@@ -83,8 +83,7 @@ export function registerGit(program: Command) {
         success("GitHub connected! You can now deploy private repositories.");
         info(chalk.dim("  Run `lizard deploy` to deploy your project."));
       } else {
-        error("GitHub App not detected. Please try again or connect via the dashboard.");
-        process.exit(1);
+        fail("GitHub App not detected. Please try again or connect via the dashboard.");
       }
     });
 

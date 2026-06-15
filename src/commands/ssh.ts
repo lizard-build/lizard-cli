@@ -3,7 +3,7 @@ import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { api, getBaseURL, streamSSE, withScope } from "../lib/api.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
-import { error, isTTY, isJSONMode } from "../lib/format.js";
+import { error, fail, isTTY, isJSONMode } from "../lib/format.js";
 import { getToken } from "../lib/auth.js";
 import * as https from "node:https";
 import * as http from "node:http";
@@ -29,8 +29,7 @@ Examples:
         // "looks like an ID" by length breaks for long service names.
         const svc = await resolveService(projectId, opts.service);
         if (svc.kind !== "app") {
-          error(`"${svc.name}" is an addon — ssh works only for app services.`);
-          process.exit(1);
+          fail(`"${svc.name}" is an addon — ssh works only for app services.`);
         }
         serviceId = svc.id;
       } else {
@@ -40,8 +39,7 @@ Examples:
         );
         const running = (data.apps || []).filter((a) => a.status === "running");
         if (running.length === 0) {
-          error("No running services in this project.");
-          process.exit(1);
+          fail("No running services in this project.");
         }
         if (running.length === 1) {
           serviceId = running[0].id;
@@ -53,14 +51,12 @@ Examples:
           if (p.isCancel(selected)) process.exit(5);
           serviceId = selected as string;
         } else {
-          error("Multiple services — pass -s <service>");
-          process.exit(1);
+          fail("Multiple services — pass -s <service>");
         }
       }
 
       if (cmdArgs.length === 0) {
-        error("No command given. Usage: lizard ssh -s <service> -- <cmd> [args...]");
-        process.exit(1);
+        fail("No command given. Usage: lizard ssh -s <service> -- <cmd> [args...]");
       }
 
       // The server executes `cmd` via shell on the VM, so each arg must be

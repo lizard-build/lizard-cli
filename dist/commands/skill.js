@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { error, info, isJSONMode, printJSON, table } from "../lib/format.js";
+import { fail, info, isJSONMode, printJSON, table } from "../lib/format.js";
 import { EMBEDDED_SKILLS } from "../lib/skills-data.generated.js";
 function fsSource(dir) {
     return {
@@ -140,8 +140,7 @@ export function registerSkill(program) {
             process.stdout.write(md.endsWith("\n") ? md : md + "\n");
         }
         catch (e) {
-            error(e.message);
-            process.exit(3);
+            fail(e.message, 3);
         }
     });
     skill
