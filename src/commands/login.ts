@@ -52,9 +52,11 @@ export async function checkSession(
 }
 
 /**
- * Start the login flow: creates a session, saves it to disk, opens the
- * browser, prints the URL, then exits. The user authenticates in the browser
- * and re-runs their original command — requireAuth will pick up the session.
+ * Start the login flow: creates a session, saves it to disk, surfaces the
+ * auth URL, then exits. In human mode it opens the browser and prints the
+ * URL; in JSON mode it emits the URL as JSON and never opens a browser. The
+ * user authenticates and re-runs their original command — requireAuth will
+ * pick up the pending session.
  */
 export async function performLogin(): Promise<never> {
   const session = await createSession();
@@ -67,10 +69,17 @@ export async function performLogin(): Promise<never> {
     createdAt: Date.now(),
   });
 
-  await openURL(authUrl);
-  process.stderr.write(
-    `\nAuthenticate with Lizard:\n  ${chalk.cyan(authUrl)}\n\nOnce authenticated, run your command again.\n\n`,
-  );
+  // In JSON mode emit the URL as machine-readable output and never spawn a
+  // browser — agents drive this flow and popping open a browser on a
+  // headless/agent host is wrong. In human mode, open it and print the URL.
+  if (isJSONMode()) {
+    printJSON({ status: "pending", authUrl });
+  } else {
+    await openURL(authUrl);
+    process.stderr.write(
+      `\nAuthenticate with Lizard:\n  ${chalk.cyan(authUrl)}\n\nOnce authenticated, run your command again.\n\n`,
+    );
+  }
   process.exit(0);
 }
 
@@ -98,7 +107,7 @@ export function registerLogin(program: Command) {
           avatarUrl: user.avatarUrl,
         });
         if (isJSONMode()) {
-          printJSON({ username: user.username });
+          printJSON({ status: "complete", username: user.username });
         } else {
           success(`Logged in as ${chalk.bold(user.username)}`);
         }
