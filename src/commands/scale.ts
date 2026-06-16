@@ -4,13 +4,18 @@ import { api, withScope, type ResourceScope } from "../lib/api.js";
 import { getActiveServiceWithKind, resolveProjectScope } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON } from "../lib/format.js";
 
-// Discrete tiers the dashboard slider exposes (CPU_OPTIONS / MEMORY_OPTIONS in
-// lizard-client). The API and node-agent accept other values, but anything off
-// the tier list lands in DB as a string the UI slider can't snap to — the row
-// shows raw "3000m" and the slider falls to index 0. Mirror the UI tiers so the
-// CLI and dashboard stay in lockstep.
+// Discrete tiers the dashboard exposes (CPU_OPTIONS / STORAGE in lizard-client).
+// The API and node-agent accept other values, but anything off the tier list
+// lands in DB as a string the UI selector can't snap to — the row shows raw
+// "3000m" and the selector falls to index 0. Mirror the UI tiers so the CLI and
+// dashboard stay in lockstep.
 const ALLOWED_CPU_CORES = [1, 2, 4] as const;
-const ALLOWED_MEMORY_MB = [512, 1024, 2048, 4096] as const;
+// Memory is a free-range slider on the dashboard (MemorySliderRow): 1 MB step,
+// 128 MB floor, 8192 MB ceiling. Accept any whole MB in that range — no tier
+// list. Emitted k8s string stays canonical (mbToK8s → Gi when divisible by
+// 1024), so a CLI edit produces the same stored value as the slider.
+const MEM_MIN_MB = 128;
+const MEM_MAX_MB = 8192;
 // Storage tiers match the addon size selector on the dashboard. Addon-only —
 // apps don't have a resizable data volume on this path.
 const ALLOWED_STORAGE_MB = [512, 1024, 2048, 4096, 8192, 16384] as const;
@@ -19,7 +24,7 @@ const ALLOWED_STORAGE_MB = [512, 1024, 2048, 4096, 8192, 16384] as const;
  * `lizard scale` — service scaling.
  *   --replicas <n>     change replica count (1-10) — apps only
  *   --cpu <cores>      CPU cap; allowed: 1, 2, 4
- *   --memory <mb>      memory cap; allowed: 512, 1024, 2048, 4096
+ *   --memory <mb>      memory cap in MB; any whole value 128-8192
  *   --storage <mb>     data volume size; addons only, grow-only;
  *                      allowed: 512, 1024, 2048, 4096, 8192, 16384
  */
@@ -32,7 +37,7 @@ export function registerScale(program: Command) {
     .option("-p, --project <id>", "Project name, slug, or ID")
     .option("--replicas <n>", "Number of replicas (1-10), apps only", parseIntOption)
     .option("--cpu <cores>", `CPU cap, whole cores (allowed: ${ALLOWED_CPU_CORES.join(", ")})`, parseIntOption)
-    .option("--memory <mb>", `Memory cap in MB (allowed: ${ALLOWED_MEMORY_MB.join(", ")})`, parseIntOption)
+    .option("--memory <mb>", `Memory cap in MB (${MEM_MIN_MB}-${MEM_MAX_MB}, 1 MB steps)`, parseIntOption)
     .option("--storage <mb>", `Data volume size in MB, addons only, grow-only (allowed: ${ALLOWED_STORAGE_MB.join(", ")})`, parseIntOption)
     .action(async (serviceArg: string | undefined, opts, _cmd) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);
@@ -55,9 +60,9 @@ export function registerScale(program: Command) {
           `--cpu ${opts.cpu} not supported. Allowed: ${ALLOWED_CPU_CORES.join(", ")} cores.`,
         );
       }
-      if (opts.memory !== undefined && !(ALLOWED_MEMORY_MB as readonly number[]).includes(opts.memory)) {
+      if (opts.memory !== undefined && (opts.memory < MEM_MIN_MB || opts.memory > MEM_MAX_MB)) {
         throw new Error(
-          `--memory ${opts.memory} not supported. Allowed: ${ALLOWED_MEMORY_MB.join(", ")} MB.`,
+          `--memory ${opts.memory} out of range. Allowed: ${MEM_MIN_MB}-${MEM_MAX_MB} MB.`,
         );
       }
       if (opts.storage !== undefined && !(ALLOWED_STORAGE_MB as readonly number[]).includes(opts.storage)) {
