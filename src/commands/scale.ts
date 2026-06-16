@@ -7,9 +7,9 @@ import { success, isJSONMode, printJSON } from "../lib/format.js";
 // Discrete tiers the dashboard exposes (CPU_OPTIONS / STORAGE in lizard-client).
 // The API and node-agent accept other values, but anything off the tier list
 // lands in DB as a string the UI selector can't snap to — the row shows raw
-// "3000m" and the selector falls to index 0. Mirror the UI tiers so the CLI and
+// "1500m" and the selector falls to index 0. Mirror the UI tiers so the CLI and
 // dashboard stay in lockstep.
-const ALLOWED_CPU_CORES = [1, 2, 4] as const;
+const ALLOWED_CPU_CORES = [1, 2, 3, 4] as const;
 // Memory is a free-range slider on the dashboard (MemorySliderRow): 1 MB step,
 // 128 MB floor, 8192 MB ceiling. Accept any whole MB in that range — no tier
 // list. Emitted k8s string stays canonical (mbToK8s → Gi when divisible by
@@ -23,7 +23,7 @@ const ALLOWED_STORAGE_MB = [512, 1024, 2048, 4096, 8192, 16384] as const;
 /**
  * `lizard scale` — service scaling.
  *   --replicas <n>     change replica count (1-10) — apps only
- *   --cpu <cores>      CPU cap; allowed: 1, 2, 4
+ *   --cpu <cores>      CPU cap; allowed: 1, 2, 3, 4
  *   --memory <mb>      memory cap in MB; any whole value 128-8192
  *   --storage <mb>     data volume size; addons only, grow-only;
  *                      allowed: 512, 1024, 2048, 4096, 8192, 16384
