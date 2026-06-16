@@ -1,5 +1,10 @@
 import { describe, test, expect } from "vitest";
-import { withQuery, withScope } from "../../src/lib/api.js";
+import {
+  withQuery,
+  withScope,
+  APIError,
+  isProjectDeletedError,
+} from "../../src/lib/api.js";
 
 describe("withQuery", () => {
   test("returns path unchanged when no params", () => {
@@ -62,5 +67,41 @@ describe("withScope", () => {
     expect(
       withScope("/api/projects/X/apps", { workspaceId: null }),
     ).toBe("/api/projects/X/apps");
+  });
+});
+
+describe("isProjectDeletedError", () => {
+  const guardBody = {
+    error: "Project is being deleted",
+    message:
+      "This project is in trash and cannot be modified. Restore it before making changes.",
+  };
+
+  test("matches the trashed-project write-guard 409", () => {
+    expect(
+      isProjectDeletedError(
+        new APIError(409, "Project is being deleted", "", guardBody),
+      ),
+    ).toBe(true);
+  });
+
+  test("does not match a configRevision optimistic-concurrency 409", () => {
+    const conflict = new APIError(409, "Config revision conflict", "", {
+      error: "configRevision mismatch",
+    });
+    expect(isProjectDeletedError(conflict)).toBe(false);
+  });
+
+  test("does not match other statuses, even with the same body", () => {
+    expect(
+      isProjectDeletedError(new APIError(404, "x", "", guardBody)),
+    ).toBe(false);
+  });
+
+  test("does not match non-APIError values", () => {
+    expect(isProjectDeletedError(new Error("Project is being deleted"))).toBe(
+      false,
+    );
+    expect(isProjectDeletedError(null)).toBe(false);
   });
 });

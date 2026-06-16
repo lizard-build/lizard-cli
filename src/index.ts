@@ -4,7 +4,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
 import { requireAuth, isLoggedIn } from "./lib/auth.js";
-import { setBaseURL, setAccessToken, APIError } from "./lib/api.js";
+import { setBaseURL, setAccessToken, APIError, isProjectDeletedError } from "./lib/api.js";
 import { checkForUpdateInBackground, runBackgroundUpdate, CURRENT_VERSION } from "./lib/updater.js";
 
 const BANNER = chalk.rgb(16, 185, 129)(
@@ -359,10 +359,15 @@ async function main() {
       process.exit(exitCode);
     }
 
-    const msg = err.message || String(err);
+    // Project moved to trash: the backend rejects every write to it. Surface a
+    // clear next step instead of the raw "Project is being deleted" 409.
+    const projectDeleted = isProjectDeletedError(err);
+    const msg = projectDeleted
+      ? "This project is being deleted — create a new one with `lizard init`."
+      : err.message || String(err);
     const apiErr = err instanceof APIError ? err : undefined;
     const status = apiErr?.status;
-    const code = apiErr?.code || err.code || "ERROR";
+    const code = projectDeleted ? "PROJECT_DELETED" : apiErr?.code || err.code || "ERROR";
 
     if (isJSONMode()) {
       console.log(

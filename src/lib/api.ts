@@ -74,6 +74,19 @@ export function isAuthError(err: unknown): boolean {
   return err instanceof APIError && (err.status === 401 || err.status === 403);
 }
 
+/**
+ * True when the error is the platform's write-guard rejection for a project
+ * that has been moved to trash (soft-deleted). The backend returns 409 with
+ * `error: "Project is being deleted"`. We match on that signature — not on the
+ * bare 409 — because `service set` also returns 409 for `configRevision`
+ * optimistic-concurrency conflicts, which must stay a retryable conflict.
+ */
+export function isProjectDeletedError(err: unknown): err is APIError {
+  if (!(err instanceof APIError) || err.status !== 409) return false;
+  const body = err.body as { error?: string } | null;
+  return body?.error === "Project is being deleted";
+}
+
 async function request<T = any>(
   method: string,
   path: string,
