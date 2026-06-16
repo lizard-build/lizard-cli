@@ -184,8 +184,15 @@ Default to service-scope. `--global` puts the value into `process.env` of every 
 
 Rules:
 
+- Check first: `lizard secrets list` (+ `--global`) before set/update — avoid creating a duplicate or shadowing an existing key (service scope wins over global; see [Precedence](#precedence-last-writer-wins)).
 - Default — service-scope: `lizard secrets set KEY=v --service <svc>` per consumer. For addon DSNs, bind on each consumer with `lizard secrets set DATABASE_URL='${{postgres.DATABASE_URL}}' --service <svc>` (no separate `env` command — refs are interpolated at deploy time wherever they appear) — rotation still happens once on the addon, every reference updates.
 - `--global` only for non-secrets and provably-public values: `LOG_LEVEL`, `NODE_ENV`, feature flags, frontend `SENTRY_DSN`. If unsure whether a value is a secret, treat it as one. A compromised service reads its own env; broader scope = more credentials exposed for no reason.
+
+### Applying an env change
+
+- Runtime vars/secrets → pushed live via SIGUSR1, **no restart**.
+- `VITE_*` / `NEXT_PUBLIC_*` (build-time baked) → `lizard redeploy --service <svc>`; a plain restart won't pick them up.
+- Verify the consumer got it: `lizard ssh --service <svc> -- env`.
 
 ## Managed addons
 
