@@ -467,7 +467,8 @@ async function fetchPeriodUsage(projectId: string, workspaceId: string): Promise
       estimatedUsd: objCost > 0 ? objCost * linearFactor : 0,
     },
   ];
-  const rows = allRows.filter((r) => r.key === "object" || r.costUsd > 0 || r.usage > 0);
+  // Always show every resource row, even when usage and cost are still 0.
+  const rows = allRows;
 
   return {
     periodStart: summary.periodStart,
