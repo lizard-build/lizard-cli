@@ -105,19 +105,9 @@ export function registerDomain(program: Command) {
           throw err;
         });
 
-      if (isJSONMode()) {
-        printJSON(result);
-        return;
-      }
-
-      // Custom domain — print verification + DNS instructions.
-      // Names are shown relative to the registrable domain (what most
-      // provider UIs expect); a note gives the FQDN form for raw zones.
-      success(`Custom domain ${chalk.cyan(hostname)} registered (pending verification)`);
-      console.log();
-      console.log("  Add these DNS records at your provider:");
-      console.log();
-
+      // Derive DNS records once, shared by both JSON and human output.
+      // Names are relative to the registrable domain (what most provider
+      // UIs expect); `fqdn` carries the full form for raw zones.
       const labels = hostname.split(".");
       const baseDomain = labels.length > 2 ? labels.slice(-2).join(".") : hostname;
       const relativeName = (full: string): string =>
@@ -128,19 +118,42 @@ export function registerDomain(program: Command) {
             : full;
 
       const txtFqdn = result.txtRecord || `_lizard-verify.${hostname}`;
-      const rows: Array<[string, string, string]> = [
-        ["TXT", relativeName(txtFqdn), result.txtValue || ""],
+      const dnsRecords = [
+        {
+          type: "TXT",
+          name: relativeName(txtFqdn),
+          fqdn: txtFqdn,
+          value: result.txtValue || "",
+        },
+        ...(result.cnameTarget
+          ? [
+              {
+                type: "CNAME",
+                name: relativeName(hostname),
+                fqdn: hostname,
+                value: result.cnameTarget,
+              },
+            ]
+          : []),
       ];
-      if (result.cnameTarget) {
-        rows.push(["CNAME", relativeName(hostname), result.cnameTarget]);
+
+      if (isJSONMode()) {
+        printJSON({ ...result, baseDomain, dnsRecords });
+        return;
       }
 
-      const typeW = Math.max("TYPE".length, ...rows.map((r) => r[0].length));
-      const nameW = Math.max("NAME".length, ...rows.map((r) => r[1].length));
+      // Custom domain — print verification + DNS instructions.
+      success(`Custom domain ${chalk.cyan(hostname)} registered (pending verification)`);
+      console.log();
+      console.log("  Add these DNS records at your provider:");
+      console.log();
+
+      const typeW = Math.max("TYPE".length, ...dnsRecords.map((r) => r.type.length));
+      const nameW = Math.max("NAME".length, ...dnsRecords.map((r) => r.name.length));
       const pad = (s: string, w: number) => s + " ".repeat(w - s.length);
 
       console.log("    " + chalk.dim(`${pad("TYPE", typeW)}  ${pad("NAME", nameW)}  VALUE`));
-      for (const [type, name, value] of rows) {
+      for (const { type, name, value } of dnsRecords) {
         console.log(`    ${pad(type, typeW)}  ${pad(name, nameW)}  ${chalk.cyan(value)}`);
       }
       console.log();
