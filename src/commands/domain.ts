@@ -110,24 +110,52 @@ export function registerDomain(program: Command) {
         return;
       }
 
-      // Custom domain — print verification + DNS instructions
+      // Custom domain — print verification + DNS instructions.
+      // Names are shown relative to the registrable domain (what most
+      // provider UIs expect); a note gives the FQDN form for raw zones.
       success(`Custom domain ${chalk.cyan(hostname)} registered (pending verification)`);
       console.log();
-      console.log(chalk.bold("1) Verify ownership — add this TXT record at your DNS provider:"));
-      console.log(`     ${chalk.dim("Name: ")}${chalk.cyan(result.txtRecord || `_lizard-verify.${hostname}`)}`);
-      console.log(`     ${chalk.dim("Value:")} ${chalk.cyan(result.txtValue || "")}`);
+      console.log("  Add these DNS records at your provider:");
       console.log();
+
+      const labels = hostname.split(".");
+      const baseDomain = labels.length > 2 ? labels.slice(-2).join(".") : hostname;
+      const relativeName = (full: string): string =>
+        full === baseDomain
+          ? "@"
+          : full.endsWith(`.${baseDomain}`)
+            ? full.slice(0, -(baseDomain.length + 1))
+            : full;
+
+      const txtFqdn = result.txtRecord || `_lizard-verify.${hostname}`;
+      const rows: Array<[string, string, string]> = [
+        ["TXT", relativeName(txtFqdn), result.txtValue || ""],
+      ];
       if (result.cnameTarget) {
-        console.log(chalk.bold("2) Point traffic — add this CNAME record:"));
-        console.log(`     ${chalk.dim("Name: ")}${chalk.cyan(hostname)}`);
-        console.log(`     ${chalk.dim("Value:")} ${chalk.cyan(result.cnameTarget)}`);
-        console.log(chalk.dim(`     (${result.cnameTarget} is a multi-A record across all load balancers — no IP to track.)`));
-        console.log();
+        rows.push(["CNAME", relativeName(hostname), result.cnameTarget]);
       }
-      console.log(chalk.bold("3) Once both records propagate, run:"));
-      console.log(`     ${chalk.cyan(`lizard domain verify ${hostname}`)}`);
+
+      const typeW = Math.max("TYPE".length, ...rows.map((r) => r[0].length));
+      const nameW = Math.max("NAME".length, ...rows.map((r) => r[1].length));
+      const pad = (s: string, w: number) => s + " ".repeat(w - s.length);
+
+      console.log("    " + chalk.dim(`${pad("TYPE", typeW)}  ${pad("NAME", nameW)}  VALUE`));
+      for (const [type, name, value] of rows) {
+        console.log(`    ${pad(type, typeW)}  ${pad(name, nameW)}  ${chalk.cyan(value)}`);
+      }
       console.log();
-      console.log(chalk.dim("HTTPS certificate will be issued automatically by Let's Encrypt on first request."));
+
+      console.log(chalk.dim(`    Names are relative to ${baseDomain}. If your provider asks for a full`));
+      if (result.cnameTarget) {
+        console.log(chalk.dim(`    name, use ${txtFqdn} and ${hostname}.`));
+        console.log(chalk.dim(`    (${result.cnameTarget} is a multi-A record across all load balancers.)`));
+      } else {
+        console.log(chalk.dim(`    name, use ${txtFqdn}.`));
+      }
+      console.log();
+
+      console.log(`  Then run:  ${chalk.cyan(`lizard domain verify ${hostname}`)}`);
+      console.log(chalk.dim("  HTTPS is issued automatically by Let's Encrypt on first request."));
     });
 
   // Subcommands intentionally don't redeclare -s/-p: Commander 14 binds a
