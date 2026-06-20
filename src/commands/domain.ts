@@ -161,7 +161,6 @@ export function registerDomain(program: Command) {
       console.log(chalk.dim(`    Names are relative to ${baseDomain}. If your provider asks for a full`));
       if (result.cnameTarget) {
         console.log(chalk.dim(`    name, use ${txtFqdn} and ${hostname}.`));
-        console.log(chalk.dim(`    (${result.cnameTarget} is a multi-A record across all load balancers.)`));
       } else {
         console.log(chalk.dim(`    name, use ${txtFqdn}.`));
       }
