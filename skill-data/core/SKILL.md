@@ -94,7 +94,16 @@ Builds run on the platform's build nodes (no local Docker needed). When a build 
 
 ## Deploying
 
-First question for a new service: upload vs git repo. Default to git when the user has a remote; fall back to upload for quick iteration or no-remote situations.
+First question for a new service: upload vs git repo. **Always check for a git remote before reaching for `up`** — the CLI never auto-detects one, so you must do it yourself:
+
+```
+git remote get-url origin
+```
+
+- **Exit 0 with a GitHub URL → use the git-source path below**, not `up`. Parse `owner/repo` from the URL and run `lizard add -r owner/repo`. This is strongly preferred: pushes auto-redeploy via webhook, and there's no re-upload on every change.
+- **No remote / non-GitHub / not a git repo → use tarball upload (`lizard up`).** This is the fallback for quick local iteration or no-remote situations, not the default.
+
+`lizard up` always works regardless of git state, which makes it the path of least resistance — resist it when a GitHub remote exists. Only fall back to upload when the remote check actually fails. (For a private repo whose remote exists but isn't yet accessible to Lizard, run `lizard git connect` to install the GitHub App, then use the git-source path — don't silently downgrade to a tarball.)
 
 ### Git-source deploy (preferred when there's a remote)
 
