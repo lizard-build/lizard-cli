@@ -244,7 +244,11 @@ export function registerDomain(program: Command) {
         .catch((err: any) => {
           if (err?.status === 404) {
             throw new Error(
-              `No pending verification for ${hostname}. Run \`lizard domain ${hostname}\` first.`,
+              `No pending verification for ${hostname} on service "${service.name}".\n` +
+                `Domains are verified against the same service they were registered on.\n` +
+                `  • If you registered it on another service, re-run with -s: ` +
+                `lizard domain verify ${hostname} -s <service>\n` +
+                `  • If you haven't registered it yet, run: lizard domain ${hostname} -s ${service.name}`,
             );
           }
           throw err;
