@@ -22,6 +22,24 @@ const BANNER = chalk.rgb(16, 185, 129)(
   ].join("\n"),
 );
 
+// Pointer shown at the top of `lizard --help` (and mirrored in the --help --json
+// schema dump). Steers AI agents to the version-matched embedded skill instead
+// of guessing commands from flag docs alone.
+const AGENTS_HELP = [
+  chalk.bold("Start here (for AI agents):"),
+  "  " + chalk.cyan("lizard skills get core"),
+  "",
+  chalk.dim(
+    "  Skills ship with the CLI (always version-matched) and cover the full app",
+  ),
+  chalk.dim(
+    "  lifecycle — deploy, link, addons, logs, scaling, secrets, domains — with",
+  ),
+  chalk.dim(
+    "  copy-paste examples. Prefer this over guessing commands from flag docs alone.",
+  ),
+].join("\n");
+
 // Commands (alphabetical by command name)
 import { registerAdd } from "./commands/add.js";
 import { registerConfig } from "./commands/config.js";
@@ -61,7 +79,7 @@ program
   .name("lizard")
   .description("Lizard CLI — deploy and manage apps on Lizard")
   .version(CURRENT_VERSION)
-  .addHelpText("before", BANNER + "\n")
+  .addHelpText("before", BANNER + "\n\n" + AGENTS_HELP + "\n")
   .configureHelp({
     subcommandTerm: (cmd) => {
       const alias = cmd.aliases()[0];
@@ -314,6 +332,10 @@ async function main() {
     const out = {
       cli: "lizard",
       version: CURRENT_VERSION,
+      agents: {
+        start: "lizard skills get core",
+        note: "Skills ship with this CLI version and cover the full app lifecycle (deploy, link, addons, logs, scaling, secrets, domains) with copy-paste examples. Prefer this over guessing commands from flag docs alone.",
+      },
       command: dumpCommand(target),
       globalOptions: isRoot
         ? []
