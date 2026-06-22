@@ -11,6 +11,7 @@ interface DomainResponse {
   hostname: string;
   generated?: boolean;
   verified?: boolean;
+  autoVerified?: boolean;
   txtRecord?: string;
   txtValue?: string;
   cnameTarget?: string;
@@ -117,14 +118,21 @@ export function registerDomain(program: Command) {
             ? full.slice(0, -(baseDomain.length + 1))
             : full;
 
+      // When the apex is already verified for this account the API attaches the
+      // domain immediately (autoVerified) and returns no TXT challenge — so the
+      // TXT row only belongs in the output when there's actually a token.
       const txtFqdn = result.txtRecord || `_lizard-verify.${hostname}`;
       const dnsRecords = [
-        {
-          type: "TXT",
-          name: relativeName(txtFqdn),
-          fqdn: txtFqdn,
-          value: result.txtValue || "",
-        },
+        ...(result.txtValue
+          ? [
+              {
+                type: "TXT",
+                name: relativeName(txtFqdn),
+                fqdn: txtFqdn,
+                value: result.txtValue,
+              },
+            ]
+          : []),
         ...(result.cnameTarget
           ? [
               {
@@ -142,10 +150,18 @@ export function registerDomain(program: Command) {
         return;
       }
 
-      // Custom domain — print verification + DNS instructions.
-      success(`Custom domain ${chalk.cyan(hostname)} registered (pending verification)`);
-      console.log();
-      console.log("  Add these DNS records at your provider:");
+      const alreadyVerified = result.autoVerified || result.verified;
+
+      // Custom domain — header reflects whether ownership still needs proving.
+      if (alreadyVerified) {
+        success(`Custom domain ${chalk.cyan(hostname)} attached (ownership already verified)`);
+        console.log();
+        console.log("  Add this DNS record at your provider to route traffic:");
+      } else {
+        success(`Custom domain ${chalk.cyan(hostname)} registered (pending verification)`);
+        console.log();
+        console.log("  Add these DNS records at your provider:");
+      }
       console.log();
 
       const typeW = Math.max("TYPE".length, ...dnsRecords.map((r) => r.type.length));
@@ -159,14 +175,20 @@ export function registerDomain(program: Command) {
       console.log();
 
       console.log(chalk.dim(`    Names are relative to ${baseDomain}. If your provider asks for a full`));
-      if (result.cnameTarget) {
+      if (alreadyVerified) {
+        console.log(chalk.dim(`    name, use ${hostname}.`));
+      } else if (result.cnameTarget) {
         console.log(chalk.dim(`    name, use ${txtFqdn} and ${hostname}.`));
       } else {
         console.log(chalk.dim(`    name, use ${txtFqdn}.`));
       }
       console.log();
 
-      console.log(`  Then run:  ${chalk.cyan(`lizard domain verify ${hostname}`)}`);
+      if (alreadyVerified) {
+        console.log(chalk.dim("  Domain is already active — no verification step needed."));
+      } else {
+        console.log(`  Then run:  ${chalk.cyan(`lizard domain verify ${hostname}`)}`);
+      }
       console.log(chalk.dim("  HTTPS is issued automatically by Let's Encrypt on first request."));
     });
 

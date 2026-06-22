@@ -70,28 +70,85 @@ export function registerDomain(program) {
             }
             throw err;
         });
+        // Derive DNS records once, shared by both JSON and human output.
+        // Names are relative to the registrable domain (what most provider
+        // UIs expect); `fqdn` carries the full form for raw zones.
+        const labels = hostname.split(".");
+        const baseDomain = labels.length > 2 ? labels.slice(-2).join(".") : hostname;
+        const relativeName = (full) => full === baseDomain
+            ? "@"
+            : full.endsWith(`.${baseDomain}`)
+                ? full.slice(0, -(baseDomain.length + 1))
+                : full;
+        // When the apex is already verified for this account the API attaches the
+        // domain immediately (autoVerified) and returns no TXT challenge — so the
+        // TXT row only belongs in the output when there's actually a token.
+        const txtFqdn = result.txtRecord || `_lizard-verify.${hostname}`;
+        const dnsRecords = [
+            ...(result.txtValue
+                ? [
+                    {
+                        type: "TXT",
+                        name: relativeName(txtFqdn),
+                        fqdn: txtFqdn,
+                        value: result.txtValue,
+                    },
+                ]
+                : []),
+            ...(result.cnameTarget
+                ? [
+                    {
+                        type: "CNAME",
+                        name: relativeName(hostname),
+                        fqdn: hostname,
+                        value: result.cnameTarget,
+                    },
+                ]
+                : []),
+        ];
         if (isJSONMode()) {
-            printJSON(result);
+            printJSON({ ...result, baseDomain, dnsRecords });
             return;
         }
-        // Custom domain — print verification + DNS instructions
-        success(`Custom domain ${chalk.cyan(hostname)} registered (pending verification)`);
-        console.log();
-        console.log(chalk.bold("1) Verify ownership — add this TXT record at your DNS provider:"));
-        console.log(`     ${chalk.dim("Name: ")}${chalk.cyan(result.txtRecord || `_lizard-verify.${hostname}`)}`);
-        console.log(`     ${chalk.dim("Value:")} ${chalk.cyan(result.txtValue || "")}`);
-        console.log();
-        if (result.cnameTarget) {
-            console.log(chalk.bold("2) Point traffic — add this CNAME record:"));
-            console.log(`     ${chalk.dim("Name: ")}${chalk.cyan(hostname)}`);
-            console.log(`     ${chalk.dim("Value:")} ${chalk.cyan(result.cnameTarget)}`);
-            console.log(chalk.dim(`     (${result.cnameTarget} is a multi-A record across all load balancers — no IP to track.)`));
+        const alreadyVerified = result.autoVerified || result.verified;
+        // Custom domain — header reflects whether ownership still needs proving.
+        if (alreadyVerified) {
+            success(`Custom domain ${chalk.cyan(hostname)} attached (ownership already verified)`);
             console.log();
+            console.log("  Add this DNS record at your provider to route traffic:");
         }
-        console.log(chalk.bold("3) Once both records propagate, run:"));
-        console.log(`     ${chalk.cyan(`lizard domain verify ${hostname}`)}`);
+        else {
+            success(`Custom domain ${chalk.cyan(hostname)} registered (pending verification)`);
+            console.log();
+            console.log("  Add these DNS records at your provider:");
+        }
         console.log();
-        console.log(chalk.dim("HTTPS certificate will be issued automatically by Let's Encrypt on first request."));
+        const typeW = Math.max("TYPE".length, ...dnsRecords.map((r) => r.type.length));
+        const nameW = Math.max("NAME".length, ...dnsRecords.map((r) => r.name.length));
+        const pad = (s, w) => s + " ".repeat(w - s.length);
+        console.log("    " + chalk.dim(`${pad("TYPE", typeW)}  ${pad("NAME", nameW)}  VALUE`));
+        for (const { type, name, value } of dnsRecords) {
+            console.log(`    ${pad(type, typeW)}  ${pad(name, nameW)}  ${chalk.cyan(value)}`);
+        }
+        console.log();
+        console.log(chalk.dim(`    Names are relative to ${baseDomain}. If your provider asks for a full`));
+        if (alreadyVerified) {
+            console.log(chalk.dim(`    name, use ${hostname}.`));
+        }
+        else if (result.cnameTarget) {
+            console.log(chalk.dim(`    name, use ${txtFqdn} and ${hostname}.`));
+        }
+        else {
+            console.log(chalk.dim(`    name, use ${txtFqdn}.`));
+        }
+        console.log();
+        if (alreadyVerified) {
+            console.log(chalk.dim("  Domain is already active — no verification step needed."));
+        }
+        else {
+            console.log(`  Then run:  ${chalk.cyan(`lizard domain verify ${hostname}`)}`);
+        }
+        console.log(chalk.dim("  HTTPS is issued automatically by Let's Encrypt on first request."));
     });
     // Subcommands intentionally don't redeclare -s/-p: Commander 14 binds a
     // duplicate short flag to the parent, leaving the subcommand action with
