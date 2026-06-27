@@ -40,6 +40,24 @@ const AGENTS_HELP = [
   ),
 ].join("\n");
 
+// Compact form of the same pointer, shown on every subcommand's `--help` so the
+// per-command flag docs never read as the whole story. Mirrors the `agents`
+// block that `--help --json` already emits for every command; one tight line so
+// it sits above a subcommand's Usage without crowding it.
+const AGENTS_HELP_COMPACT =
+  chalk.bold("For AI agents:") +
+  " run " +
+  chalk.cyan("lizard skills get core") +
+  chalk.dim(" for version-matched usage and examples.");
+
+/** Attach the compact agents pointer to every (nested) subcommand's help. */
+function addAgentsPointerToSubcommands(cmd: Command) {
+  for (const sub of cmd.commands) {
+    sub.addHelpText("before", AGENTS_HELP_COMPACT + "\n");
+    addAgentsPointerToSubcommands(sub);
+  }
+}
+
 // Commands (alphabetical by command name)
 import { registerAdd } from "./commands/add.js";
 import { registerConfig } from "./commands/config.js";
@@ -162,6 +180,10 @@ registerUp(program);
 registerUpgrade(program);
 registerWhoami(program);
 registerWorkspace(program);
+
+// Root help already carries the full AGENTS_HELP block; mirror a compact pointer
+// onto every subcommand so `lizard <cmd> --help` matches `--help --json` parity.
+addAgentsPointerToSubcommands(program);
 
 const EXIT_CODES: Record<string, string> = {
   "0": "success",

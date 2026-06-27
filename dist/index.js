@@ -3,7 +3,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
 import { requireAuth } from "./lib/auth.js";
-import { setBaseURL, setAccessToken, APIError } from "./lib/api.js";
+import { setBaseURL, setAccessToken, APIError, isProjectDeletedError } from "./lib/api.js";
 import { checkForUpdateInBackground, runBackgroundUpdate, CURRENT_VERSION } from "./lib/updater.js";
 const BANNER = chalk.rgb(16, 185, 129)([
     "╔═══════════════════════════════════════════════════╗",
@@ -17,6 +17,32 @@ const BANNER = chalk.rgb(16, 185, 129)([
     "║                                                   ║",
     "╚═══════════════════════════════════════════════════╝",
 ].join("\n"));
+// Pointer shown at the top of `lizard --help` (and mirrored in the --help --json
+// schema dump). Steers AI agents to the version-matched embedded skill instead
+// of guessing commands from flag docs alone.
+const AGENTS_HELP = [
+    chalk.bold("Start here (for AI agents):"),
+    "  " + chalk.cyan("lizard skills get core"),
+    "",
+    chalk.dim("  Skills ship with the CLI (always version-matched) and cover the full app"),
+    chalk.dim("  lifecycle — deploy, link, addons, logs, scaling, secrets, domains — with"),
+    chalk.dim("  copy-paste examples. Prefer this over guessing commands from flag docs alone."),
+].join("\n");
+// Compact form of the same pointer, shown on every subcommand's `--help` so the
+// per-command flag docs never read as the whole story. Mirrors the `agents`
+// block that `--help --json` already emits for every command; one tight line so
+// it sits above a subcommand's Usage without crowding it.
+const AGENTS_HELP_COMPACT = chalk.bold("For AI agents:") +
+    " run " +
+    chalk.cyan("lizard skills get core") +
+    chalk.dim(" for version-matched usage and examples.");
+/** Attach the compact agents pointer to every (nested) subcommand's help. */
+function addAgentsPointerToSubcommands(cmd) {
+    for (const sub of cmd.commands) {
+        sub.addHelpText("before", AGENTS_HELP_COMPACT + "\n");
+        addAgentsPointerToSubcommands(sub);
+    }
+}
 // Commands (alphabetical by command name)
 import { registerAdd } from "./commands/add.js";
 import { registerConfig } from "./commands/config.js";
@@ -54,7 +80,7 @@ program
     .name("lizard")
     .description("Lizard CLI — deploy and manage apps on Lizard")
     .version(CURRENT_VERSION)
-    .addHelpText("before", BANNER + "\n")
+    .addHelpText("before", BANNER + "\n\n" + AGENTS_HELP + "\n")
     .configureHelp({
     subcommandTerm: (cmd) => {
         const alias = cmd.aliases()[0];
@@ -131,6 +157,9 @@ registerUp(program);
 registerUpgrade(program);
 registerWhoami(program);
 registerWorkspace(program);
+// Root help already carries the full AGENTS_HELP block; mirror a compact pointer
+// onto every subcommand so `lizard <cmd> --help` matches `--help --json` parity.
+addAgentsPointerToSubcommands(program);
 const EXIT_CODES = {
     "0": "success",
     "1": "generic error",
@@ -281,6 +310,10 @@ async function main() {
         const out = {
             cli: "lizard",
             version: CURRENT_VERSION,
+            agents: {
+                start: "lizard skills get core",
+                note: "Skills ship with this CLI version and cover the full app lifecycle (deploy, link, addons, logs, scaling, secrets, domains) with copy-paste examples. Prefer this over guessing commands from flag docs alone.",
+            },
             command: dumpCommand(target),
             globalOptions: isRoot
                 ? []
@@ -318,10 +351,15 @@ async function main() {
             }
             process.exit(exitCode);
         }
-        const msg = err.message || String(err);
+        // Project moved to trash: the backend rejects every write to it. Surface a
+        // clear next step instead of the raw "Project is being deleted" 409.
+        const projectDeleted = isProjectDeletedError(err);
+        const msg = projectDeleted
+            ? "This project is being deleted — create a new one with `lizard init`."
+            : err.message || String(err);
         const apiErr = err instanceof APIError ? err : undefined;
         const status = apiErr?.status;
-        const code = apiErr?.code || err.code || "ERROR";
+        const code = projectDeleted ? "PROJECT_DELETED" : apiErr?.code || err.code || "ERROR";
         if (isJSONMode()) {
             console.log(JSON.stringify({
                 error: {
