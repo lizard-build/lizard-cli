@@ -20,6 +20,7 @@ export function registerDomain(program) {
         .option("-s, --service <name>", "Service name or ID")
         .option("-p, --project <id>", "Project name, slug, or ID")
         .option("--port <n>", "Port to expose", parseIntOption)
+        .option("-f, --force", "Move the domain here if it's attached to another of your services")
         .action(async (hostname, opts, _cmd) => {
         const projectId = await resolveProjectId(opts.project);
         const service = await getActiveService(opts.service, projectId);
@@ -62,11 +63,23 @@ export function registerDomain(program) {
             .post(`/api/apps/${service.id}/domains`, {
             hostname,
             port: opts.port,
+            force: opts.force,
         })
             .catch((err) => {
             if (err?.status === 404) {
                 throw new Error("Domain endpoint not yet implemented. The API needs " +
                     "`POST /api/apps/{id}/domains` with body { hostname }.");
+            }
+            // Domain already in use. When the server says it's reclaimable
+            // (you own the holding app, or DNS-verified the apex) point the
+            // user at --force; otherwise let the server's message surface.
+            if (err?.status === 409) {
+                const b = (err.body ?? {});
+                if (b.canReclaim) {
+                    throw new Error(`${b.error ?? "Domain already in use"}\n` +
+                        `  Run again with --force to move it here: lizard domain ${hostname} --force` +
+                        (opts.service ? ` -s ${opts.service}` : ""));
+                }
             }
             throw err;
         });
@@ -108,6 +121,12 @@ export function registerDomain(program) {
         ];
         if (isJSONMode()) {
             printJSON({ ...result, baseDomain, dnsRecords });
+            return;
+        }
+        // Moved from another of the user's services — ownership was already
+        // proven, so there are no DNS records to show. Short, clear, done.
+        if (result.moved) {
+            success(`Custom domain ${chalk.cyan(hostname)} moved to ${service.name}`);
             return;
         }
         const alreadyVerified = result.autoVerified || result.verified;
@@ -189,7 +208,11 @@ export function registerDomain(program) {
             .post(`/api/apps/${service.id}/domains/verify`, { hostname })
             .catch((err) => {
             if (err?.status === 404) {
-                throw new Error(`No pending verification for ${hostname}. Run \`lizard domain ${hostname}\` first.`);
+                throw new Error(`No pending verification for ${hostname} on service "${service.name}".\n` +
+                    `Domains are verified against the same service they were registered on.\n` +
+                    `  • If you registered it on another service, re-run with -s: ` +
+                    `lizard domain verify ${hostname} -s <service>\n` +
+                    `  • If you haven't registered it yet, run: lizard domain ${hostname} -s ${service.name}`);
             }
             throw err;
         });

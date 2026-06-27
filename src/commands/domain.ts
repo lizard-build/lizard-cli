@@ -15,6 +15,7 @@ interface DomainResponse {
   txtRecord?: string;
   txtValue?: string;
   cnameTarget?: string;
+  moved?: boolean;
 }
 
 interface AppLite {
@@ -40,6 +41,7 @@ export function registerDomain(program: Command) {
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name, slug, or ID")
     .option("--port <n>", "Port to expose", parseIntOption)
+    .option("-f, --force", "Move the domain here if it's attached to another of your services")
     .action(async (hostname: string | undefined, opts, _cmd) => {
       const projectId = await resolveProjectId(opts.project);
       const service = await getActiveService(opts.service, projectId);
@@ -95,6 +97,7 @@ export function registerDomain(program: Command) {
         .post<DomainResponse>(`/api/apps/${service.id}/domains`, {
           hostname,
           port: opts.port,
+          force: opts.force,
         })
         .catch((err: any) => {
           if (err?.status === 404) {
@@ -102,6 +105,19 @@ export function registerDomain(program: Command) {
               "Domain endpoint not yet implemented. The API needs " +
                 "`POST /api/apps/{id}/domains` with body { hostname }.",
             );
+          }
+          // Domain already in use. When the server says it's reclaimable
+          // (you own the holding app, or DNS-verified the apex) point the
+          // user at --force; otherwise let the server's message surface.
+          if (err?.status === 409) {
+            const b = (err.body ?? {}) as { error?: string; canReclaim?: boolean };
+            if (b.canReclaim) {
+              throw new Error(
+                `${b.error ?? "Domain already in use"}\n` +
+                  `  Run again with --force to move it here: lizard domain ${hostname} --force` +
+                  (opts.service ? ` -s ${opts.service}` : ""),
+              );
+            }
           }
           throw err;
         });
@@ -147,6 +163,13 @@ export function registerDomain(program: Command) {
 
       if (isJSONMode()) {
         printJSON({ ...result, baseDomain, dnsRecords });
+        return;
+      }
+
+      // Moved from another of the user's services — ownership was already
+      // proven, so there are no DNS records to show. Short, clear, done.
+      if (result.moved) {
+        success(`Custom domain ${chalk.cyan(hostname)} moved to ${service.name}`);
         return;
       }
 

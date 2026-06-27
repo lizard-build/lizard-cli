@@ -221,7 +221,7 @@ Multi-step requests follow natural chains. Return one unified response, don't fa
 - Add object storage to a service — `lizard add s3` → reference `${{s3.S3_ENDPOINT}}`, `${{s3.S3_DEFAULT_BUCKET}}`, `${{s3.S3_ACCESS_KEY_ID}}`, `${{s3.S3_SECRET_ACCESS_KEY}}`, `${{s3.S3_REGION}}` from the consumer service. Anything uploaded to the `default` bucket is publicly served at `<dashboard-host>/api/s3/<addonId>/public/default/<key>` with no extra setup. See [Managed addons](#managed-addons).
 - Wire a fresh git source on an existing service — `service set --set sourceType=github --set repoUrl=… --set branch=…` → `redeploy`.
 - Fix a failed build — `logs --build` → diagnose → fix project (user's repo) OR adjust `buildCommand` / `startCommand` via `service set` → `redeploy` → `logs` to verify.
-- Add a custom domain — `domain <host> --service <svc>` (the hostname is a positional, there is no `add` subcommand) → surface the TXT/CNAME records to the user → `domain verify <host>` once DNS propagates. Bare `domain` shows (or auto-generates) the service's current domain.
+- Add a custom domain — `domain <host> --service <svc>` (the hostname is a positional, there is no `add` subcommand) → surface the TXT/CNAME records to the user → `domain verify <host>` once DNS propagates. Bare `domain` shows (or auto-generates) the service's current domain. If the host is already attached to another of the user's services, the attach 409s with a reclaim hint — re-run with `--force` to move it here.
 
 ## Common ops
 
@@ -237,6 +237,7 @@ lizard scale --service <name> --replicas N
 lizard domain example.com --service <name>  # attach custom domain (positional, not `domain add`)
 lizard domain --json                        # show/auto-generate the service's current domain
 lizard domain verify example.com            # activate after DNS records propagate
+lizard domain example.com --service <name> --force  # move domain here from another of your services
 lizard metrics --json                       # CPU/memory/network/disk (add --cost for cost)
 lizard events --json                        # deploy history + replica status
 lizard ssh --service <name> -- <cmd>        # one-off command INSIDE the service VM (streams output, returns remote exit code)
