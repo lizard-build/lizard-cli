@@ -45,6 +45,19 @@ export function isNotFound(err) {
 export function isAuthError(err) {
     return err instanceof APIError && (err.status === 401 || err.status === 403);
 }
+/**
+ * True when the error is the platform's write-guard rejection for a project
+ * that has been moved to trash (soft-deleted). The backend returns 409 with
+ * `error: "Project is being deleted"`. We match on that signature — not on the
+ * bare 409 — because `service set` also returns 409 for `configRevision`
+ * optimistic-concurrency conflicts, which must stay a retryable conflict.
+ */
+export function isProjectDeletedError(err) {
+    if (!(err instanceof APIError) || err.status !== 409)
+        return false;
+    const body = err.body;
+    return body?.error === "Project is being deleted";
+}
 async function request(method, path, body, extraHeaders = {}) {
     const url = baseURL + path;
     const token = _accessToken || getToken();
@@ -81,12 +94,36 @@ async function request(method, path, body, extraHeaders = {}) {
         return undefined;
     return JSON.parse(text);
 }
+/** Like api.get, but returns the raw response body instead of JSON.parse-ing
+ *  it — for endpoints that reply with `text/plain` (e.g. sandbox file reads). */
+export async function getRawText(path) {
+    const url = baseURL + path;
+    const token = _accessToken || getToken();
+    const headers = { "User-Agent": USER_AGENT };
+    if (token)
+        headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(url, { method: "GET", headers });
+    if (!res.ok) {
+        let msg = res.statusText;
+        let code = "";
+        let body = null;
+        try {
+            const j = (await res.json());
+            body = j;
+            msg = j.error || j.message || msg;
+            code = j.code || "";
+        }
+        catch { }
+        throw new APIError(res.status, msg, code, body);
+    }
+    return res.text();
+}
 export const api = {
     get: (path) => request("GET", path),
     post: (path, body, headers) => request("POST", path, body, headers),
     put: (path, body) => request("PUT", path, body),
     patch: (path, body) => request("PATCH", path, body),
-    delete: (path) => request("DELETE", path),
+    delete: (path, body) => request("DELETE", path, body),
 };
 /** Compare two Redis-stream-style event ids (`<ms>-<seq>`). Returns true when
  *  `id` is at or before `last` — i.e. a replayed event we've already shown.

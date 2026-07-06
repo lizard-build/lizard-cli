@@ -1,6 +1,6 @@
 import open from "open";
 import { resolveProjectId } from "../lib/config.js";
-import { getBaseURL } from "../lib/api.js";
+import { api, getBaseURL } from "../lib/api.js";
 import { success, isJSONMode, printJSON } from "../lib/format.js";
 export function registerOpen(program) {
     program
@@ -9,7 +9,15 @@ export function registerOpen(program) {
         .option("-p, --project <id>", "Project name, slug, or ID")
         .action(async (opts) => {
         const projectId = await resolveProjectId(opts.project);
-        const url = `${getBaseURL()}/projects/${projectId}`;
+        // The dashboard routes projects as `/<workspaceSlug>/<projectSlug>` —
+        // there is no `/projects/<id>` route, so we must resolve both slugs.
+        // `/api/projects` is the only endpoint that returns workspaceSlug.
+        const projects = await api.get("/api/projects");
+        const project = projects.find((p) => p.id === projectId);
+        if (!project?.slug || !project.workspaceSlug) {
+            throw new Error("Could not resolve project URL (missing slug).");
+        }
+        const url = `${getBaseURL()}/${project.workspaceSlug}/${project.slug}`;
         // JSON / headless mode: report the URL instead of popping a browser
         if (isJSONMode()) {
             printJSON({ url, opened: false });

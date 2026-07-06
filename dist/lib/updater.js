@@ -4,7 +4,7 @@ import { Readable } from "node:stream";
 import { join, dirname } from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
-export const CURRENT_VERSION = "0.3.54";
+export const CURRENT_VERSION = "0.3.74";
 const RELEASES_API = "https://api.github.com/repos/lizard-build/lizard-cli/releases/latest";
 const RELEASE_BASE = "https://github.com/lizard-build/lizard-cli/releases/latest/download";
 /** Minimum gap between background update checks. */

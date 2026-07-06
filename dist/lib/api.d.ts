@@ -23,12 +23,23 @@ export declare class APIError extends Error {
 }
 export declare function isNotFound(err: unknown): boolean;
 export declare function isAuthError(err: unknown): boolean;
+/**
+ * True when the error is the platform's write-guard rejection for a project
+ * that has been moved to trash (soft-deleted). The backend returns 409 with
+ * `error: "Project is being deleted"`. We match on that signature — not on the
+ * bare 409 — because `service set` also returns 409 for `configRevision`
+ * optimistic-concurrency conflicts, which must stay a retryable conflict.
+ */
+export declare function isProjectDeletedError(err: unknown): err is APIError;
+/** Like api.get, but returns the raw response body instead of JSON.parse-ing
+ *  it — for endpoints that reply with `text/plain` (e.g. sandbox file reads). */
+export declare function getRawText(path: string): Promise<string>;
 export declare const api: {
     get: <T = any>(path: string) => Promise<T>;
     post: <T = any>(path: string, body?: unknown, headers?: Record<string, string>) => Promise<T>;
     put: <T = any>(path: string, body?: unknown) => Promise<T>;
     patch: <T = any>(path: string, body?: unknown) => Promise<T>;
-    delete: <T = any>(path: string) => Promise<T>;
+    delete: <T = any>(path: string, body?: unknown) => Promise<T>;
 };
 /** Stream SSE and call handler for each event. Return false to stop.
  *

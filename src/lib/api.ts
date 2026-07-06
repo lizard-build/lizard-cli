@@ -131,6 +131,30 @@ async function request<T = any>(
   return JSON.parse(text) as T;
 }
 
+/** Like api.get, but returns the raw response body instead of JSON.parse-ing
+ *  it — for endpoints that reply with `text/plain` (e.g. sandbox file reads). */
+export async function getRawText(path: string): Promise<string> {
+  const url = baseURL + path;
+  const token = _accessToken || getToken();
+  const headers: Record<string, string> = { "User-Agent": USER_AGENT };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch(url, { method: "GET", headers });
+  if (!res.ok) {
+    let msg = res.statusText;
+    let code = "";
+    let body: unknown = null;
+    try {
+      const j = (await res.json()) as any;
+      body = j;
+      msg = j.error || j.message || msg;
+      code = j.code || "";
+    } catch {}
+    throw new APIError(res.status, msg, code, body);
+  }
+  return res.text();
+}
+
 export const api = {
   get: <T = any>(path: string) => request<T>("GET", path),
   post: <T = any>(path: string, body?: unknown, headers?: Record<string, string>) =>
@@ -139,7 +163,7 @@ export const api = {
     request<T>("PUT", path, body),
   patch: <T = any>(path: string, body?: unknown) =>
     request<T>("PATCH", path, body),
-  delete: <T = any>(path: string) => request<T>("DELETE", path),
+  delete: <T = any>(path: string, body?: unknown) => request<T>("DELETE", path, body),
 };
 
 /** Compare two Redis-stream-style event ids (`<ms>-<seq>`). Returns true when

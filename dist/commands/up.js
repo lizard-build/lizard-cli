@@ -4,7 +4,7 @@ import { execSync, spawn } from "child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
-import { api, streamSSE, getBaseURL } from "../lib/api.js";
+import { api, streamSSE, getBaseURL, APIError } from "../lib/api.js";
 import { updateProjectLink } from "../lib/config.js";
 import { resolveContext, getScope } from "../lib/resolve.js";
 import { ensureLinked } from "./init.js";
@@ -137,8 +137,17 @@ async function deployFromLocal(args) {
             body: tarball.buffer,
         });
         if (!res.ok) {
+            // Parse the JSON error envelope when present so structured failures
+            // (e.g. the trashed-project write guard's 409) survive to the central
+            // handler; fall back to raw text for non-JSON bodies.
             const text = await res.text();
-            throw new Error(`Upload failed (${res.status}): ${text || res.statusText}`);
+            let parsed = null;
+            try {
+                parsed = text ? JSON.parse(text) : null;
+            }
+            catch { }
+            const detail = parsed?.error || parsed?.message || text || res.statusText;
+            throw new APIError(res.status, `Upload failed (${res.status}): ${detail}`, parsed?.code || "", parsed);
         }
         newApp = (await res.json());
         spinner.succeed(`Service ${chalk.bold(newApp.name)} ${args.existingServiceId ? "updated" : "created"}`);
