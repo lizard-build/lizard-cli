@@ -1,19 +1,21 @@
 import chalk from "chalk";
+import * as p from "@clack/prompts";
 import { Command } from "commander";
-import { api, type Workspace } from "../lib/api.js";
-import { fetchWorkspaces } from "../lib/picker.js";
-import { isJSONMode, printJSON, table, success, info } from "../lib/format.js";
+import { api, withQuery, type Workspace } from "../lib/api.js";
+import { fetchWorkspaces, resolveWorkspace } from "../lib/picker.js";
+import { isJSONMode, printJSON, table, success, info, isTTY } from "../lib/format.js";
 
 /**
- * `lizard workspace` — create and list workspaces.
+ * `lizard workspace` — create, list, and delete workspaces.
  *
- * Member management (invite/remove/rename) intentionally lives in the
- * dashboard, not here, to keep CLI surface narrow (Railway model).
+ * Delete only removes empty workspaces (no projects, no sandboxes). Member
+ * management (invite/remove/rename) intentionally lives in the dashboard, not
+ * here, to keep the CLI surface narrow (Railway model).
  */
 export function registerWorkspace(program: Command) {
   const ws = program
     .command("workspace")
-    .description("Create and list workspaces");
+    .description("Create, list, and delete workspaces");
 
   ws.command("create")
     .argument("<name>", "Workspace name")
@@ -57,5 +59,39 @@ export function registerWorkspace(program: Command) {
           w.isPersonal ? chalk.green("✓") : "",
         ]),
       );
+    });
+
+  ws.command("rm")
+    .alias("delete")
+    .argument("<name-or-id>", "Workspace name, slug, or ID")
+    .description("Delete an empty workspace")
+    .option("-y, --yes", "Skip confirmation")
+    .action(async (nameOrId: string, opts: { yes?: boolean }) => {
+      const workspace = await resolveWorkspace(nameOrId);
+
+      if (workspace.isPersonal) {
+        throw new Error("Cannot delete your personal workspace.");
+      }
+      if (workspace.role !== "owner") {
+        throw new Error("Only the workspace owner can delete it.");
+      }
+      // Empty workspaces only. Check here for a clear message; the backend
+      // enforces the same via ?requireEmpty=true and also refuses if any
+      // sandbox remains (which the CLI can't count on its own).
+      const projectCount = workspace.projectCount ?? 0;
+      if (projectCount > 0) {
+        throw new Error(
+          `Workspace "${workspace.name}" has ${projectCount} project(s). Delete them first, or use the dashboard to remove everything.`,
+        );
+      }
+
+      if (!opts.yes && isTTY() && !isJSONMode()) {
+        const ok = await p.confirm({ message: `Delete workspace ${chalk.bold(workspace.name)}?` });
+        if (p.isCancel(ok) || !ok) process.exit(5);
+      }
+
+      await api.delete(withQuery(`/api/workspaces/${workspace.id}`, { requireEmpty: true }));
+      if (isJSONMode()) printJSON({ id: workspace.id, status: "deleted" });
+      else success(`Workspace ${chalk.bold(workspace.name)} deleted`);
     });
 }
