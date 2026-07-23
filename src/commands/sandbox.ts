@@ -151,18 +151,23 @@ export function registerSandbox(program: Command) {
 
   sb.command("list")
     .alias("ls")
-    .description("List sandboxes")
-    .option("-p, --project <id>", "Only list sandboxes for this project")
+    .description("List sandboxes in the linked (or given) project")
+    .option("-p, --project <id>", "List sandboxes for this project instead of the linked one")
+    .option("--all", "List every sandbox across all your workspaces")
     .action(async (opts) => {
-      if (opts.project) {
-        const { projectId, scope } = await resolveProjectScope(opts.project);
-        const sandboxes = await api.get<SandboxRecord[]>(
-          withScope(`/api/projects/${projectId}/sandboxes`, scope),
-        );
+      // `--all` is the only way to get the workspace-wide view. Without it we
+      // scope to a project — the linked one, or `--project` — and error like
+      // `ps` when nothing is linked, so the default never leaks other members'
+      // or other projects' sandboxes.
+      if (opts.all) {
+        const sandboxes = await api.get<SandboxRecord[]>("/api/sandboxes");
         printSandboxList(sandboxes);
         return;
       }
-      const sandboxes = await api.get<SandboxRecord[]>("/api/sandboxes");
+      const { projectId, scope } = await resolveProjectScope(opts.project);
+      const sandboxes = await api.get<SandboxRecord[]>(
+        withScope(`/api/projects/${projectId}/sandboxes`, scope),
+      );
       printSandboxList(sandboxes);
     });
 
