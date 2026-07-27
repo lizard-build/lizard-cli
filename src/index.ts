@@ -412,12 +412,20 @@ async function main() {
     // Project moved to trash: the backend rejects every write to it. Surface a
     // clear next step instead of the raw "Project is being deleted" 409.
     const projectDeleted = isProjectDeletedError(err);
+    // Node's fetch (undici) throws a bare "fetch failed" and hides the real
+    // reason (ECONNREFUSED, ENOTFOUND, connect timeout…) on err.cause. Unwrap
+    // it so the user sees something actionable instead of just "fetch failed".
+    const causeDetail = err?.cause?.code || err?.cause?.message;
+    const baseMsg = err.message || String(err);
     const msg = projectDeleted
       ? "This project is being deleted — create a new one with `lizard init`."
-      : err.message || String(err);
+      : causeDetail && !baseMsg.includes(causeDetail)
+        ? `${baseMsg} (${causeDetail})`
+        : baseMsg;
     const apiErr = err instanceof APIError ? err : undefined;
     const status = apiErr?.status;
-    const code = projectDeleted ? "PROJECT_DELETED" : apiErr?.code || err.code || "ERROR";
+    const code =
+      projectDeleted ? "PROJECT_DELETED" : apiErr?.code || err.code || err?.cause?.code || "ERROR";
 
     if (isJSONMode()) {
       console.log(
@@ -445,12 +453,14 @@ async function main() {
     const isAuth = status === 401 || status === 403 || code === "NOT_AUTHENTICATED";
 
     const isNotFound = status === 404;
+    // undici wraps the socket error, so the real code lives on err.cause.
+    const netCode = err.code || err?.cause?.code;
     const isTimeout =
       status === 408 ||
       status === 504 ||
       err.name === "AbortError" ||
-      err.code === "ETIMEDOUT" ||
-      err.code === "UND_ERR_CONNECT_TIMEOUT";
+      netCode === "ETIMEDOUT" ||
+      netCode === "UND_ERR_CONNECT_TIMEOUT";
 
     if (isAuth) process.exit(2);
     if (isNotFound) process.exit(3);
