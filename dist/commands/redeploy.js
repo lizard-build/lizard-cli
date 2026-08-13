@@ -24,8 +24,6 @@ export function registerRedeploy(program) {
             id = resolved.id;
         }
         else {
-            if (!isTTY())
-                throw new Error("Provide an app name or ID, or run interactively");
             const { projectId, scope } = await resolveProjectScope(opts.project);
             const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
             const apps = data.apps || [];
@@ -33,9 +31,11 @@ export function registerRedeploy(program) {
                 throw new Error("No apps in project. Create one with `lizard up` or `lizard add`.");
             }
             if (apps.length === 1) {
+                // Only one app — no ambiguity, resolve it regardless of TTY so
+                // scripted/non-interactive callers don't need to pass a redundant name.
                 id = apps[0].id;
             }
-            else {
+            else if (isTTY()) {
                 const selected = await p.select({
                     message: "Select app to redeploy",
                     options: apps.map((a) => ({
@@ -47,6 +47,9 @@ export function registerRedeploy(program) {
                 if (p.isCancel(selected))
                     process.exit(5);
                 id = selected;
+            }
+            else {
+                throw new Error("Multiple apps — provide an app name or ID, or run interactively");
             }
         }
         const spinner = ora("Starting redeploy...").start();

@@ -24,17 +24,17 @@ export function registerRestart(program) {
             id = resolved.id;
         }
         else {
-            if (!isTTY())
-                throw new Error("Provide an app name or ID, or run interactively");
             const { projectId, scope } = await resolveProjectScope(opts.project);
             const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
             const apps = data.apps || [];
             if (apps.length === 0)
                 throw new Error("No apps in project");
             if (apps.length === 1) {
+                // Only one app — no ambiguity, resolve it regardless of TTY so
+                // scripted/non-interactive callers don't need to pass a redundant name.
                 id = apps[0].id;
             }
-            else {
+            else if (isTTY()) {
                 const selected = await p.select({
                     message: "Select app to restart",
                     options: apps.map((a) => ({
@@ -46,6 +46,9 @@ export function registerRestart(program) {
                 if (p.isCancel(selected))
                     process.exit(5);
                 id = selected;
+            }
+            else {
+                throw new Error("Multiple apps — provide an app name or ID, or run interactively");
             }
         }
         const spinner = ora("Starting restart...").start();

@@ -25,8 +25,6 @@ export function registerRedeploy(program: Command) {
         }
         id = resolved.id;
       } else {
-        if (!isTTY()) throw new Error("Provide an app name or ID, or run interactively");
-
         const { projectId, scope } = await resolveProjectScope(opts.project);
         const data = await api.get<{ apps: any[] }>(withScope(`/api/projects/${projectId}/services`, scope));
         const apps = data.apps || [];
@@ -38,8 +36,10 @@ export function registerRedeploy(program: Command) {
         }
 
         if (apps.length === 1) {
+          // Only one app — no ambiguity, resolve it regardless of TTY so
+          // scripted/non-interactive callers don't need to pass a redundant name.
           id = apps[0].id;
-        } else {
+        } else if (isTTY()) {
           const selected = await p.select({
             message: "Select app to redeploy",
             options: apps.map((a: any) => ({
@@ -50,6 +50,8 @@ export function registerRedeploy(program: Command) {
           });
           if (p.isCancel(selected)) process.exit(5);
           id = selected as string;
+        } else {
+          throw new Error("Multiple apps — provide an app name or ID, or run interactively");
         }
       }
 

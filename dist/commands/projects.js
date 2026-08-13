@@ -1,7 +1,9 @@
 import chalk from "chalk";
+import * as p from "@clack/prompts";
 import { api, withQuery } from "../lib/api.js";
-import { success, isJSONMode, printJSON, table } from "../lib/format.js";
+import { success, isJSONMode, printJSON, table, isTTY } from "../lib/format.js";
 import { pickWorkspace, resolveWorkspace } from "../lib/picker.js";
+import { resolveProjectId } from "../lib/config.js";
 export function registerProjects(program) {
     const proj = program
         .command("project")
@@ -52,6 +54,33 @@ export function registerProjects(program) {
         }
         else {
             success(`Project ${chalk.bold(project.name)} created in ${chalk.bold(workspace.name)}`);
+        }
+    });
+    proj
+        .command("delete")
+        .alias("rm")
+        .description("Delete a project — moves it to trash, permanently purged after 3 days")
+        .argument("[project]", "Project name, slug, or ID (defaults to the project linked in this directory)")
+        .option("-y, --yes", "Skip confirmation")
+        .action(async (projectArg, opts) => {
+        const projectId = await resolveProjectId(projectArg);
+        const projects = await api.get("/api/projects");
+        const name = projects.find((proj) => proj.id === projectId)?.name ?? projectId;
+        if (!opts.yes) {
+            if (!isTTY())
+                throw new Error("Use -y to confirm in non-interactive mode");
+            const confirm = await p.confirm({
+                message: `Delete project ${chalk.bold(name)}? All its services will stop; the project is recoverable for 3 days, then permanently removed.`,
+            });
+            if (p.isCancel(confirm) || !confirm)
+                process.exit(5);
+        }
+        await api.delete(`/api/projects/${projectId}`);
+        if (isJSONMode()) {
+            printJSON({ id: projectId, name, status: "deleted" });
+        }
+        else {
+            success(`Project ${chalk.bold(name)} deleted (recoverable for 3 days)`);
         }
     });
 }
