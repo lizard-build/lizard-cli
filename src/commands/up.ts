@@ -45,6 +45,7 @@ export function registerUp(program: Command) {
     .option("-d, --detach", "Don't attach to the log stream")
     .option("-c, --ci", "Stream build logs only, exit on completion")
     .option("-s, --service <name>", "Service to deploy to (defaults to linked)")
+    .option("-p, --project <id>", "Project name, slug, or ID")
     .option("--no-gitignore", "Don't ignore paths from .gitignore")
     .option("--region <code>", "Region to create the service in (new services only)")
     .option("--build-command <cmd>", "Build command to run (e.g. 'npm run build')")

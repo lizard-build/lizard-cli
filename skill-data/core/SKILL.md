@@ -145,8 +145,8 @@ lizard up --json
 
 - Uploads cwd as a tarball (respects `.gitignore`), forces `sourceType=upload`.
 - Streams build logs over SSE; emits a final `{ event: "deployed", url }` on success (`{ event: "failed" }` on failure; `url` may be `null`).
-- Flags: `--service`, `--region`, `--build-command`, `--start-command`, `--pre-deploy-command`, `--port`, `--detach`, `--ci`.
-- If cwd isn't linked, auto-runs `init` — interactive on a TTY. Headless (non-TTY) it does **not** auto-create a project: it errors out asking you to run `lizard init --name <project>` first (or pass `--name <project>` to `up`/`init`). This guards against a cwd typo silently spawning an empty project in CI. So for headless flows, link explicitly first.
+- Flags: `--project`, `--service`, `--region`, `--build-command`, `--start-command`, `--pre-deploy-command`, `--port`, `--detach`, `--ci`.
+- If cwd isn't linked, auto-runs `init` — interactive on a TTY. Headless (non-TTY) it does **not** auto-create a project: it errors out asking you to run `lizard init --name <project>` first (or pass `--project <project>` to `up`). This guards against a cwd typo silently spawning an empty project in CI. So for headless flows, link explicitly first.
 - `lizard up` always switches the service to `sourceType=upload`. Do not use it to update a git-backed service — use `lizard redeploy` or push to the remote.
 
 ## Worker mode
