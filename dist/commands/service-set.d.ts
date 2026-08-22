@@ -22,7 +22,7 @@ import { Command } from "commander";
  * file's cfg blob. Mirrors `configApplySchema.serviceConfigSchema` in
  * dragonlabs-platform/server/src/routes/projects.ts.
  */
-export declare const SERVICE_FIELDS: readonly ["name", "sourceType", "repoUrl", "branch", "rootDirectory", "buildCommand", "watchPatterns", "dockerfilePath", "startCommand", "preDeployCommand", "containerPort"];
+export declare const SERVICE_FIELDS: readonly ["name", "sourceType", "repoUrl", "branch", "rootDirectory", "buildCommand", "watchPatterns", "dockerfilePath", "startCommand", "preDeployCommand", "containerPort", "cpuLimit", "memoryLimit"];
 export declare function validateName(name: string): string | null;
 export declare function registerServiceSet(svc: Command): void;
 /**

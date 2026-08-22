@@ -39,6 +39,8 @@ export const SERVICE_FIELDS = [
     "startCommand",
     "preDeployCommand",
     "containerPort", // 0 = worker mode (no HTTP listener)
+    "cpuLimit", // e.g. "4000m"
+    "memoryLimit", // e.g. "4Gi"
 ];
 const SERVICE_FIELD_SET = new Set(SERVICE_FIELDS);
 const NUMERIC_FIELDS = new Set(["containerPort"]);
@@ -92,6 +94,8 @@ Supported --set fields (flat — matches the wire schema and \`service show\`):
   startCommand                string  (e.g. "node dist/index.js")
   preDeployCommand            string  (runs once before each rollout, e.g. migrations)
   containerPort               number  (1-65535, or 0 for worker mode / no HTTP listener)
+  cpuLimit                    string  (e.g. "4000m")
+  memoryLimit                 string  (e.g. "4Gi")
 
   variables.<KEY>             string  (per-service env shortcut)
   variables.<KEY>.value       string  (supports \${{ <ref>.KEY }} templates)
