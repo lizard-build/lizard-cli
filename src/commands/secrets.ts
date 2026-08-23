@@ -114,8 +114,9 @@ export function registerSecrets(program: Command) {
       "after",
       `
 Notes:
-  Secrets apply live to running VMs. Keys prefixed with NEXT_PUBLIC_* or VITE_*
-  trigger a redeploy because they're baked into the client bundle at build time.`,
+  Secrets apply to running services without a rebuild — the service restarts to
+  pick them up. Keys prefixed with NEXT_PUBLIC_* or VITE_* trigger a redeploy
+  because they're baked into the client bundle at build time.`,
     )
     .action(async (opts) => {
       const scope = await resolveScope(opts.project, opts.service, opts.global);
