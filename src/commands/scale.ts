@@ -73,7 +73,7 @@ export function registerScale(program: Command) {
 
       if (service.kind === "addon") {
         if (opts.replicas !== undefined) {
-          throw new Error("Addons run as a single VM and don't support --replicas.");
+          throw new Error("Addons run as a single instance and don't support --replicas.");
         }
         return scaleAddon(projectId, scope, service, opts.cpu, opts.memory, opts.storage);
       }
