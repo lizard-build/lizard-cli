@@ -4,7 +4,7 @@ import { Readable } from "node:stream";
 import { join, dirname } from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
-export const CURRENT_VERSION = "0.3.74";
+export const CURRENT_VERSION = "0.3.85";
 const RELEASES_API = "https://api.github.com/repos/lizard-build/lizard-cli/releases/latest";
 const RELEASE_BASE = "https://github.com/lizard-build/lizard-cli/releases/latest/download";
 /** Minimum gap between background update checks. */
@@ -37,7 +37,12 @@ function stateDir() {
 }
 const checkStampFile = () => join(stateDir(), "update-check.json");
 const updateNoticeFile = () => join(stateDir(), "update-notice.json");
-export async function getLatestVersion() {
+/**
+ * Standalone binaries self-update from a GitHub release asset, so GitHub's
+ * `releases/latest` is the correct — and only necessary — source of truth
+ * for that path (the release and its assets are published atomically).
+ */
+async function getLatestVersionFromGitHub() {
     try {
         const res = await fetch(RELEASES_API, {
             headers: { "User-Agent": "lizard-cli" },
@@ -53,19 +58,42 @@ export async function getLatestVersion() {
         const version = data.tag_name?.replace(/^v/, "");
         if (!version)
             return { kind: "error" };
-        // Verify the version is actually published to npm before advertising it —
-        // CI tags GitHub before npm publish completes, causing a race window where
-        // `npx @lizard-build/cli@{version}` fails with ETARGET.
-        const npmRes = await fetch(`https://registry.npmjs.org/@lizard-build/cli/${version}`, {
-            signal: AbortSignal.timeout(5000),
-        });
-        if (!npmRes.ok)
-            return { kind: "error" };
         return { kind: "ok", version };
     }
     catch {
         return { kind: "error" };
     }
+}
+/**
+ * npm installs upgrade via `npm install -g @lizard-build/cli@latest`, so
+ * npm's own `latest` dist-tag is the correct — and only necessary — source
+ * of truth for that path. It only ever resolves to a version that is fully
+ * indexed and installable right now.
+ *
+ * (Previously this cross-checked GitHub's release tag against npm's
+ * specific-version endpoint. That endpoint 404s for several minutes after
+ * `npm publish --provenance` returns success while npm processes package
+ * attestation — GitHub's release becomes visible well before npm's registry
+ * catches up — so the check failed on almost every release.)
+ */
+async function getLatestVersionFromNpm() {
+    try {
+        const res = await fetch("https://registry.npmjs.org/@lizard-build/cli/latest", {
+            signal: AbortSignal.timeout(5000),
+        });
+        if (!res.ok)
+            return { kind: "error" };
+        const data = (await res.json());
+        if (!data.version)
+            return { kind: "error" };
+        return { kind: "ok", version: data.version };
+    }
+    catch {
+        return { kind: "error" };
+    }
+}
+export async function getLatestVersion() {
+    return isStandaloneBinary() ? getLatestVersionFromGitHub() : getLatestVersionFromNpm();
 }
 export function isNewerVersion(latest, current) {
     const [maj, min, pat] = latest.split(".").map(Number);
