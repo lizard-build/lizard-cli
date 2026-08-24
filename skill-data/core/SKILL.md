@@ -209,7 +209,7 @@ Provision with `lizard add <type>`. Each addon exposes a fixed env-var set; refe
 
 - `postgres` — `DATABASE_URL`, `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PASSWORD`.
 - `redis` — `REDIS_URL`.
-- `s3` — `S3_ENDPOINT`, `S3_DEFAULT_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`. Auto-creates a public-read bucket named `default`; objects in any public bucket are served without auth two ways: the gateway URL the dashboard shows, `https://s3-<region>.onlizard.com/<addonId>/<bucket>/<key>`, or the platform proxy `<dashboard-host>/api/s3/<addonId>/public/<bucket>/<key>` (the host `lizard open` launches; long-lived immutable cache headers). For AWS SDK use, set `forcePathStyle: true`. ACL flips aren't on the CLI yet — point users at the dashboard.
+- `s3` — `S3_ENDPOINT`, `S3_DEFAULT_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`. Auto-creates a public-read bucket named `default`; objects in any public bucket are served without auth two ways: the gateway URL the dashboard shows, `https://s3-<region>.onlizard.com/<addonId>/<bucket>/<key>`, or the platform proxy `<dashboard-host>/api/s3/<addonId>/public/<bucket>/<key>` (the host `lizard open` launches; long-lived immutable cache headers). For AWS SDK use, set `forcePathStyle: true`. ACL flips aren't on the CLI yet — point users at the dashboard. To push a local file into a bucket directly (no AWS SDK needed), use `lizard s3 upload <file> [--addon <name>] [--bucket <name>] [--key <key>] [--content-type <type>]` — auto-resolves the project's only S3 addon and bucket `default` if omitted; prints `{key, etag, size, url}`. `lizard s3 list|ls [--bucket <name>] [--prefix <p>]` lists objects in a bucket.
 
 ## Composition patterns
 
@@ -246,6 +246,8 @@ lizard project list --json                  # all projects in workspace
 lizard regions --json
 lizard open                                 # open dashboard
 lizard whoami --json                        # auth check
+lizard s3 upload <file> [--bucket <b>]      # upload a local file to an S3 addon bucket
+lizard s3 list --json [--bucket <b>]        # list objects in an S3 addon bucket
 ```
 
 For exact flags, `lizard <cmd> --help --json`. Other commands not shown above: `lizard git` (GitHub integration), `lizard config` (project configuration), `lizard workspace` (workspace info) — discover each with `lizard <cmd> --help --json`.

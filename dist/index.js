@@ -51,6 +51,7 @@ import { registerDomain } from "./commands/domain.js";
 import { registerEvents } from "./commands/events.js";
 import { registerGit } from "./commands/git.js";
 import { registerInit } from "./commands/init.js";
+import { registerKeys } from "./commands/keys.js";
 import { registerLink } from "./commands/link.js";
 import { registerLogin } from "./commands/login.js";
 import { registerLogout } from "./commands/logout.js";
@@ -64,6 +65,7 @@ import { registerRedeploy } from "./commands/redeploy.js";
 import { registerRegions } from "./commands/regions.js";
 import { registerRestart } from "./commands/restart.js";
 import { registerRun } from "./commands/run.js";
+import { registerS3 } from "./commands/s3.js";
 import { registerSandbox } from "./commands/sandbox.js";
 import { registerScale } from "./commands/scale.js";
 import { registerSecrets } from "./commands/secrets.js";
@@ -135,6 +137,7 @@ registerDomain(program);
 registerEvents(program);
 registerGit(program);
 registerInit(program);
+registerKeys(program);
 registerLink(program);
 registerLogin(program);
 registerLogout(program);
@@ -148,6 +151,7 @@ registerRedeploy(program);
 registerRegions(program);
 registerRestart(program);
 registerRun(program);
+registerS3(program);
 registerSandbox(program);
 registerScale(program);
 registerSecrets(program);
@@ -358,12 +362,19 @@ async function main() {
         // Project moved to trash: the backend rejects every write to it. Surface a
         // clear next step instead of the raw "Project is being deleted" 409.
         const projectDeleted = isProjectDeletedError(err);
+        // Node's fetch (undici) throws a bare "fetch failed" and hides the real
+        // reason (ECONNREFUSED, ENOTFOUND, connect timeout…) on err.cause. Unwrap
+        // it so the user sees something actionable instead of just "fetch failed".
+        const causeDetail = err?.cause?.code || err?.cause?.message;
+        const baseMsg = err.message || String(err);
         const msg = projectDeleted
             ? "This project is being deleted — create a new one with `lizard init`."
-            : err.message || String(err);
+            : causeDetail && !baseMsg.includes(causeDetail)
+                ? `${baseMsg} (${causeDetail})`
+                : baseMsg;
         const apiErr = err instanceof APIError ? err : undefined;
         const status = apiErr?.status;
-        const code = projectDeleted ? "PROJECT_DELETED" : apiErr?.code || err.code || "ERROR";
+        const code = projectDeleted ? "PROJECT_DELETED" : apiErr?.code || err.code || err?.cause?.code || "ERROR";
         if (isJSONMode()) {
             console.log(JSON.stringify({
                 error: {
@@ -383,11 +394,13 @@ async function main() {
         // Exit codes derived from APIError.status (or tagged error codes), not message text
         const isAuth = status === 401 || status === 403 || code === "NOT_AUTHENTICATED";
         const isNotFound = status === 404;
+        // undici wraps the socket error, so the real code lives on err.cause.
+        const netCode = err.code || err?.cause?.code;
         const isTimeout = status === 408 ||
             status === 504 ||
             err.name === "AbortError" ||
-            err.code === "ETIMEDOUT" ||
-            err.code === "UND_ERR_CONNECT_TIMEOUT";
+            netCode === "ETIMEDOUT" ||
+            netCode === "UND_ERR_CONNECT_TIMEOUT";
         if (isAuth)
             process.exit(2);
         if (isNotFound)
