@@ -68,9 +68,9 @@ For streaming commands (`up`, `logs`), JSON mode emits **one event per line**:
 
 ## Skill content (`skill-data/`)
 
-This directory holds the canonical agent skill markdown. The public discovery stub lives in [`lizard-build/lizard-skills`](https://github.com/lizard-build/lizard-skills) and is intentionally thin — it just tells agents to run `lizard skill get <name>` to fetch the version-matched content from the installed CLI.
+This directory holds the canonical agent skill markdown. Lizard Skill, the public discovery stub, lives in [`lizard-build/skill`](https://github.com/lizard-build/skill) and is intentionally thin — it just tells agents to run `lizard skill get <name>` to fetch the version-matched content from the installed CLI.
 
-When you change platform behavior (build pipeline, env precedence, addon env vars, deploy flow), update `skill-data/core/SKILL.md`. Do **not** put that content in the lizard-skills stub — it would go stale.
+When you change platform behavior (build pipeline, env precedence, addon env vars, deploy flow), update `skill-data/core/SKILL.md`. Do **not** put that content in the Lizard Skill stub — it would go stale.
 
 Frontmatter format (YAML):
 ```yaml
