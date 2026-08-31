@@ -2,10 +2,10 @@
 
 Deploy apps, databases and sandboxes to Lizard (lizard.build) from the command line.
 
-Point the CLI at your code and it detects the stack — Node, Python, Go, Rust,
-Ruby, PHP or Java — builds it and ships it live. Managed Postgres, Managed Redis
-and Managed Object Storage attach in one command. Billing only for active
-resources, so idle apps cost a fraction.
+Point the CLI at your code and it detects the stack — Go, Node, Python, Rust,
+Ruby, PHP, Java or a static site — builds it and ships it live. Managed
+Postgres, Managed Redis and Managed Object Storage attach in one command.
+Billing only for active resources, so idle apps cost a fraction.
 
 Every command is agent-readable: add `--json` for structured output, or run
 `lizard --help --json` to dump the full command schema.
@@ -54,16 +54,27 @@ lizard add postgres redis s3
 lizard up         # upload and deploy code
 lizard add        # add Managed Postgres, Managed Redis or Managed Object Storage
 lizard ps         # list services
+lizard status     # show the linked workspace, project and service
 lizard logs       # stream runtime logs
-lizard metrics    # resource metrics (CPU, memory, network, disk) and cost
-lizard scale      # scale replicas / CPU / memory
+lizard metrics    # resource metrics (CPU, memory, network, disk); --cost for spend
+lizard scale      # scale replicas / CPU / memory / storage
 lizard secrets    # manage secrets
 lizard domain     # manage domains
-lizard run        # run a command with project and service secrets injected
-lizard ssh        # open a shell in a service
+lizard redeploy   # rebuild and redeploy from the current source
+lizard run        # run a command locally with project and service secrets injected
+lizard ssh        # run one command inside a service container
 lizard sandbox    # create and manage Sandboxes
 lizard volume     # Persistent Volumes for Sandboxes
 lizard skills     # agent guides, version-matched to the CLI
+```
+
+`run` and `ssh` are a pair: `run` executes on your machine with the service's
+env injected, `ssh` executes inside the running container. Both take the command
+after `--`:
+
+```bash
+lizard run -- npm run migrate
+lizard ssh -s my-app -- printenv
 ```
 
 Run `lizard --help` for the full list.
