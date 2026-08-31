@@ -1,7 +1,7 @@
 {
   "name": "@lizard-build/cli",
   "version": "0.3.88",
-  "description": "Lizard CLI — deploy and manage apps on Lizard",
+  "description": "Lizard CLI — deploy apps, databases and sandboxes to Lizard (lizard.build) from your terminal or your coding agent. Detects Node, Python, Go, Rust, Ruby, PHP and Java; adds Managed Postgres, Managed Redis and Managed Object Storage in one command.",
   "type": "module",
   "bin": {
     "lizard": "./dist/index.js"
@@ -22,7 +22,18 @@
   "keywords": [
     "cli",
     "deploy",
+    "deployment",
     "paas",
+    "hosting",
+    "containers",
+    "kubernetes",
+    "postgres",
+    "redis",
+    "s3",
+    "sandbox",
+    "ai-agent",
+    "coding-agent",
+    "devops",
     "lizard"
   ],
   "repository": {
