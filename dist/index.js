@@ -280,6 +280,22 @@ function dumpCommand(cmd) {
             .map(dumpCommand),
     };
 }
+/**
+ * Write to stdout, then exit once the write has actually flushed.
+ *
+ * process.exit() discards writes that are still pending. When stdout is a pipe
+ * — every agent, every script, every `| jq` — anything past the 64 KB pipe
+ * buffer is written asynchronously, so exiting on the next line truncated the
+ * payload mid-object. `lizard --help --json` is ~95 KB and was arriving as
+ * exactly 65536 bytes of unparseable JSON, while the same command redirected
+ * to a file came out whole.
+ *
+ * Callers must return straight after calling this: the exit happens in the
+ * write callback, not synchronously.
+ */
+function writeAndExit(payload, code) {
+    process.stdout.write(payload, () => process.exit(code));
+}
 async function main() {
     // Hidden entry point: detached child spawned by checkForUpdateInBackground.
     // Handled before commander so it never shows up in help or telemetry.
@@ -298,21 +314,21 @@ async function main() {
     // raw string; agents asking for JSON should get JSON.
     if (process.argv.includes("--json") &&
         (process.argv.includes("--version") || process.argv.includes("-V"))) {
-        process.stdout.write(JSON.stringify({ cli: "lizard", version: CURRENT_VERSION }, null, 2) + "\n");
-        process.exit(0);
+        writeAndExit(JSON.stringify({ cli: "lizard", version: CURRENT_VERSION }, null, 2) + "\n", 0);
+        return;
     }
     if (isHelpJsonRequest(process.argv)) {
         const { target, unknown } = findTargetCommand(stripHelpToken(process.argv), program);
         if (unknown) {
-            process.stdout.write(JSON.stringify({
+            writeAndExit(JSON.stringify({
                 error: {
                     code: "UNKNOWN_COMMAND",
                     status: null,
                     message: `Unknown command '${unknown}'. Run \`lizard --help --json\` to list available commands.`,
                     body: null,
                 },
-            }, null, 2) + "\n");
-            process.exit(3);
+            }, null, 2) + "\n", 3);
+            return;
         }
         const isRoot = target === program;
         const out = {
@@ -328,8 +344,8 @@ async function main() {
                 : program.options.filter((o) => !o.hidden).map(dumpOption),
             exitCodes: EXIT_CODES,
         };
-        process.stdout.write(JSON.stringify(out, null, 2) + "\n");
-        process.exit(0);
+        writeAndExit(JSON.stringify(out, null, 2) + "\n", 0);
+        return;
     }
     try {
         await program.parseAsync(process.argv);
@@ -346,7 +362,7 @@ async function main() {
             const exitCode = err.exitCode ?? 1;
             const bareGroup = err.code === "commander.help"; // help({error:true}) — no subcommand given
             if (isJSONMode() && exitCode !== 0) {
-                console.log(JSON.stringify({
+                writeAndExit(JSON.stringify({
                     error: {
                         code: bareGroup ? "MISSING_SUBCOMMAND" : err.code,
                         status: null,
@@ -355,7 +371,8 @@ async function main() {
                             : err.message || String(err),
                         body: null,
                     },
-                }, null, 2));
+                }, null, 2) + "\n", exitCode);
+                return;
             }
             process.exit(exitCode);
         }
@@ -375,22 +392,6 @@ async function main() {
         const apiErr = err instanceof APIError ? err : undefined;
         const status = apiErr?.status;
         const code = projectDeleted ? "PROJECT_DELETED" : apiErr?.code || err.code || err?.cause?.code || "ERROR";
-        if (isJSONMode()) {
-            console.log(JSON.stringify({
-                error: {
-                    code,
-                    status: status ?? null,
-                    message: msg,
-                    body: apiErr?.body ?? null,
-                },
-            }, null, 2));
-        }
-        else {
-            error(msg);
-            if (status === 401) {
-                process.stderr.write("Run `lizard login` to re-authenticate.\n");
-            }
-        }
         // Exit codes derived from APIError.status (or tagged error codes), not message text
         const isAuth = status === 401 || status === 403 || code === "NOT_AUTHENTICATED";
         const isNotFound = status === 404;
@@ -401,13 +402,25 @@ async function main() {
             err.name === "AbortError" ||
             netCode === "ETIMEDOUT" ||
             netCode === "UND_ERR_CONNECT_TIMEOUT";
-        if (isAuth)
-            process.exit(2);
-        if (isNotFound)
-            process.exit(3);
-        if (isTimeout)
-            process.exit(4);
-        process.exit(1);
+        const exitCode = isAuth ? 2 : isNotFound ? 3 : isTimeout ? 4 : 1;
+        if (isJSONMode()) {
+            // Through writeAndExit, not console.log + exit: `body` carries the raw
+            // API response and can exceed the pipe buffer on its own.
+            writeAndExit(JSON.stringify({
+                error: {
+                    code,
+                    status: status ?? null,
+                    message: msg,
+                    body: apiErr?.body ?? null,
+                },
+            }, null, 2) + "\n", exitCode);
+            return;
+        }
+        error(msg);
+        if (status === 401) {
+            process.stderr.write("Run `lizard login` to re-authenticate.\n");
+        }
+        process.exit(exitCode);
     }
 }
 main();

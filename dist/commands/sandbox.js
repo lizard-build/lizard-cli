@@ -7,7 +7,6 @@ import * as p from "@clack/prompts";
 import { api, getBaseURL, getRawText, streamSSE, withQuery, withScope } from "../lib/api.js";
 import { getToken } from "../lib/auth.js";
 import { resolveProjectScope } from "../lib/resolve.js";
-import { resolveWorkspace } from "../lib/picker.js";
 import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAgo, isTTY } from "../lib/format.js";
 const VALID_TEMPLATES = ["base", "code-interpreter-v1"];
 function parseIntOption(v) {
@@ -52,29 +51,20 @@ export function registerSandbox(program) {
     sb.command("create")
         .description("Create a sandbox")
         .option("-t, --template <name>", `Template (${VALID_TEMPLATES.join(", ")})`, "base")
-        .option("--cpus <n>", "vCPUs (1-8, default 1)", parseIntOption)
-        .option("--memory <mb>", "Memory in MB (128-8192, default 2048)", parseIntOption)
         .option("--timeout <ms>", "Idle timeout in ms before auto-stop (default 300000)", parseIntOption)
         .option("--region <code>", "Region to create the sandbox in")
-        .option("--volume <name-or-id>", "Attach a persistent volume (requires --project or a linked project)")
-        .option("-p, --project <id>", "Associate with a project (name, slug, or ID)")
-        .option("-w, --workspace <ws>", "Workspace to create the sandbox in")
+        .option("--volume <name-or-id>", "Attach a persistent volume")
+        .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
         .action(async (opts) => {
         if (opts.template && !VALID_TEMPLATES.includes(opts.template)) {
             throw new Error(`Unknown template "${opts.template}". Available: ${VALID_TEMPLATES.join(", ")}`);
         }
-        let projectId;
-        let workspaceId;
-        let scope;
-        if (opts.project || opts.volume) {
-            const resolved = await resolveProjectScope(opts.project);
-            projectId = resolved.projectId;
-            scope = resolved.scope;
-            workspaceId = resolved.scope.workspaceId ?? undefined;
-        }
-        else if (opts.workspace) {
-            workspaceId = (await resolveWorkspace(opts.workspace)).id;
-        }
+        // A sandbox must belong to a project — billing is metered per project.
+        // resolveProjectScope throws a clear "No project linked…" error when
+        // there's no --project and the cwd isn't linked, so the CLI can never
+        // create a project-less sandbox.
+        const { projectId, scope } = await resolveProjectScope(opts.project);
+        const workspaceId = scope.workspaceId ?? undefined;
         let volumeId;
         if (opts.volume) {
             volumeId = await resolveVolumeId(projectId, scope, opts.volume);
@@ -84,8 +74,6 @@ export function registerSandbox(program) {
         try {
             sandbox = await api.post("/api/sandboxes", {
                 template: opts.template,
-                cpus: opts.cpus,
-                memoryMb: opts.memory,
                 timeoutMs: opts.timeout,
                 region: opts.region,
                 volumeId,
@@ -108,16 +96,21 @@ export function registerSandbox(program) {
     });
     sb.command("list")
         .alias("ls")
-        .description("List sandboxes")
-        .option("-p, --project <id>", "Only list sandboxes for this project")
+        .description("List sandboxes in the linked (or given) project")
+        .option("-p, --project <id>", "List sandboxes for this project instead of the linked one")
+        .option("--all", "List every sandbox across all your workspaces")
         .action(async (opts) => {
-        if (opts.project) {
-            const { projectId, scope } = await resolveProjectScope(opts.project);
-            const sandboxes = await api.get(withScope(`/api/projects/${projectId}/sandboxes`, scope));
+        // `--all` is the only way to get the workspace-wide view. Without it we
+        // scope to a project — the linked one, or `--project` — and error like
+        // `ps` when nothing is linked, so the default never leaks other members'
+        // or other projects' sandboxes.
+        if (opts.all) {
+            const sandboxes = await api.get("/api/sandboxes");
             printSandboxList(sandboxes);
             return;
         }
-        const sandboxes = await api.get("/api/sandboxes");
+        const { projectId, scope } = await resolveProjectScope(opts.project);
+        const sandboxes = await api.get(withScope(`/api/projects/${projectId}/sandboxes`, scope));
         printSandboxList(sandboxes);
     });
     sb.command("rm")

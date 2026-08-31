@@ -102,6 +102,18 @@ describe("--help --json dump", () => {
     expect(out.command.arguments.some((a: any) => a.name === "pairs")).toBe(true);
   });
 
+  test("the dump survives the pipe — no 64 KB truncation", async () => {
+    // execa pipes stdout, so everything past the 64 KB pipe buffer is written
+    // asynchronously. Calling process.exit() on the next line used to discard
+    // the remainder: the dump arrived as exactly 65536 bytes of unparseable
+    // JSON for every agent and every `| jq`, while the same command redirected
+    // to a file came out whole. Guard both halves — size and parseability —
+    // so a regression can't hide behind a payload that shrank below the buffer.
+    const { stdout } = await run(["--help", "--json"]);
+    expect(Buffer.byteLength(stdout)).toBeGreaterThan(65_536);
+    expect(() => parseJSON(stdout)).not.toThrow();
+  });
+
   test("exitCodes is included in the dump", async () => {
     const { stdout } = await run(["--help", "--json"]);
     const out = parseJSON(stdout);
