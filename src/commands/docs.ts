@@ -2,7 +2,10 @@ import { Command } from "commander";
 import open from "open";
 import { success, isJSONMode, printJSON } from "../lib/format.js";
 
-const DOCS_URL = "https://docs.lizard.build";
+// Docs are served from the main host under /docs. The docs.lizard.build
+// subdomain resolves but has no valid certificate, so opening it dumps the
+// user on a TLS error page — don't switch back to it without checking.
+const DOCS_URL = "https://lizard.build/docs";
 
 export function registerDocs(program: Command) {
   program
