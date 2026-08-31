@@ -286,7 +286,9 @@ describe("docs --json", () => {
     const { stdout, exitCode } = await run(["docs", "--json"]);
     expect(exitCode).toBe(0);
     const out = parseJSON(stdout);
-    expect(out.url).toContain("docs.lizard.build");
+    // Pin the exact URL: this assertion previously matched a substring and
+    // happily passed against docs.lizard.build, which serves no valid cert.
+    expect(out.url).toBe("https://lizard.build/docs");
     expect(out.opened).toBe(false);
   });
 });
