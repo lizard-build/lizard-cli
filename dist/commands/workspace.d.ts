@@ -1,8 +1,9 @@
 import { Command } from "commander";
 /**
- * `lizard workspace` — workspace info.
+ * `lizard workspace` — create, list, and delete workspaces.
  *
- * Member management (invite/remove/rename) intentionally lives in the
- * dashboard, not here, to keep CLI surface narrow (Railway model).
+ * Delete only removes empty workspaces (no projects, no sandboxes). Member
+ * management (invite/remove/rename) intentionally lives in the dashboard, not
+ * here, to keep the CLI surface narrow (Railway model).
  */
 export declare function registerWorkspace(program: Command): void;

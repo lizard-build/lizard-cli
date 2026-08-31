@@ -9,8 +9,8 @@ import * as http from "node:http";
 export function registerSSH(program) {
     program
         .command("ssh")
-        .description("Execute a command inside a running service VM")
-        .argument("[cmd...]", "Command and args to run inside the VM (required; pass after `--` to stop flag parsing, e.g. `-- ls -la /app`)")
+        .description("Execute a command inside a running service container")
+        .argument("[cmd...]", "Command and args to run inside the container (required; pass after `--` to stop flag parsing, e.g. `-- ls -la /app`)")
         .option("-s, --service <id>", "Service name or ID")
         .option("-p, --project <id>", "Project name, slug, or ID")
         .addHelpText("after", `
