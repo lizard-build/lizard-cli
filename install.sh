@@ -8,52 +8,73 @@ RED="\033[31m"
 DIM="\033[2m"
 RESET="\033[0m"
 
+RELEASE_BASE="https://github.com/lizard-build/lizard-cli/releases/latest/download"
+INSTALL_DIR="$HOME/.lizard/bin"
+
 echo ""
 echo -e "${BOLD}Lizard CLI${RESET} installer"
 echo ""
 
-# ── Check Node.js ────────────────────────────────────────────────────────────
+# Detect OS and arch
+OS="$(uname -s)"
+ARCH="$(uname -m)"
 
-if ! command -v node >/dev/null 2>&1; then
-  echo -e "${RED}Error:${RESET} Node.js is required but not found."
-  echo ""
-  echo "Install Node.js 18+ from https://nodejs.org"
-  echo "Or use a version manager:"
-  echo "  curl -fsSL https://fnm.vercel.app/install | bash"
+case "$OS" in
+  Darwin)
+    case "$ARCH" in
+      arm64) BINARY="lizard-darwin-arm64" ;;
+      x86_64) BINARY="lizard-darwin-x64" ;;
+      *) echo -e "${RED}Error:${RESET} Unsupported architecture: $ARCH"; exit 1 ;;
+    esac
+    ;;
+  Linux)
+    case "$ARCH" in
+      x86_64)  BINARY="lizard-linux-x64" ;;
+      aarch64) BINARY="lizard-linux-arm64" ;;
+      arm64)   BINARY="lizard-linux-arm64" ;;
+      *) echo -e "${RED}Error:${RESET} Unsupported architecture: $ARCH"; exit 1 ;;
+    esac
+    ;;
+  *)
+    echo -e "${RED}Error:${RESET} Unsupported OS: $OS"
+    echo -e "  On Windows, install from npm: ${CYAN}npm i -g @lizard-build/cli${RESET}"
+    exit 1
+    ;;
+esac
+
+mkdir -p "$INSTALL_DIR"
+TMP="$(mktemp)"
+
+echo -e "${DIM}Downloading $BINARY...${RESET}"
+
+# `set -e` aborts on a failed curl before any `$?` check could run, so handle
+# the failure inline to keep the message useful.
+if ! curl -fL --progress-bar "$RELEASE_BASE/$BINARY" -o "$TMP"; then
+  rm -f "$TMP"
+  echo -e "${RED}Error:${RESET} Download failed: $RELEASE_BASE/$BINARY"
   exit 1
 fi
 
-NODE_MAJOR=$(node -e "process.stdout.write(String(parseInt(process.version.slice(1))))")
-if [ "$NODE_MAJOR" -lt 18 ]; then
-  echo -e "${RED}Error:${RESET} Node.js 18+ is required (you have $(node -v))"
-  echo "Upgrade at https://nodejs.org"
-  exit 1
+chmod +x "$TMP"
+mv "$TMP" "$INSTALL_DIR/lizard"
+
+# Add to PATH in shell config if not already there
+SHELL_RC=""
+case "$SHELL" in
+  */zsh)  SHELL_RC="$HOME/.zshrc" ;;
+  */bash) SHELL_RC="$HOME/.bashrc" ;;
+esac
+if [ -n "$SHELL_RC" ] && ! grep -q "\.lizard/bin" "$SHELL_RC" 2>/dev/null; then
+  echo 'export PATH="$HOME/.lizard/bin:$PATH"' >> "$SHELL_RC"
 fi
+export PATH="$INSTALL_DIR:$PATH"
 
-# ── Install via npm ──────────────────────────────────────────────────────────
-
-if ! command -v npm >/dev/null 2>&1; then
-  echo -e "${RED}Error:${RESET} npm not found. Please install npm."
-  exit 1
-fi
-
-echo -e "${DIM}Installing @lizard-build/cli...${RESET}"
-npm install -g @lizard-build/cli --quiet
-
-# ── Verify ───────────────────────────────────────────────────────────────────
-
-if ! command -v lizard >/dev/null 2>&1; then
-  echo ""
-  echo -e "${RED}Error:${RESET} Installation succeeded but 'lizard' is not in PATH."
-  echo "You may need to add npm global bin to your PATH:"
-  echo "  export PATH=\"\$(npm prefix -g)/bin:\$PATH\""
-  exit 1
-fi
-
-VERSION=$(lizard version --json 2>/dev/null | node -e "process.stdin.resume();let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{process.stdout.write(JSON.parse(d).version)}catch{process.stdout.write('?')}})" 2>/dev/null || echo "?")
+# `lizard version` is not a command — the flag is the only way to read it.
+VERSION="$("$INSTALL_DIR/lizard" --version 2>/dev/null | head -1 || echo "?")"
 
 echo ""
 echo -e "${GREEN}✓${RESET} Lizard CLI ${BOLD}v${VERSION}${RESET} installed"
 echo ""
 echo -e "  Run ${CYAN}lizard login${RESET} to get started"
+echo -e "  ${DIM}(if 'lizard' is not found, run: export PATH="\$HOME/.lizard/bin:\$PATH")${RESET}"
 echo ""
