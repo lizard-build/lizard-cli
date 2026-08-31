@@ -85,7 +85,7 @@ arguments, options, defaults, subcommands and exit codes.
 
 ## Links
 
-- Docs — https://docs.lizard.build
+- Docs — https://lizard.build/docs
 - Source — https://github.com/lizard-build/lizard-cli
 
 ## License
