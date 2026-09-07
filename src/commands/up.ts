@@ -313,7 +313,7 @@ function prompt(question: string): Promise<string> {
   });
 }
 
-async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuildId?: string) {
+export async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuildId?: string) {
   // Prefer the buildId returned by the upload/redeploy response — polling
   // builds[0] races against a still-running previous build and can attach
   // to the wrong one.
@@ -345,12 +345,16 @@ async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuil
   // idle timeout, network blips). Reconnect until the build itself reports
   // a terminal status, with a hard cap so we don't loop forever.
   const deadline = Date.now() + 15 * 60 * 1000; // 15 min max
+  let buildFailed = false;
   while (Date.now() < deadline) {
     let dropped = false;
     try {
       await streamSSE(`/api/builds/${buildId}/logs`, (event, data) => {
         if (event === "done" || event === "error") {
-          if (event === "error") emitBuildError(data);
+          if (event === "error") {
+            buildFailed = true;
+            emitBuildError(data);
+          }
           else emitBuildDone();
           return false;
         }
@@ -365,6 +369,7 @@ async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuil
     // build state — terminal status means we stop reconnecting.
     try {
       const build = await api.get<{ status: string }>(`/api/builds/${buildId}`);
+      if (build.status === "failed") buildFailed = true;
       if (build.status === "done" || build.status === "failed") break;
     } catch {}
 
@@ -372,6 +377,10 @@ async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuil
     await sleep(2000);
   }
 
+  if (buildFailed) {
+    process.exitCode = 1;
+    return;
+  }
   if (ciMode) return;
 
   const app = await api.get<App>(`/api/apps/${appId}`);
@@ -388,6 +397,7 @@ async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuil
       success(`Deployed! ${app.domain ? chalk.cyan(`https://${app.domain}`) : ""}`);
     }
   } else if (app.status === "failed") {
+    process.exitCode = 1;
     if (isJSONMode()) {
       process.stdout.write(
         JSON.stringify({ event: "failed", status: "failed" }) + "\n",

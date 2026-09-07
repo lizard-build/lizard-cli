@@ -268,7 +268,7 @@ function prompt(question) {
         });
     });
 }
-async function streamBuildLogs(appId, ciMode = false, knownBuildId) {
+export async function streamBuildLogs(appId, ciMode = false, knownBuildId) {
     // Prefer the buildId returned by the upload/redeploy response — polling
     // builds[0] races against a still-running previous build and can attach
     // to the wrong one.
@@ -300,13 +300,16 @@ async function streamBuildLogs(appId, ciMode = false, knownBuildId) {
     // idle timeout, network blips). Reconnect until the build itself reports
     // a terminal status, with a hard cap so we don't loop forever.
     const deadline = Date.now() + 15 * 60 * 1000; // 15 min max
+    let buildFailed = false;
     while (Date.now() < deadline) {
         let dropped = false;
         try {
             await streamSSE(`/api/builds/${buildId}/logs`, (event, data) => {
                 if (event === "done" || event === "error") {
-                    if (event === "error")
+                    if (event === "error") {
+                        buildFailed = true;
                         emitBuildError(data);
+                    }
                     else
                         emitBuildDone();
                     return false;
@@ -322,6 +325,8 @@ async function streamBuildLogs(appId, ciMode = false, knownBuildId) {
         // build state — terminal status means we stop reconnecting.
         try {
             const build = await api.get(`/api/builds/${buildId}`);
+            if (build.status === "failed")
+                buildFailed = true;
             if (build.status === "done" || build.status === "failed")
                 break;
         }
@@ -329,6 +334,10 @@ async function streamBuildLogs(appId, ciMode = false, knownBuildId) {
         if (!dropped)
             break; // clean SSE end — don't reconnect
         await sleep(2000);
+    }
+    if (buildFailed) {
+        process.exitCode = 1;
+        return;
     }
     if (ciMode)
         return;
@@ -346,6 +355,7 @@ async function streamBuildLogs(appId, ciMode = false, knownBuildId) {
         }
     }
     else if (app.status === "failed") {
+        process.exitCode = 1;
         if (isJSONMode()) {
             process.stdout.write(JSON.stringify({ event: "failed", status: "failed" }) + "\n");
         }
