@@ -1,7 +1,8 @@
 import chalk from "chalk";
 import ora from "ora";
 import { Command } from "commander";
-import { execSync, spawn } from "child_process";
+import { execSync } from "child_process";
+import { createTarball } from "../lib/archive.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
@@ -290,34 +291,6 @@ function collectFilesManually(root: string, dir: string): string[] {
   return results;
 }
 
-function createTarball(files: string[], cwd: string): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const chunks: Uint8Array[] = [];
-    // `--null` makes tar read NUL-separated paths from stdin, matching what
-    // `git ls-files -z` writes. Newline-separated input would split filenames
-    // containing `\n` across multiple entries. Both bsdtar (macOS) and GNU
-    // tar accept `--null` before `-T -`.
-    const tar = spawn("tar", ["--null", "-czf", "-", "-T", "-"], { cwd });
-    tar.stdout.on("data", (c: Buffer) => chunks.push(c));
-    tar.stderr.on("data", () => {});
-    tar.on("close", (code: number) => {
-      if (code === 0) {
-        const total = chunks.reduce((n, c) => n + c.length, 0);
-        const out = new Uint8Array(total);
-        let off = 0;
-        for (const c of chunks) {
-          out.set(c, off);
-          off += c.length;
-        }
-        resolve(out);
-      } else {
-        reject(new Error(`tar exited ${code}`));
-      }
-    });
-    if (files.length > 0) tar.stdin.write(files.join("\0") + "\0");
-    tar.stdin.end();
-  });
-}
 
 function detectLocalPort(dir: string): number | undefined {
   for (const name of ["Dockerfile", "dockerfile", "Dockerfile.production"]) {
