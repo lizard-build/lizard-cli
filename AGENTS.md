@@ -8,7 +8,8 @@ This project uses **npm**. Don't introduce pnpm/yarn lockfiles. Scripts:
 
 - `npm run build` — TypeScript compile to `dist/`
 - `npm run dev` — run from source via `tsx`
-- `npm test` — integration tests (`test/cli.test.ts`)
+- `npm test` — local unit tests (`test/unit/*`)
+- `npm run test:integration` — live API tests; requires `LIZARD_LIVE_TESTS=1`. Mutations also require an approved test project in `LIZARD_TEST_PROJECT_ID` and `LIZARD_TEST_ALLOW_MUTATIONS=1`.
 - `npm run test:unit` — unit tests (`test/unit/*`)
 
 The published `bin` is `dist/index.js`. Always run `npm run build` before testing against `dist/`.
@@ -108,6 +109,6 @@ Version lives in `package.json` AND `src/lib/updater.ts` (`CURRENT_VERSION`). Bu
 
 ## Tests
 
-Unit tests are vitest, fast, and can be run while iterating. The integration suite (`npm test`) spawns the built CLI from `dist/` against fixtures in `test/fixtures/`, so re-run `npm run build` first.
+Unit tests use Vitest. Run `npm run build` before testing the compiled CLI. The integration suite (`npm run test:integration`) calls the live API with the current account. It is not an isolated fixture suite. Read its code and obtain approval for the target environment before opting in. The default binary is this checkout's `dist/index.js`.
 
 Two pre-existing failures in `test/unit/json.test.ts` reference a `lizard list` command that was dropped in commit `1c856f9` — not blocking; the fixture list there needs to be updated separately.
