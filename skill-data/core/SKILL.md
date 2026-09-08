@@ -199,9 +199,13 @@ Rules:
 
 ### Applying an env change
 
-- Runtime vars/secrets → pushed live via SIGUSR1, **no restart**.
+- Runtime vars/secrets apply without rebuilding the image. The application process restarts to read its new environment; do not promise uninterrupted requests.
 - `VITE_*` / `NEXT_PUBLIC_*` (build-time baked) → `lizard redeploy --service <svc>`; a plain restart won't pick them up.
-- Verify the consumer got it: `lizard ssh --service <svc> -- env`.
+- Verify a non-secret value or the application's behavior. Do not print the full environment: it can expose credentials.
+
+## Sandboxes: timeout
+
+`lizard sandbox create` sends a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without expiration, or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. Check the current Sandboxes lifecycle documentation before relying on pause to retain state.
 
 ## Managed addons
 

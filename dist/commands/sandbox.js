@@ -15,6 +15,13 @@ function parseIntOption(v) {
         throw new Error(`Invalid number: ${v}`);
     return n;
 }
+function parseTimeoutOption(value) {
+    const timeout = Number(value);
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(timeout) || timeout > 2_147_483_647) {
+        throw new Error("Timeout must be an integer from 0 to 2147483647 milliseconds");
+    }
+    return timeout;
+}
 /** Resolve a volume by name or ID. Requires a project — volumes are project-scoped. */
 async function resolveVolumeId(projectId, scope, nameOrId) {
     const volumes = await api.get(withScope(`/api/projects/${projectId}/volumes`, scope));
@@ -51,7 +58,7 @@ export function registerSandbox(program) {
     sb.command("create")
         .description("Create a sandbox")
         .option("-t, --template <name>", `Template (${VALID_TEMPLATES.join(", ")})`, "base")
-        .option("--timeout <ms>", "Idle timeout in ms before auto-stop (default 300000)", parseIntOption)
+        .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
         .option("--region <code>", "Region to create the sandbox in")
         .option("--volume <name-or-id>", "Attach a persistent volume")
         .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
@@ -152,8 +159,8 @@ export function registerSandbox(program) {
     });
     sb.command("timeout")
         .argument("<id>", "Sandbox ID")
-        .argument("<ms>", "New idle timeout in milliseconds", parseIntOption)
-        .description("Update a sandbox's idle timeout")
+        .argument("<ms>", "New lifetime in milliseconds (minimum 1000)", parseTimeoutOption)
+        .description("Update a sandbox's lifetime")
         .action(async (id, ms) => {
         const updated = await api.post(`/api/sandboxes/${id}/timeout`, { timeoutMs: ms });
         if (isJSONMode())

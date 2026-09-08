@@ -16,7 +16,8 @@
     "dev": "tsx src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "vitest run test/cli.test.ts",
+    "test": "vitest run test/unit",
+    "test:integration": "vitest run test/cli.test.ts",
     "test:unit": "vitest run test/unit"
   },
   "keywords": [

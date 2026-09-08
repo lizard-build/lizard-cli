@@ -1,7 +1,8 @@
 import chalk from "chalk";
 import ora from "ora";
 import { Command } from "commander";
-import { execSync, spawn } from "child_process";
+import { execSync } from "child_process";
+import { createTarball } from "../lib/archive.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
@@ -290,34 +291,6 @@ function collectFilesManually(root: string, dir: string): string[] {
   return results;
 }
 
-function createTarball(files: string[], cwd: string): Promise<Uint8Array> {
-  return new Promise((resolve, reject) => {
-    const chunks: Uint8Array[] = [];
-    // `--null` makes tar read NUL-separated paths from stdin, matching what
-    // `git ls-files -z` writes. Newline-separated input would split filenames
-    // containing `\n` across multiple entries. Both bsdtar (macOS) and GNU
-    // tar accept `--null` before `-T -`.
-    const tar = spawn("tar", ["--null", "-czf", "-", "-T", "-"], { cwd });
-    tar.stdout.on("data", (c: Buffer) => chunks.push(c));
-    tar.stderr.on("data", () => {});
-    tar.on("close", (code: number) => {
-      if (code === 0) {
-        const total = chunks.reduce((n, c) => n + c.length, 0);
-        const out = new Uint8Array(total);
-        let off = 0;
-        for (const c of chunks) {
-          out.set(c, off);
-          off += c.length;
-        }
-        resolve(out);
-      } else {
-        reject(new Error(`tar exited ${code}`));
-      }
-    });
-    if (files.length > 0) tar.stdin.write(files.join("\0") + "\0");
-    tar.stdin.end();
-  });
-}
 
 function detectLocalPort(dir: string): number | undefined {
   for (const name of ["Dockerfile", "dockerfile", "Dockerfile.production"]) {
@@ -340,7 +313,7 @@ function prompt(question: string): Promise<string> {
   });
 }
 
-async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuildId?: string) {
+export async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuildId?: string) {
   // Prefer the buildId returned by the upload/redeploy response — polling
   // builds[0] races against a still-running previous build and can attach
   // to the wrong one.
@@ -372,12 +345,16 @@ async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuil
   // idle timeout, network blips). Reconnect until the build itself reports
   // a terminal status, with a hard cap so we don't loop forever.
   const deadline = Date.now() + 15 * 60 * 1000; // 15 min max
+  let buildFailed = false;
   while (Date.now() < deadline) {
     let dropped = false;
     try {
       await streamSSE(`/api/builds/${buildId}/logs`, (event, data) => {
         if (event === "done" || event === "error") {
-          if (event === "error") emitBuildError(data);
+          if (event === "error") {
+            buildFailed = true;
+            emitBuildError(data);
+          }
           else emitBuildDone();
           return false;
         }
@@ -392,6 +369,7 @@ async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuil
     // build state — terminal status means we stop reconnecting.
     try {
       const build = await api.get<{ status: string }>(`/api/builds/${buildId}`);
+      if (build.status === "failed") buildFailed = true;
       if (build.status === "done" || build.status === "failed") break;
     } catch {}
 
@@ -399,6 +377,10 @@ async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuil
     await sleep(2000);
   }
 
+  if (buildFailed) {
+    process.exitCode = 1;
+    return;
+  }
   if (ciMode) return;
 
   const app = await api.get<App>(`/api/apps/${appId}`);
@@ -415,6 +397,7 @@ async function streamBuildLogs(appId: string, ciMode: boolean = false, knownBuil
       success(`Deployed! ${app.domain ? chalk.cyan(`https://${app.domain}`) : ""}`);
     }
   } else if (app.status === "failed") {
+    process.exitCode = 1;
     if (isJSONMode()) {
       process.stdout.write(
         JSON.stringify({ event: "failed", status: "failed" }) + "\n",

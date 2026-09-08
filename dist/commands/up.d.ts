@@ -7,3 +7,4 @@ import { Command } from "commander";
  *   - --detach returns immediately after upload
  */
 export declare function registerUp(program: Command): void;
+export declare function streamBuildLogs(appId: string, ciMode?: boolean, knownBuildId?: string): Promise<void>;

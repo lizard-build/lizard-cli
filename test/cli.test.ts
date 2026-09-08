@@ -10,7 +10,8 @@
  *     mutate services (deploy, scale) are skipped so they can never touch
  *     an arbitrary real project picked from the account.
  *
- * Run: npm test
+ * Run: LIZARD_LIVE_TESTS=1 npm run test:integration
+ * Mutations also require LIZARD_TEST_PROJECT_ID and LIZARD_TEST_ALLOW_MUTATIONS=1.
  *
  * Flag-order rules (commander):
  *   - Global flags (--json, --token, --region) go BEFORE the subcommand.
@@ -39,7 +40,7 @@ import * as os from "node:os";
 // fall back to whatever `lizard` is on PATH. Resolve to absolute path so we
 // can run from any cwd (the e2e suite drops into /tmp for fixtures).
 function resolveLizard(): string[] {
-  const raw = process.env.LIZARD_BIN ?? "lizard";
+  const raw = process.env.LIZARD_BIN ?? "dist/index.js";
   if (raw.endsWith(".js")) {
     return [process.execPath, path.resolve(raw)];
   }
@@ -110,10 +111,15 @@ let projectId: string;
 
 // Tracks created app IDs for afterAll cleanup
 const createdApps: string[] = [];
+const allowMutations = process.env.LIZARD_TEST_ALLOW_MUTATIONS === "1"
+  && Boolean(process.env.LIZARD_TEST_PROJECT_ID);
 
 // ── Setup: resolve project ID ─────────────────────────────────────────────────
 
 beforeAll(async () => {
+  if (process.env.LIZARD_LIVE_TESTS !== "1") {
+    throw new Error("Live API tests require LIZARD_LIVE_TESTS=1. Run npm test for local unit tests.");
+  }
   // Explicit override wins (CI-friendly).
   if (process.env.LIZARD_TEST_PROJECT_ID) {
     projectId = process.env.LIZARD_TEST_PROJECT_ID;
@@ -205,7 +211,7 @@ describe("projects", () => {
 
 // ── Project-scope (global) secrets ────────────────────────────────────────────
 
-describe("project secrets", () => {
+describe.skipIf(!allowMutations)("project secrets", () => {
   const KEY = `CLI_TEST_GLOBAL_${Date.now()}`;
 
   // For listing we use the bare `secret` form (no `list` subcommand) — the
@@ -265,7 +271,7 @@ describe("ps (service inventory)", () => {
 // Mutates a real app (forces replicas=1) — only safe against a dedicated,
 // explicitly pinned test project.
 
-describe.skipIf(!process.env.LIZARD_TEST_PROJECT_ID)("scale", () => {
+describe.skipIf(!allowMutations)("scale", () => {
   test("scale --replicas succeeds when an app exists", async () => {
     const services = await cliJSON("ps", "--project", projectId);
     const apps: Array<{ id: string; name: string }> = services?.apps ?? [];
@@ -313,7 +319,7 @@ describe("domain", () => {
 let DEPLOY_DIR: string | undefined;
 
 describe.skipIf(
-  process.env.LIZARD_SKIP_DEPLOY === "1" || !process.env.LIZARD_TEST_PROJECT_ID,
+  process.env.LIZARD_SKIP_DEPLOY === "1" || !allowMutations,
 )("deploy", () => {
   const appName = `cli-test-${Date.now()}`;
   let appId: string;
@@ -476,6 +482,7 @@ describe("error handling", () => {
 // ── Cleanup ───────────────────────────────────────────────────────────────────
 
 afterAll(async () => {
+  if (!allowMutations || process.env.LIZARD_LIVE_TESTS !== "1") return;
   for (const id of createdApps) {
     await execa(LIZARD_CMD, [
       ...LIZARD_ARGS_PREFIX,
