@@ -4,7 +4,8 @@ import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { api, streamSSE, withScope } from "../lib/api.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
-import { success, info, error, isJSONMode, printJSON, isTTY } from "../lib/format.js";
+import { success, info, error, isJSONMode, printJSON, isTTY, fail } from "../lib/format.js";
+import { waitForAppReady } from "../lib/wait-ready.js";
 
 export function registerRedeploy(program: Command) {
   program
@@ -12,6 +13,11 @@ export function registerRedeploy(program: Command) {
     .argument("[nameOrId]", "App name or ID to redeploy")
     .description("Trigger a fresh build (latest commit / last upload) with current vars")
     .option("--detach", "Run in background")
+    .option(
+      "--wait",
+      "Wait for the new build to deploy and become ready before exiting (works in --json mode too)",
+    )
+    .option("--timeout <seconds>", "Max time to wait with --wait, in seconds", "120")
     .option("-s, --service <name>", "App name or ID (alias for positional)")
     .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (nameOrId: string | undefined, opts) => {
@@ -55,6 +61,12 @@ export function registerRedeploy(program: Command) {
         }
       }
 
+      const timeoutSeconds = parseInt(opts.timeout, 10);
+      if (!(timeoutSeconds > 0)) {
+        fail(`--timeout must be a positive number of seconds, got ${JSON.stringify(opts.timeout)}`, 1, "INVALID_ARGUMENT");
+      }
+      const timeoutMs = timeoutSeconds * 1000;
+
       const spinner = ora("Starting redeploy...").start();
       // The endpoint pre-creates and returns the Build record — use its id
       // instead of polling builds[0], which races against a previous build.
@@ -65,7 +77,7 @@ export function registerRedeploy(program: Command) {
       );
       spinner.stop();
 
-      if (opts.detach || isJSONMode()) {
+      if (!opts.wait && (opts.detach || isJSONMode())) {
         if (isJSONMode()) {
           printJSON({ id, buildId: build?.id, status: "deploying" });
         } else {
@@ -75,7 +87,8 @@ export function registerRedeploy(program: Command) {
         return;
       }
 
-      info("Redeploying...");
+      const jsonWait = opts.wait && isJSONMode();
+      if (!jsonWait) info("Redeploying...");
 
       let buildId: string | null = build?.id ?? null;
       // Fallback for older servers that respond without a Build record.
@@ -95,12 +108,19 @@ export function registerRedeploy(program: Command) {
         } catch {}
       }
 
+      let buildFailed = false;
+      let buildFailReason: string | undefined;
       if (buildId) {
         await streamSSE(`/api/builds/${buildId}/logs`, (event, data) => {
           if (event === "done" || event === "error") {
-            if (event === "error") error(`Build failed: ${data}`);
+            if (event === "error") {
+              buildFailed = true;
+              buildFailReason = data;
+              if (!jsonWait) error(`Build failed: ${data}`);
+            }
             return false;
           }
+          if (jsonWait) return true; // suppress raw log lines in JSON mode
           try {
             const parsed = JSON.parse(data);
             const line =
@@ -113,11 +133,45 @@ export function registerRedeploy(program: Command) {
         });
       }
 
+      if (opts.wait) {
+        if (buildFailed) {
+          if (isJSONMode()) {
+            printJSON({ id, buildId, ok: false, status: "build_failed", reason: buildFailReason });
+          } else {
+            error(`Redeploy failed: ${buildFailReason ?? "build failed"}`);
+          }
+          process.exitCode = 1;
+          return;
+        }
+        // Build succeeded — deployStatus is already deploying/idle by this point
+        // (streamSSE only returns after the build's done/error frame), so trust
+        // status/deployStatus transitions directly rather than gating on
+        // restartedAt (redeploy never touches it — see waitForAppReady's doc).
+        const waitSpinner = isJSONMode() ? null : ora("Waiting for the new build to become ready...").start();
+        const result = await waitForAppReady(id!, undefined, { timeoutMs });
+        waitSpinner?.stop();
+
+        if (isJSONMode()) {
+          printJSON({ id, buildId, ...result });
+        } else if (result.ok) {
+          success(`Redeployed! ${result.domain ? chalk.cyan(`https://${result.domain}`) : ""}`);
+        } else {
+          error(
+            result.status === "timeout"
+              ? `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for the deploy to become ready`
+              : `Redeploy failed (${result.status})`,
+          );
+        }
+        if (!result.ok) process.exitCode = 1;
+        return;
+      }
+
       const app = await api.get<{ status: string; domain?: string }>(`/api/apps/${id}`);
       if (app.status === "running") {
         success(`Redeployed! ${app.domain ? chalk.cyan(`https://${app.domain}`) : ""}`);
       } else {
         error("Redeploy failed");
+        process.exitCode = 1;
       }
     });
 }

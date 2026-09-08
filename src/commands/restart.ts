@@ -4,7 +4,8 @@ import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { api, withScope } from "../lib/api.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
-import { success, info, error, isJSONMode, printJSON, isTTY } from "../lib/format.js";
+import { success, info, error, isJSONMode, printJSON, isTTY, fail } from "../lib/format.js";
+import { waitForAppReady, AppSnapshot } from "../lib/wait-ready.js";
 
 export function registerRestart(program: Command) {
   program
@@ -12,6 +13,11 @@ export function registerRestart(program: Command) {
     .argument("[nameOrId]", "App name or ID to restart")
     .description("Restart an app")
     .option("--detach", "Run in background")
+    .option(
+      "--wait",
+      "Wait for this specific restart attempt to become ready before exiting (works in --json mode too) — an old, already-running read from before the restart never counts as success",
+    )
+    .option("--timeout <seconds>", "Max time to wait with --wait, in seconds", "120")
     .option("-s, --service <name>", "App name or ID (alias for positional)")
     .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (nameOrId: string | undefined, opts) => {
@@ -51,9 +57,47 @@ export function registerRestart(program: Command) {
         }
       }
 
+      const timeoutSeconds = parseInt(opts.timeout, 10);
+      if (!(timeoutSeconds > 0)) {
+        fail(`--timeout must be a positive number of seconds, got ${JSON.stringify(opts.timeout)}`, 1, "INVALID_ARGUMENT");
+      }
+      const timeoutMs = timeoutSeconds * 1000;
+
+      // Captured before triggering — waitForAppReady uses this baseline to tell
+      // this attempt apart from the app simply already being "running" from
+      // before the restart. Not fatal if it fails: undefined baseline still
+      // works (any non-null restartedAt reported afterwards counts as new).
+      let baselineRestartedAt: AppSnapshot["restartedAt"] = null;
+      if (opts.wait) {
+        try {
+          const before = await api.get<AppSnapshot>(`/api/apps/${id}`);
+          baselineRestartedAt = before.restartedAt ?? null;
+        } catch {}
+      }
+
       const spinner = ora("Starting restart...").start();
       await api.post(`/api/apps/${id}/restart`, undefined, { "X-Deploy-Source": "cli" });
       spinner.stop();
+
+      if (opts.wait) {
+        const waitSpinner = isJSONMode() ? null : ora("Waiting for the new attempt to become ready...").start();
+        const result = await waitForAppReady(id!, baselineRestartedAt, { timeoutMs });
+        waitSpinner?.stop();
+
+        if (isJSONMode()) {
+          printJSON({ id, ...result });
+        } else if (result.ok) {
+          success(`Restarted! ${result.domain ? chalk.cyan(`https://${result.domain}`) : ""}`);
+        } else {
+          error(
+            result.status === "timeout"
+              ? `Timed out after ${Math.round(timeoutMs / 1000)}s waiting for the restart to become ready`
+              : `Restart failed (${result.status})`,
+          );
+        }
+        if (!result.ok) process.exitCode = 1;
+        return;
+      }
 
       if (opts.detach || isJSONMode()) {
         if (isJSONMode()) {
