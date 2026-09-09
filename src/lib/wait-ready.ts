@@ -5,6 +5,7 @@ export interface AppSnapshot {
   deployStatus?: string | null;
   restartedAt?: number | string | null;
   domain?: string;
+  containerPort?: number;
 }
 
 export interface WaitResult {
@@ -28,8 +29,10 @@ function sleep(ms: number): Promise<void> {
  * Two consecutive successful checks, spaced apart, against the app's own domain.
  * A single 200 isn't enough during a restart handover — LIZARD-174's reproduction
  * found one healthy response immediately followed by a 502 while the old process
- * was still finishing its shutdown. Not run for apps with no domain (workers) —
- * platform-reported readiness is the only signal available for those.
+ * was still finishing its shutdown. Not run for containerPort=0 workers —
+ * every app gets a generated domain regardless of whether it serves HTTP, so
+ * the caller gates this on containerPort, not domain presence (LIZARD-174).
+ * Platform-reported readiness is the only signal available for those.
  */
 async function debounceHealthCheck(domain: string): Promise<boolean> {
   for (let i = 0; i < 2; i++) {
@@ -108,7 +111,13 @@ export async function waitForAppReady(
       return { ok: false, status: app.status, attemptId, domain: app.domain, waitedMs: Date.now() - start };
     }
     if (app.status === "running") {
-      if (healthCheck && app.domain) {
+      // Every app gets a generated .onlizard.com domain regardless of whether
+      // it actually listens for HTTP — a containerPort=0 worker has one too.
+      // LIZARD-174: gating on app.domain alone made restart --wait spin a
+      // worker until the timeout, health-checking a URL nothing ever answers,
+      // even though the platform had already reported it Running/Ready.
+      const hasHttpPort = app.containerPort !== 0;
+      if (healthCheck && hasHttpPort && app.domain) {
         const healthy = await debounceHealthCheck(app.domain);
         if (!healthy) {
           // Platform says running, but the URL isn't consistently healthy yet
