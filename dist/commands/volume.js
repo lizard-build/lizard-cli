@@ -1,18 +1,9 @@
 import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { api, withScope } from "../lib/api.js";
+import { assertValidVolumeName, resolveVolume } from "../lib/volume.js";
 import { resolveProjectScope } from "../lib/resolve.js";
 import { success, info, isJSONMode, printJSON, table, isTTY } from "../lib/format.js";
-/** Resolve a volume by name or ID within a project. Mirrors resolveService. */
-async function resolveVolume(projectId, scope, nameOrId) {
-    const volumes = await api.get(withScope(`/api/projects/${projectId}/volumes`, scope));
-    const lower = nameOrId.toLowerCase();
-    const match = volumes.find((v) => v.id.toLowerCase() === lower || v.name.toLowerCase() === lower);
-    if (!match) {
-        throw new Error(`Volume "${nameOrId}" not found. Available: ${volumes.map((v) => v.name).join(", ") || "(none)"}`);
-    }
-    return match;
-}
 function parseIntOption(v) {
     const n = parseInt(v, 10);
     if (Number.isNaN(n))
@@ -40,9 +31,10 @@ export function registerVolume(program) {
             console.log("No volumes. Use `lizard volume create <name>`.");
             return;
         }
-        table(["Name", "ID", "Size", "Status", "Attached to"], volumes.map((v) => [
+        // The name is the key now — the ID is noise in a human-readable list and is
+        // still there in full under `--json`.
+        table(["Name", "Size", "Status", "Attached to"], volumes.map((v) => [
             v.name,
-            chalk.dim(v.id),
             `${v.sizeGb} GB`,
             v.status,
             v.attachedTo ? chalk.dim(v.attachedTo) : chalk.dim("—"),
@@ -55,6 +47,7 @@ export function registerVolume(program) {
         .option("--size <gb>", "Size in GB (1-100, default 5)", parseIntOption)
         .option("-p, --project <id>", "Project name, slug, or ID")
         .action(async (name, opts) => {
+        assertValidVolumeName(name);
         const { projectId, scope } = await resolveProjectScope(opts.project);
         const sizeGb = opts.size ?? 5;
         if (sizeGb < 1 || sizeGb > 100) {
@@ -68,8 +61,7 @@ export function registerVolume(program) {
             return;
         }
         success(`Volume ${chalk.bold(created.name)} created (${created.sizeGb} GB)`);
-        info(chalk.dim(`  ID: ${created.id}`));
-        info(chalk.dim(`  Attach it to a sandbox: lizard sandbox create --volume ${created.id}`));
+        info(chalk.dim(`  Attach it to a sandbox: lizard sandbox create --volume ${created.name}`));
     });
     vol
         .command("rm")
@@ -91,7 +83,7 @@ export function registerVolume(program) {
             if (p.isCancel(ok) || !ok)
                 process.exit(5);
         }
-        await api.delete(withScope(`/api/projects/${projectId}/volumes/${volume.id}`, scope));
+        await api.delete(withScope(`/api/projects/${projectId}/volumes/${encodeURIComponent(volume.name)}`, scope));
         if (isJSONMode()) {
             printJSON({ id: volume.id, status: "deleted" });
         }

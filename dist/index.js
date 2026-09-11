@@ -46,6 +46,7 @@ function addAgentsPointerToSubcommands(cmd) {
 // Commands (alphabetical by command name)
 import { registerAdd } from "./commands/add.js";
 import { registerConfig } from "./commands/config.js";
+import { registerCredits } from "./commands/credits.js";
 import { registerDocs } from "./commands/docs.js";
 import { registerDomain } from "./commands/domain.js";
 import { registerEvents } from "./commands/events.js";
@@ -132,6 +133,7 @@ program.exitOverride();
 // Register all commands (alphabetical)
 registerAdd(program);
 registerConfig(program);
+registerCredits(program);
 registerDocs(program);
 registerDomain(program);
 registerEvents(program);

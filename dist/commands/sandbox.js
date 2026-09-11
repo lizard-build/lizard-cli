@@ -7,6 +7,7 @@ import * as p from "@clack/prompts";
 import { api, getBaseURL, getRawText, streamSSE, withQuery, withScope } from "../lib/api.js";
 import { getToken } from "../lib/auth.js";
 import { resolveProjectScope } from "../lib/resolve.js";
+import { resolveVolume } from "../lib/volume.js";
 import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAgo, isTTY } from "../lib/format.js";
 const VALID_TEMPLATES = ["base", "code-interpreter-v1"];
 function parseIntOption(v) {
@@ -21,16 +22,6 @@ function parseTimeoutOption(value) {
         throw new Error("Timeout must be an integer from 0 to 2147483647 milliseconds");
     }
     return timeout;
-}
-/** Resolve a volume by name or ID. Requires a project — volumes are project-scoped. */
-async function resolveVolumeId(projectId, scope, nameOrId) {
-    const volumes = await api.get(withScope(`/api/projects/${projectId}/volumes`, scope));
-    const lower = nameOrId.toLowerCase();
-    const match = volumes.find((v) => v.id.toLowerCase() === lower || v.name.toLowerCase() === lower);
-    if (!match) {
-        throw new Error(`Volume "${nameOrId}" not found. Available: ${volumes.map((v) => v.name).join(", ") || "(none)"}`);
-    }
-    return match.id;
 }
 function printSandboxList(sandboxes) {
     if (isJSONMode()) {
@@ -72,9 +63,11 @@ export function registerSandbox(program) {
         // create a project-less sandbox.
         const { projectId, scope } = await resolveProjectScope(opts.project);
         const workspaceId = scope.workspaceId ?? undefined;
+        // Resolved server-side so a name is matched against this project only — see
+        // lib/volume.ts for why the old client-side .find() had to go.
         let volumeId;
         if (opts.volume) {
-            volumeId = await resolveVolumeId(projectId, scope, opts.volume);
+            volumeId = (await resolveVolume(projectId, scope, opts.volume)).id;
         }
         const spinner = isJSONMode() ? null : ora("Creating sandbox...").start();
         let sandbox;
