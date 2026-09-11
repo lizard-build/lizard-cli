@@ -8,6 +8,7 @@ import { Command } from "commander";
 import { api, getBaseURL, getRawText, streamSSE, withQuery, withScope, type ResourceScope } from "../lib/api.js";
 import { getToken } from "../lib/auth.js";
 import { resolveProjectScope } from "../lib/resolve.js";
+import { resolveVolume } from "../lib/volume.js";
 import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAgo, isTTY } from "../lib/format.js";
 
 const VALID_TEMPLATES = ["base", "code-interpreter-v1"] as const;
@@ -27,11 +28,6 @@ interface SandboxRecord {
   projectId?: string | null;
 }
 
-interface VolumeRecord {
-  id: string;
-  name: string;
-}
-
 function parseIntOption(v: string): number {
   const n = parseInt(v, 10);
   if (Number.isNaN(n)) throw new Error(`Invalid number: ${v}`);
@@ -44,27 +40,6 @@ function parseTimeoutOption(value: string): number {
     throw new Error("Timeout must be an integer from 0 to 2147483647 milliseconds");
   }
   return timeout;
-}
-
-/** Resolve a volume by name or ID. Requires a project — volumes are project-scoped. */
-async function resolveVolumeId(
-  projectId: string,
-  scope: ResourceScope,
-  nameOrId: string,
-): Promise<string> {
-  const volumes = await api.get<VolumeRecord[]>(
-    withScope(`/api/projects/${projectId}/volumes`, scope),
-  );
-  const lower = nameOrId.toLowerCase();
-  const match = volumes.find(
-    (v) => v.id.toLowerCase() === lower || v.name.toLowerCase() === lower,
-  );
-  if (!match) {
-    throw new Error(
-      `Volume "${nameOrId}" not found. Available: ${volumes.map((v) => v.name).join(", ") || "(none)"}`,
-    );
-  }
-  return match.id;
 }
 
 function printSandboxList(sandboxes: SandboxRecord[]) {
@@ -114,9 +89,11 @@ export function registerSandbox(program: Command) {
       const { projectId, scope } = await resolveProjectScope(opts.project);
       const workspaceId = scope.workspaceId ?? undefined;
 
+      // Resolved server-side so a name is matched against this project only — see
+      // lib/volume.ts for why the old client-side .find() had to go.
       let volumeId: string | undefined;
       if (opts.volume) {
-        volumeId = await resolveVolumeId(projectId, scope, opts.volume);
+        volumeId = (await resolveVolume(projectId, scope, opts.volume)).id;
       }
 
       const spinner = isJSONMode() ? null : ora("Creating sandbox...").start();

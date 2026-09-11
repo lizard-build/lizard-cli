@@ -2,38 +2,9 @@ import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { api, withScope, type ResourceScope } from "../lib/api.js";
+import { assertValidVolumeName, resolveVolume, type VolumeRecord } from "../lib/volume.js";
 import { resolveProjectScope } from "../lib/resolve.js";
 import { success, info, isJSONMode, printJSON, table, isTTY } from "../lib/format.js";
-
-interface VolumeRecord {
-  id: string;
-  name: string;
-  sizeGb: number;
-  status: string;
-  attachedTo?: string | null;
-  createdAt?: number;
-}
-
-/** Resolve a volume by name or ID within a project. Mirrors resolveService. */
-async function resolveVolume(
-  projectId: string,
-  scope: ResourceScope,
-  nameOrId: string,
-): Promise<VolumeRecord> {
-  const volumes = await api.get<VolumeRecord[]>(
-    withScope(`/api/projects/${projectId}/volumes`, scope),
-  );
-  const lower = nameOrId.toLowerCase();
-  const match = volumes.find(
-    (v) => v.id.toLowerCase() === lower || v.name.toLowerCase() === lower,
-  );
-  if (!match) {
-    throw new Error(
-      `Volume "${nameOrId}" not found. Available: ${volumes.map((v) => v.name).join(", ") || "(none)"}`,
-    );
-  }
-  return match;
-}
 
 function parseIntOption(v: string): number {
   const n = parseInt(v, 10);
@@ -68,11 +39,12 @@ export function registerVolume(program: Command) {
         return;
       }
 
+      // The name is the key now — the ID is noise in a human-readable list and is
+      // still there in full under `--json`.
       table(
-        ["Name", "ID", "Size", "Status", "Attached to"],
+        ["Name", "Size", "Status", "Attached to"],
         volumes.map((v) => [
           v.name,
-          chalk.dim(v.id),
           `${v.sizeGb} GB`,
           v.status,
           v.attachedTo ? chalk.dim(v.attachedTo) : chalk.dim("—"),
@@ -87,6 +59,7 @@ export function registerVolume(program: Command) {
     .option("--size <gb>", "Size in GB (1-100, default 5)", parseIntOption)
     .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (name: string, opts) => {
+      assertValidVolumeName(name);
       const { projectId, scope } = await resolveProjectScope(opts.project);
       const sizeGb = opts.size ?? 5;
       if (sizeGb < 1 || sizeGb > 100) {
@@ -104,8 +77,7 @@ export function registerVolume(program: Command) {
         return;
       }
       success(`Volume ${chalk.bold(created.name)} created (${created.sizeGb} GB)`);
-      info(chalk.dim(`  ID: ${created.id}`));
-      info(chalk.dim(`  Attach it to a sandbox: lizard sandbox create --volume ${created.id}`));
+      info(chalk.dim(`  Attach it to a sandbox: lizard sandbox create --volume ${created.name}`));
     });
 
   vol
@@ -132,7 +104,7 @@ export function registerVolume(program: Command) {
         if (p.isCancel(ok) || !ok) process.exit(5);
       }
 
-      await api.delete(withScope(`/api/projects/${projectId}/volumes/${volume.id}`, scope));
+      await api.delete(withScope(`/api/projects/${projectId}/volumes/${encodeURIComponent(volume.name)}`, scope));
 
       if (isJSONMode()) {
         printJSON({ id: volume.id, status: "deleted" });
