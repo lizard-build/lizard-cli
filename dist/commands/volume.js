@@ -45,6 +45,7 @@ export function registerVolume(program) {
         .argument("<name>", "Volume name")
         .description("Create a persistent volume")
         .option("--size <gb>", "Size in GB (1-100, default 5)", parseIntOption)
+        .option("--region <code>", "Region to place the volume in (must match the sandbox that will attach it)")
         .option("-p, --project <id>", "Project name, slug, or ID")
         .action(async (name, opts) => {
         assertValidVolumeName(name);
@@ -55,7 +56,7 @@ export function registerVolume(program) {
         }
         if (!isJSONMode())
             info(`Creating volume ${chalk.cyan(name)}...`);
-        const created = await api.post(withScope(`/api/projects/${projectId}/volumes`, scope), { name, sizeGb });
+        const created = await api.post(withScope(`/api/projects/${projectId}/volumes`, scope), { name, sizeGb, region: opts.region });
         if (isJSONMode()) {
             printJSON(created);
             return;
