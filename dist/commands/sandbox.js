@@ -235,6 +235,112 @@ Examples:
         else
             success(`Port ${port} unexposed`);
     });
+    sb.command("fork")
+        .argument("<id>", "Running sandbox ID to fork")
+        .description("Checkpoint a running sandbox and boot one or more forks from it")
+        .option("-n, --count <n>", "Number of forks to boot", parseIntOption, 1)
+        .option("--timeout <ms>", "Fork lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 0)
+        .action(async (id, opts) => {
+        const spinner = isJSONMode() ? null : ora(`Forking ${id}...`).start();
+        let res;
+        try {
+            res = await api.post(`/api/sandboxes/${id}/fork`, { count: opts.count, timeoutMs: opts.timeout });
+        }
+        catch (e) {
+            spinner?.stop();
+            throw e;
+        }
+        spinner?.stop();
+        if (isJSONMode()) {
+            printJSON(res);
+            return;
+        }
+        const ok = res.results.filter((r) => r.sandbox).map((r) => r.sandbox);
+        const failed = res.results.filter((r) => r.error);
+        success(`Forked ${chalk.bold(id)} → ${ok.length}/${res.results.length} fork(s)`);
+        if (ok.length)
+            printSandboxList(ok);
+        for (const f of failed)
+            error(f.error.message);
+    });
+    sb.command("snapshot")
+        .argument("<id>", "Running sandbox ID")
+        .description("Create a persistent snapshot of a running sandbox (fork from it later)")
+        .option("--name <name>", "Optional label for the snapshot")
+        .action(async (id, opts) => {
+        const spinner = isJSONMode() ? null : ora(`Snapshotting ${id}...`).start();
+        let snap;
+        try {
+            snap = await api.post(`/api/sandboxes/${id}/snapshot`, { name: opts.name });
+        }
+        catch (e) {
+            spinner?.stop();
+            throw e;
+        }
+        spinner?.stop();
+        if (isJSONMode()) {
+            printJSON(snap);
+            return;
+        }
+        success(`Snapshot ${chalk.bold(snap.id)} created`);
+        info(chalk.dim(`  Restore: lizard sandbox restore ${snap.id}`));
+    });
+    sb.command("snapshots")
+        .description("List persistent sandbox snapshots in the linked (or given) project")
+        .option("-p, --project <id>", "List snapshots for this project instead of the linked one")
+        .action(async (opts) => {
+        const { projectId, scope } = await resolveProjectScope(opts.project);
+        const snaps = await api.get(withScope(`/api/projects/${projectId}/snapshots`, scope));
+        if (isJSONMode()) {
+            printJSON(snaps);
+            return;
+        }
+        if (!snaps.length) {
+            console.log("No snapshots. Use `lizard sandbox snapshot <id>`.");
+            return;
+        }
+        table(["Snapshot ID", "Name", "Template", "From", "CPU/Mem", "Created"], snaps.map((s) => [s.id, s.name ?? "", s.template, s.sourceSandboxId ?? "", `${s.cpus} vCPU / ${s.memoryMb} MB`, timeAgo(s.createdAt)]));
+    });
+    sb.command("restore")
+        .alias("snapshot-fork")
+        .argument("<snapshot-id>", "Snapshot ID to boot from")
+        .description("Boot a new sandbox from a persistent snapshot")
+        .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 0)
+        .action(async (snapshotId, opts) => {
+        const spinner = isJSONMode() ? null : ora(`Restoring from ${snapshotId}...`).start();
+        let sandbox;
+        try {
+            sandbox = await api.post(`/api/sandbox-snapshots/${snapshotId}/fork`, { timeoutMs: opts.timeout });
+        }
+        catch (e) {
+            spinner?.stop();
+            throw e;
+        }
+        spinner?.stop();
+        if (isJSONMode()) {
+            printJSON(sandbox);
+            return;
+        }
+        success(`Sandbox ${chalk.bold(sandbox.id)} restored from snapshot`);
+        info(chalk.dim(`  Exec: lizard sandbox exec ${sandbox.id} -- <cmd>`));
+    });
+    sb.command("snapshot-rm")
+        .alias("snapshot-delete")
+        .argument("<snapshot-id>", "Snapshot ID")
+        .description("Delete a persistent snapshot")
+        .option("-y, --yes", "Skip confirmation")
+        .action(async (snapshotId, opts) => {
+        if (!opts.yes && isTTY() && !isJSONMode()) {
+            const ok = await p.confirm({ message: `Delete snapshot ${chalk.bold(snapshotId)}?` });
+            if (p.isCancel(ok) || !ok)
+                process.exit(5);
+        }
+        await api.delete(`/api/sandbox-snapshots/${snapshotId}`);
+        if (isJSONMode())
+            printJSON({ id: snapshotId, status: "deleted" });
+        else
+            success(`Snapshot ${chalk.bold(snapshotId)} deleted`);
+    });
     registerSandboxFiles(sb);
 }
 function registerSandboxFiles(sb) {
