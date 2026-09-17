@@ -12,6 +12,7 @@ let _accessToken: string | null = null;
 export function setBaseURL(url: string) { baseURL = url; }
 export function getBaseURL() { return baseURL; }
 export function setAccessToken(token: string) { _accessToken = token; }
+export function getRequestToken(): string | null { return _accessToken || getToken(); }
 
 // ── Scoping ───────────────────────────────────────────────────────────
 //

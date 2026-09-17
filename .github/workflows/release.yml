@@ -23,12 +23,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Bump patch version
+      - name: Select release version
         id: bump
         run: |
           CURRENT=$(node -p "require('./package.json').version")
-          IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
-          NEW="$MAJ.$MIN.$((PAT + 1))"
+          if git show-ref --verify --quiet "refs/tags/v$CURRENT"; then
+            IFS='.' read -r MAJ MIN PAT <<< "$CURRENT"
+            NEW="$MAJ.$MIN.$((PAT + 1))"
+          else
+            # Keep an explicit version bump from the pull request.
+            NEW="$CURRENT"
+          fi
           echo "version=$NEW" >> $GITHUB_OUTPUT
 
           node -e "
@@ -39,8 +44,17 @@ jobs:
           "
           sed -i "s/export const CURRENT_VERSION = \".*\"/export const CURRENT_VERSION = \"$NEW\"/" src/lib/updater.ts
 
-          git add package.json src/lib/updater.ts
-          git commit -m "chore: bump version to v$NEW [skip ci]"
+          node -e "
+            const fs = require('fs');
+            const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
+            lock.version = '$NEW';
+            lock.packages[''].version = '$NEW';
+            fs.writeFileSync('package-lock.json', JSON.stringify(lock, null, 2) + '\n');
+          "
+          git add package.json package-lock.json src/lib/updater.ts
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: bump version to v$NEW [skip ci]"
+          fi
           git tag "v$NEW"
           git push origin main --tags
 

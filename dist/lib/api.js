@@ -9,6 +9,7 @@ let _accessToken = null;
 export function setBaseURL(url) { baseURL = url; }
 export function getBaseURL() { return baseURL; }
 export function setAccessToken(token) { _accessToken = token; }
+export function getRequestToken() { return _accessToken || getToken(); }
 export function withQuery(path, params) {
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(params)) {

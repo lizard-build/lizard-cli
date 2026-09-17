@@ -1,6 +1,7 @@
 export declare function setBaseURL(url: string): void;
 export declare function getBaseURL(): string;
 export declare function setAccessToken(token: string): void;
+export declare function getRequestToken(): string | null;
 export interface ResourceScope {
     workspaceId?: string | null;
 }

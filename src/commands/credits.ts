@@ -1,3 +1,4 @@
+import { dollarsToCents, getX402Quote, payX402, getX402Status } from "../lib/x402.js";
 import chalk from "chalk";
 import open from "open";
 import * as p from "@clack/prompts";
@@ -244,13 +245,39 @@ export function registerCredits(program: Command) {
     .command("topup <amount>")
     .alias("purchase")
     .description("Buy credits (amount in dollars, e.g. `lizard credits topup 20`)")
-    .option("--method <method>", "card or crypto", "card")
+    .option("--method <method>", "card, crypto, or x402", "card")
+    .option("--quote", "Show an x402 quote without paying")
+    .option("--max-total <amount>", "Maximum x402 payment including fees, in dollars")
+    .option("--request-id <uuid>", "Reuse this ID to resume an x402 purchase")
+    .option("-y, --yes", "Confirm the x402 payment within --max-total")
     .option("--return-url <url>", "Where to redirect after payment")
     .option("--no-open", "Print the checkout link instead of opening a browser")
     .action(async (amount: string, opts) => {
+      if (opts.method === "x402") {
+        const creditCents = dollarsToCents(amount);
+        const quote = await getX402Quote(creditCents);
+        if (opts.quote) {
+          if (isJSONMode()) printJSON(quote);
+          else console.log(`Credits ${fmtCents(quote.creditCents)}, fee ${fmtCents(quote.feeCents)}, total ${fmtCents(quote.totalCents)} USDC on Base`);
+          return;
+        }
+        if (!opts.maxTotal) throw new Error("Use --max-total to set a payment limit including fees.");
+        const limit = dollarsToCents(opts.maxTotal);
+        if (quote.totalCents > limit) throw new Error("Payment exceeds --max-total.");
+        if (!opts.yes) {
+          if (!isTTY()) throw new Error("Use --yes and --max-total to authorize an x402 payment.");
+          const confirmed = await p.confirm({ message: `Pay ${fmtCents(quote.totalCents)} USDC for ${fmtCents(quote.creditCents)} credits?` });
+          if (p.isCancel(confirmed) || !confirmed) throw new Error("Payment cancelled.");
+        }
+        const result = await payX402(creditCents, limit, quote, opts.requestId);
+        if (isJSONMode()) printJSON(result);
+        else console.log(`Payment ${result.status}. Attempt: ${result.attemptId}. Request: ${result.requestId}`);
+        return;
+      }
+      if (opts.quote || opts.maxTotal || opts.requestId) throw new Error("--quote, --max-total, and --request-id require --method x402.");
       const creditCents = parseDollarsToCents(amount);
       if (opts.method !== "card" && opts.method !== "crypto") {
-        throw new Error(`--method must be "card" or "crypto", got "${opts.method}"`);
+        throw new Error(`--method must be "card", "crypto", or "x402", got "${opts.method}"`);
       }
       let out: { url?: string; sessionId?: string };
       try {
@@ -272,6 +299,14 @@ export function registerCredits(program: Command) {
       if (!out.url) throw new Error("No checkout URL returned.");
       console.log(`Complete payment (${fmtCents(creditCents)}) at:\n${chalk.cyan(out.url)}`);
       if (opts.open !== false && isTTY()) await open(out.url).catch(() => {});
+    });
+
+  cmd.command("payment-status <attempt-id>")
+    .description("Check or recover an x402 credit purchase")
+    .action(async (attemptId: string) => {
+      const result = await getX402Status(attemptId);
+      if (isJSONMode()) printJSON(result);
+      else console.log(`Payment ${result.status}. Attempt: ${result.attemptId}`);
     });
 
   // ── Auto top-up ───────────────────────────────────────────────────
@@ -341,3 +376,4 @@ export function registerCredits(program: Command) {
       }
     });
 }
+

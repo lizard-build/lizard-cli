@@ -1,6 +1,6 @@
 {
   "name": "@lizard-build/cli",
-  "version": "0.3.99",
+  "version": "4.0.0",
   "description": "Lizard CLI — deploy apps, databases and sandboxes to Lizard (lizard.build) from your terminal or your coding agent. Detects Go, Node, Python, Rust, Ruby, PHP, Java and static sites; adds Managed Postgres, Managed Redis and Managed Object Storage in one command.",
   "type": "module",
   "bin": {
@@ -49,11 +49,14 @@
   "license": "MIT",
   "dependencies": {
     "@clack/prompts": "^1.2.0",
+    "@x402/core": "^2.26.0",
+    "@x402/evm": "^2.26.0",
     "chalk": "^5.6.2",
     "commander": "^14.0.3",
     "conf": "^15.1.0",
     "open": "^10.2.0",
-    "ora": "^9.3.0"
+    "ora": "^9.3.0",
+    "viem": "^2.56.5"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
