@@ -10,7 +10,12 @@ import { resolveProjectScope } from "../lib/resolve.js";
 import { resolveProjectId } from "../lib/config.js";
 import { resolveVolume } from "../lib/volume.js";
 import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAgo, isTTY } from "../lib/format.js";
-const VALID_TEMPLATES = ["base", "code-interpreter-v1"];
+// Templates are per-region rows in sandbox_templates, not a constant. Hardcoding them
+// here meant a template that was built, registered and sitting warm in every region was
+// still rejected before a request was ever sent — codex and interpreter both were. The
+// server validates against the region's actual list and answers with what IS available,
+// so let it.
+const TEMPLATE_HINT = "base, codex, interpreter";
 function parseIntOption(v) {
     const n = parseInt(v, 10);
     if (Number.isNaN(n))
@@ -49,15 +54,12 @@ export function registerSandbox(program) {
         .description("Manage ephemeral compute sandboxes");
     sb.command("create")
         .description("Create a sandbox")
-        .option("-t, --template <name>", `Template (${VALID_TEMPLATES.join(", ")})`, "base")
+        .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
         .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
         .option("--region <code>", "Region to create the sandbox in")
         .option("--volume <name-or-id>", "Attach a persistent volume")
         .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
         .action(async (opts) => {
-        if (opts.template && !VALID_TEMPLATES.includes(opts.template)) {
-            throw new Error(`Unknown template "${opts.template}". Available: ${VALID_TEMPLATES.join(", ")}`);
-        }
         // A sandbox must belong to a project — billing is metered per project.
         // resolveProjectScope throws a clear "No project linked…" error when
         // there's no --project and the cwd isn't linked, so the CLI can never
