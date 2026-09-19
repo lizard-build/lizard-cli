@@ -70,22 +70,49 @@ export function registerSandbox(program) {
         // client a round trip — 113ms of a 1083ms create measured from EU.
         const projectId = await resolveProjectId(opts.project);
         const scope = { workspaceId: null };
-        // Resolved server-side so a name is matched against this project only — see
-        // lib/volume.ts for why the old client-side .find() had to go.
+        // Hand the volume to the create call instead of resolving it first.
+        //
+        // resolveVolume costs a full round trip purely to turn a name into an id, and the
+        // create endpoint already accepts `volumeName` alongside `projectId` (LIZARD-161)
+        // and resolves it in a query it was running anyway. Measured against us-east-1:
+        // `sandbox create --volume` issued two requests, the resolve costing 99ms of them,
+        // and ~190ms from the EU where every round trip crosses the Atlantic.
+        //
+        // Same id-shape fast path as resolveProjectId. A volume deliberately NAMED like a
+        // nanoid would be sent as an id and 404, so that case falls back to the old resolve
+        // rather than failing — wrong guesses cost a round trip, never a wrong answer.
         let volumeId;
+        let volumeName;
         if (opts.volume) {
-            volumeId = (await resolveVolume(projectId, scope, opts.volume)).id;
+            if (/^[A-Za-z0-9_-]{21}$/.test(opts.volume))
+                volumeId = opts.volume;
+            else
+                volumeName = opts.volume;
         }
         const spinner = isJSONMode() ? null : ora("Creating sandbox...").start();
         let sandbox;
         try {
-            sandbox = await api.post("/api/sandboxes", {
+            const body = {
                 template: opts.template,
                 timeoutMs: opts.timeout,
                 region: opts.region,
                 volumeId,
+                volumeName,
                 projectId,
-            });
+            };
+            try {
+                sandbox = await api.post("/api/sandboxes", body);
+            }
+            catch (e) {
+                // Only an id-shaped guess can be wrong this way, and only by 404. Anything
+                // else (409 already-attached, 400 wrong scope) is a real answer — rethrow it.
+                if (!volumeId || e?.status !== 404)
+                    throw e;
+                const resolved = await resolveVolume(projectId, scope, opts.volume);
+                sandbox = await api.post("/api/sandboxes", {
+                    ...body, volumeId: resolved.id, volumeName: undefined,
+                });
+            }
         }
         catch (e) {
             spinner?.stop();
