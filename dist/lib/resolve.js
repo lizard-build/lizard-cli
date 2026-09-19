@@ -12,8 +12,22 @@ export async function scopeForProject(projectId) {
     if (link?.projectId === projectId && link.workspaceId) {
         return { workspaceId: link.workspaceId };
     }
-    const fetched = await lookupProjectWorkspace(projectId);
-    return { workspaceId: fetched?.workspaceId ?? null };
+    // Deliberately NOT fetching the project here any more.
+    //
+    // The fetched workspaceId only ever became `?workspaceId=` on per-project resource
+    // routes, and none of them read it: /api/projects/:id/sandboxes and
+    // .../volumes authorise straight off project_members. The only routes that consume the
+    // query param are GET /api/projects and /api/projects/trash, where it is an optional
+    // filter and the CLI supplies it through withQuery, not through here.
+    //
+    // So this was a whole round trip per command for a parameter the server discards —
+    // 108ms of a 2-request `sandbox list` measured from EU. The older comment warned that
+    // omitting it could 404 a project reached via workspace membership; that is no longer
+    // true of these routes.
+    //
+    // A cached workspaceId is still used when the cwd link happens to have one, because
+    // that costs nothing.
+    return { workspaceId: null };
 }
 /**
  * Resolve a service (app or addon) within a project. Match by ID or name.

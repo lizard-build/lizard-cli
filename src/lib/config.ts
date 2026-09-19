@@ -132,6 +132,19 @@ export async function resolveProjectId(flagValue?: string): Promise<string> {
     if (link?.projectId) return link.projectId;
     throw new Error("No project linked. Run `lizard init` or pass --project <id>.");
   }
+  // A value that already looks like a project id needs no lookup. Project ids are
+  // 21-character nanoids, and listing every project to confirm what the caller just told
+  // us cost a whole round trip on every command — 451ms of a 1083ms `sandbox create`
+  // measured from EU, to learn something we were already given.
+  //
+  // A 21-character slug would be misread as an id here, so a caller that gets "project
+  // not found" from the server should retry through resolveProjectIdSlow.
+  if (/^[A-Za-z0-9_-]{21}$/.test(flagValue)) return flagValue;
+  return resolveProjectIdSlow(flagValue);
+}
+
+/** List projects and match on id, slug or name — for anything not shaped like an id. */
+export async function resolveProjectIdSlow(flagValue: string): Promise<string> {
   const { api } = await import("./api.js");
   const projects = await api.get<Array<{ id: string; name: string; slug: string }>>("/api/projects");
   // Case-insensitive, matching `lizard link` / `lizard init` behaviour.
