@@ -1,5 +1,13 @@
 import { type Credentials, type PendingAuth } from "./config.js";
 export type { Credentials } from "./config.js";
+/**
+ * The env var carrying a token or a `liz_` API key. LIZARD_TOKEN is the
+ * original name; LIZARD_API_KEY is what people reach for when what they hold
+ * is an API key, and it silently did nothing before — the CLI fell through to
+ * the credentials file and reported "Not authenticated" while the key sat
+ * right there in the environment. Both names go to the same header.
+ */
+export declare function envToken(): string | null;
 /** Get the active token in priority order: env → file */
 export declare function getToken(): string | null;
 export declare function loadCredentials(): Credentials | null;
