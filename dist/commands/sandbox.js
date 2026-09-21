@@ -58,6 +58,7 @@ export function registerSandbox(program) {
         .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
         .option("--region <code>", "Region to create the sandbox in")
         .option("--volume <name-or-id>", "Attach a persistent volume")
+        .option("--with-token [key]", "Install this liz_ key inside the sandbox so `lizard` works there (defaults to the key you are using)")
         .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
         .action(async (opts) => {
         // A sandbox must belong to a project — billing is metered per project.
@@ -92,12 +93,29 @@ export function registerSandbox(program) {
         const spinner = isJSONMode() ? null : ora("Creating sandbox...").start();
         let sandbox;
         try {
+            // --with-token seeds ~/.lizard/config.json inside the sandbox, so `lizard` works
+            // there. Bare --with-token reuses the key this command is authenticating with.
+            //
+            // Anything in the sandbox can read that key and sandboxes run untrusted code, so
+            // a full-access key here hands the sandbox your whole account. Scopes are
+            // enforced end to end now, so a workspace-scoped key is bounded to that one
+            // workspace if it escapes — warn rather than silently do the dangerous thing.
+            let lizardToken;
+            if (opts.withToken) {
+                lizardToken = typeof opts.withToken === "string" ? opts.withToken : (getToken() ?? undefined);
+                if (!lizardToken)
+                    throw new Error("--with-token: no API key available. Pass one explicitly, or `lizard login` first.");
+                if (!lizardToken.startsWith("liz_")) {
+                    throw new Error("--with-token expects a liz_ API key. Create a workspace-scoped one with `lizard keys create`.");
+                }
+            }
             const body = {
                 template: opts.template,
                 timeoutMs: opts.timeout,
                 region: opts.region,
                 volumeId,
                 volumeName,
+                lizardToken,
                 projectId,
             };
             try {
