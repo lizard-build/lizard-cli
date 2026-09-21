@@ -82,6 +82,16 @@ export function isAuthError(err: unknown): boolean {
  * bare 409 — because `service set` also returns 409 for `configRevision`
  * optimistic-concurrency conflicts, which must stay a retryable conflict.
  */
+/**
+ * True when the platform refused because the calling key is scoped and the surface is
+ * account-level — billing, credits, account-wide usage. A scoped key can never be "in
+ * scope" for one shared balance and one set of saved cards, so this is a permanent no
+ * for that key rather than something to retry.
+ */
+export function isAccountScopeError(err: unknown): err is APIError {
+  return err instanceof APIError && err.code === "ACCOUNT_SCOPE_REQUIRED";
+}
+
 export function isProjectDeletedError(err: unknown): err is APIError {
   if (!(err instanceof APIError) || err.status !== 409) return false;
   const body = err.body as { error?: string } | null;
@@ -121,8 +131,14 @@ async function request<T = any>(
     try {
       const j = (await res.json()) as any;
       body = j;
-      msg = j.error || j.message || msg;
-      code = j.code || "";
+      // The platform uses two error shapes. Most routes send {error: "human text"};
+      // the billing and credits routes send {error: "SCREAMING_CODE", message: "human
+      // text"}. Taking j.error unconditionally printed the bare code for the second
+      // shape and threw away the sentence explaining it — so a scoped key hitting
+      // billing showed "ACCOUNT_SCOPE_REQUIRED" and nothing else.
+      const errIsCode = typeof j.error === "string" && /^[A-Z][A-Z0-9_]*$/.test(j.error);
+      msg = (errIsCode ? j.message || j.error : j.error) || j.message || msg;
+      code = j.code || (errIsCode ? j.error : "") || "";
     } catch {}
     throw new APIError(res.status, msg, code, body);
   }
@@ -148,8 +164,14 @@ export async function getRawText(path: string): Promise<string> {
     try {
       const j = (await res.json()) as any;
       body = j;
-      msg = j.error || j.message || msg;
-      code = j.code || "";
+      // The platform uses two error shapes. Most routes send {error: "human text"};
+      // the billing and credits routes send {error: "SCREAMING_CODE", message: "human
+      // text"}. Taking j.error unconditionally printed the bare code for the second
+      // shape and threw away the sentence explaining it — so a scoped key hitting
+      // billing showed "ACCOUNT_SCOPE_REQUIRED" and nothing else.
+      const errIsCode = typeof j.error === "string" && /^[A-Z][A-Z0-9_]*$/.test(j.error);
+      msg = (errIsCode ? j.message || j.error : j.error) || j.message || msg;
+      code = j.code || (errIsCode ? j.error : "") || "";
     } catch {}
     throw new APIError(res.status, msg, code, body);
   }

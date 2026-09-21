@@ -4,7 +4,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
 import { requireAuth, isLoggedIn } from "./lib/auth.js";
-import { setBaseURL, setAccessToken, APIError, isProjectDeletedError } from "./lib/api.js";
+import { setBaseURL, setAccessToken, APIError, isProjectDeletedError, isAccountScopeError } from "./lib/api.js";
 import { checkForUpdateInBackground, runBackgroundUpdate, CURRENT_VERSION } from "./lib/updater.js";
 
 const BANNER = chalk.rgb(16, 185, 129)(
@@ -437,6 +437,10 @@ async function main() {
     // Project moved to trash: the backend rejects every write to it. Surface a
     // clear next step instead of the raw "Project is being deleted" 409.
     const projectDeleted = isProjectDeletedError(err);
+    // A scoped key on an account-level surface. Not a permissions mistake to retry:
+    // billing is one balance and one set of cards shared by every workspace, so no
+    // scope can cover it. Say which key would work instead of just refusing.
+    const accountScope = isAccountScopeError(err);
     // Node's fetch (undici) throws a bare "fetch failed" and hides the real
     // reason (ECONNREFUSED, ENOTFOUND, connect timeout…) on err.cause. Unwrap
     // it so the user sees something actionable instead of just "fetch failed".
@@ -444,6 +448,8 @@ async function main() {
     const baseMsg = err.message || String(err);
     const msg = projectDeleted
       ? "This project is being deleted — create a new one with `lizard init`."
+      : accountScope
+        ? `${baseMsg}\n  Your key is limited to specific workspaces or projects. Run this with an unscoped key, or see per-workspace spend with \`lizard metrics\`.`
       : causeDetail && !baseMsg.includes(causeDetail)
         ? `${baseMsg} (${causeDetail})`
         : baseMsg;

@@ -17,6 +17,13 @@ export function registerWhoami(program: Command) {
         activeWorkspaceId?: string | null;
         activeWorkspaceName?: string | null;
         defaultWorkspaceId?: string | null;
+        // Present only when the caller is a SCOPED API key. The account's email,
+        // balance and plan are withheld in that case — they belong to the account,
+        // not to the key holder, and a scoped key is made to be handed to someone
+        // else or injected into a sandbox. --json prints whatever the server sends,
+        // so this is also what stops `whoami --json` from leaking them.
+        scoped?: boolean;
+        scopes?: Array<{ type: "workspace" | "project"; id: string }>;
       }>("/api/auth/me");
 
       const link = getProjectLink();
@@ -35,6 +42,17 @@ export function registerWhoami(program: Command) {
       }
 
       console.log(chalk.bold(user.username));
+      if (user.scoped) {
+        const n = user.scopes?.length ?? 0;
+        console.log(
+          chalk.dim("Key: ") +
+            `scoped to ${n} ${n === 1 ? "resource" : "resources"}` +
+            chalk.dim(" (account billing and settings are not visible)"),
+        );
+        for (const sc of user.scopes ?? []) {
+          console.log(chalk.dim(`  ${sc.type} ${sc.id}`));
+        }
+      }
       if (user.hasGithubApp) {
         console.log(chalk.dim("GitHub App: connected"));
       }

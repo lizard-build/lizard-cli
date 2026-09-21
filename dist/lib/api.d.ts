@@ -31,6 +31,13 @@ export declare function isAuthError(err: unknown): boolean;
  * bare 409 — because `service set` also returns 409 for `configRevision`
  * optimistic-concurrency conflicts, which must stay a retryable conflict.
  */
+/**
+ * True when the platform refused because the calling key is scoped and the surface is
+ * account-level — billing, credits, account-wide usage. A scoped key can never be "in
+ * scope" for one shared balance and one set of saved cards, so this is a permanent no
+ * for that key rather than something to retry.
+ */
+export declare function isAccountScopeError(err: unknown): err is APIError;
 export declare function isProjectDeletedError(err: unknown): err is APIError;
 /** Like api.get, but returns the raw response body instead of JSON.parse-ing
  *  it — for endpoints that reply with `text/plain` (e.g. sandbox file reads). */

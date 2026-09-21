@@ -22,6 +22,15 @@ export function registerWhoami(program) {
             return;
         }
         console.log(chalk.bold(user.username));
+        if (user.scoped) {
+            const n = user.scopes?.length ?? 0;
+            console.log(chalk.dim("Key: ") +
+                `scoped to ${n} ${n === 1 ? "resource" : "resources"}` +
+                chalk.dim(" (account billing and settings are not visible)"));
+            for (const sc of user.scopes ?? []) {
+                console.log(chalk.dim(`  ${sc.type} ${sc.id}`));
+            }
+        }
         if (user.hasGithubApp) {
             console.log(chalk.dim("GitHub App: connected"));
         }
