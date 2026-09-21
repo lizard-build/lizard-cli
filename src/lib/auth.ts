@@ -9,10 +9,20 @@ import {
 
 export type { Credentials } from "./config.js";
 
+/**
+ * The env var carrying a token or a `liz_` API key. LIZARD_TOKEN is the
+ * original name; LIZARD_API_KEY is what people reach for when what they hold
+ * is an API key, and it silently did nothing before — the CLI fell through to
+ * the credentials file and reported "Not authenticated" while the key sat
+ * right there in the environment. Both names go to the same header.
+ */
+export function envToken(): string | null {
+  return process.env.LIZARD_TOKEN || process.env.LIZARD_API_KEY || null;
+}
+
 /** Get the active token in priority order: env → file */
 export function getToken(): string | null {
-  if (process.env.LIZARD_TOKEN) return process.env.LIZARD_TOKEN;
-  return loadCredentials()?.accessToken ?? null;
+  return envToken() ?? loadCredentials()?.accessToken ?? null;
 }
 
 export function loadCredentials(): Credentials | null {
@@ -92,8 +102,9 @@ function isExpired(creds: Credentials): boolean {
  * expired, starts a fresh one.
  */
 export async function requireAuth(): Promise<Credentials> {
-  if (process.env.LIZARD_TOKEN) {
-    return { accessToken: process.env.LIZARD_TOKEN, userId: "", username: "" };
+  const fromEnv = envToken();
+  if (fromEnv) {
+    return { accessToken: fromEnv, userId: "", username: "" };
   }
 
   const creds = loadCredentials();
@@ -137,8 +148,8 @@ export async function requireAuth(): Promise<Credentials> {
   if (!isTTY()) {
     const err = new Error(
       creds
-        ? "Session expired. Run `lizard login` again or set LIZARD_TOKEN."
-        : "Not authenticated. Set LIZARD_TOKEN or run `lizard login` first.",
+        ? "Session expired. Run `lizard login` again or set LIZARD_TOKEN / LIZARD_API_KEY."
+        : "Not authenticated. Set LIZARD_TOKEN (or LIZARD_API_KEY) or run `lizard login` first.",
     ) as Error & { code: string };
     err.code = "NOT_AUTHENTICATED";
     throw err;
