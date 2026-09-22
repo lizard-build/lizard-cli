@@ -57,6 +57,7 @@ lizard ps         # list services
 lizard status     # show the linked workspace, project and service
 lizard logs       # stream runtime logs
 lizard metrics    # resource metrics (CPU, memory, network, disk); --cost for spend
+lizard metrics --all # all services in the project, even with a linked service
 lizard scale      # scale replicas / CPU / memory / storage
 lizard secrets    # manage secrets
 lizard domain     # manage domains

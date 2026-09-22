@@ -243,6 +243,8 @@ lizard domain --json                        # show/auto-generate the service's c
 lizard domain verify example.com            # activate after DNS records propagate
 lizard domain example.com --service <name> --force  # move domain here from another of your services
 lizard metrics --json                       # CPU/memory/network/disk (add --cost for cost)
+lizard metrics --all --json                 # all services in the project, even from a service-linked directory
+lizard metrics --all --watch                # live overview of all services in the project
 lizard events --json                        # deploy history + replica status
 lizard ssh --service <name> -- <cmd>        # one-off command INSIDE the service container (streams output, returns remote exit code)
 lizard run --service <name> -- <cmd>        # run a command LOCALLY with the service's env/secrets injected
@@ -253,6 +255,11 @@ lizard whoami --json                        # auth check
 lizard s3 upload <file> [--bucket <b>]      # upload a local file to an S3 addon bucket
 lizard s3 list --json [--bucket <b>]        # list objects in an S3 addon bucket
 ```
+
+`lizard metrics --all` ignores the directory's linked service for this command.
+It uses the linked project unless `--project <name>` selects another project.
+Without `--all`, metrics defaults to the linked service, or the project overview
+when no service is linked. Do not combine `--all` with `--service`.
 
 For exact flags, `lizard <cmd> --help --json`. Other commands not shown above: `lizard git` (GitHub integration), `lizard config` (project configuration), `lizard workspace` (workspace info) — discover each with `lizard <cmd> --help --json`.
 
