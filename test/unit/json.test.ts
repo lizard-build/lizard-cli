@@ -246,6 +246,20 @@ describe("commander usage errors emit JSON envelopes", () => {
 describe("in-command guards emit JSON envelopes (fail())", () => {
   const AUTHED = { env: { LIZARD_TOKEN: "dummy-token-for-guard-tests" } };
 
+  test("metrics --all --service rejects the conflict as JSON", async () => {
+    const { stdout, exitCode } = await run(["metrics", "--all", "--service", "web", "--json"], AUTHED);
+    expect(exitCode).toBe(1);
+    expect(parseJSON(stdout).error.message).toContain("--all cannot be combined with --service");
+  });
+
+  test("metrics help exposes --all", async () => {
+    const { stdout, exitCode } = await run(["metrics", "--help", "--json"]);
+    expect(exitCode).toBe(0);
+    expect(parseJSON(stdout).command.options).toContainEqual(
+      expect.objectContaining({ long: "--all", takesValue: false }),
+    );
+  });
+
   test("metrics --range bogus --json", async () => {
     const { stdout, exitCode } = await run(["metrics", "--range", "bogus", "--json"], AUTHED);
     expect(exitCode).toBe(1);

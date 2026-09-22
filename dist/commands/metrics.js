@@ -10,10 +10,14 @@ export function registerMetrics(program) {
         .description("Show resource metrics (CPU, memory, network, disk) and cost")
         .option("-s, --service <id>", "Service name or ID (defaults to linked service)")
         .option("-p, --project <id>", "Project name, slug, or ID")
+        .option("--all", "Show all services in the project, ignoring the linked service")
         .option("-r, --range <range>", `Time range: ${RANGES.join("|")}`, "1h")
         .option("-w, --watch", "Live view, refreshed every 3s (Ctrl+C to stop)")
         .option("--cost", "Show running resources, cost per hour, and current billing-period usage (incl. egress)")
         .action(async (opts) => {
+        if (opts.all && opts.service) {
+            fail("--all cannot be combined with --service. Choose all services or one service.");
+        }
         if (!RANGES.includes(opts.range)) {
             fail(`Invalid --range "${opts.range}". Choose one of: ${RANGES.join(", ")}`);
         }
@@ -25,9 +29,8 @@ export function registerMetrics(program) {
             await showCost(projectId, scope);
             return;
         }
-        // Service detail when -s is given or a service is linked; otherwise
-        // an overview of every service in the project.
-        const hasService = Boolean(opts.service || getProjectLink()?.serviceId);
+        // --all bypasses the linked service for both overview and watch modes.
+        const hasService = !opts.all && Boolean(opts.service || getProjectLink()?.serviceId);
         if (opts.watch) {
             let serviceId;
             if (hasService) {
@@ -65,24 +68,6 @@ function fmtMb(mb) {
 function fmtVcpu(v) {
     return v.toFixed(2);
 }
-/** Render values as a unicode sparkline, downsampled to `width` buckets. */
-function sparkline(values, width = 30) {
-    if (values.length === 0)
-        return "";
-    const blocks = "▁▂▃▄▅▆▇█";
-    const buckets = [];
-    const per = Math.max(1, Math.ceil(values.length / width));
-    for (let i = 0; i < values.length; i += per) {
-        const slice = values.slice(i, i + per);
-        buckets.push(slice.reduce((a, b) => a + b, 0) / slice.length);
-    }
-    const max = Math.max(...buckets);
-    if (max <= 0)
-        return chalk.dim(blocks[0].repeat(buckets.length));
-    return buckets
-        .map((v) => blocks[Math.min(blocks.length - 1, Math.floor((v / max) * (blocks.length - 1) + 0.5))])
-        .join("");
-}
 function seriesByName(series, name) {
     return series.find((s) => s.metric === name)?.values ?? [];
 }
@@ -97,7 +82,6 @@ function stats(values, isRate = false) {
         min: Math.min(...vals),
         avg: vals.reduce((a, b) => a + b, 0) / vals.length,
         max: Math.max(...vals),
-        values: vals,
     };
 }
 // ── Service detail ────────────────────────────────────────────────────────
@@ -139,7 +123,6 @@ async function showServiceMetrics(serviceFlag, projectId, scope, range) {
             fmt(s.min),
             fmt(s.avg),
             fmt(s.max),
-            chalk.cyan(sparkline(s.values)),
         ]);
     };
     // "Now" for CPU/memory prefers the live Redis snapshot over the last
@@ -151,7 +134,7 @@ async function showServiceMetrics(serviceFlag, projectId, scope, range) {
     push("Disk read", dr, fmtRate);
     push("Disk write", dw, fmtRate);
     if (rows.length > 0) {
-        table(["Metric", "Now", "Min", "Avg", "Max", "Trend"], rows);
+        table(["Metric", "Now", "Min", "Avg", "Max"], rows);
     }
     else if (latest) {
         // Live snapshot only (brand-new VM, no history rows yet)
