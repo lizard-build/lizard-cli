@@ -260,6 +260,11 @@ lizard s3 list --json [--bucket <b>]        # list objects in an S3 addon bucket
 It uses the linked project unless `--project <name>` selects another project.
 Without `--all`, metrics defaults to the linked service, or the project overview
 when no service is linked. Do not combine `--all` with `--service`.
+The project overview includes `Egress` (outbound bytes per second) and `Volumes`
+(used / total bytes). These columns use the latest sample from the past hour;
+`Sampled` refers to CPU and memory. Missing measurements show `—`.
+Watch mode refreshes CPU and memory every 3 seconds and I/O history every 30 seconds.
+JSON output includes the history in each service's `series` and `timestamps` fields.
 
 For exact flags, `lizard <cmd> --help --json`. Other commands not shown above: `lizard git` (GitHub integration), `lizard config` (project configuration), `lizard workspace` (workspace info) — discover each with `lizard <cmd> --help --json`.
 
