@@ -10,8 +10,9 @@ import { info, fail, isJSONMode, printJSON, table, timeAgo } from "../lib/format
 // network_rx/tx + disk_read/write = bytes/s; latest mem is in MB.
 interface SeriesItem {
   metric: string;
-  timestamps: number[]; // seconds
+  timestamps?: number[]; // seconds (older API responses)
   values: number[];
+  available?: boolean[];
 }
 
 interface LatestMetrics {
@@ -23,6 +24,7 @@ interface LatestMetrics {
 
 interface EntityMetricsResult {
   series: SeriesItem[];
+  timestamps?: number[]; // seconds, shared by all series
   latest: LatestMetrics | null;
   limits: { cpuMillis: number; memoryMi: number };
 }
@@ -30,7 +32,7 @@ interface EntityMetricsResult {
 interface ProjectEntityMetrics extends EntityMetricsResult {
   id: string;
   label: string;
-  type: "app" | "addon";
+  type: "app" | "addon" | "sandbox";
   deleted: boolean;
 }
 
@@ -244,21 +246,67 @@ async function fetchLive(projectId: string, scope: ResourceScope): Promise<Proje
   return (data.services || []).filter((s) => !s.deleted);
 }
 
+// The live endpoint only carries CPU/memory. Read I/O from the latest history
+// sample, keeping live snapshots as the source of service membership and CPU/RAM.
+async function fetchOverviewHistory(projectId: string, scope: ResourceScope): Promise<ProjectEntityMetrics[]> {
+  try {
+    const data = await api.get<{ services: ProjectEntityMetrics[] }>(
+      withScope(withQuery(`/api/projects/${projectId}/metrics`, { range: "1h" }), scope),
+    );
+    return data.services || [];
+  } catch {
+    info("Egress and volume metrics are unavailable. CPU and memory still show live data.");
+    return [];
+  }
+}
+
+function withHistory(services: ProjectEntityMetrics[], history: ProjectEntityMetrics[]): ProjectEntityMetrics[] {
+  const byId = new Map(history.filter((s) => !s.deleted).map((s) => [s.id, s]));
+  return services.map((s) => {
+    const previous = byId.get(s.id);
+    return { ...s, series: previous?.series ?? [], timestamps: previous?.timestamps ?? [] };
+  });
+}
+
+function lastMeasurement(service: ProjectEntityMetrics, name: string): number | null {
+  if (!service.latest) return null;
+  const series = service.series.find((s) => s.metric === name);
+  if (!series?.values.length) return null;
+  const index = series.values.length - 1;
+  if (series.available?.[index] === false) return null;
+  // Legacy rate series start with a synthetic zero, not a measured rate.
+  const value = series.values[index];
+  if (name === "network_tx" && index === 0 && value === 0 && !series.available) return null;
+  return Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+const OVERVIEW_HEADERS = ["Service", "Type", "CPU (vCPU)", "Memory", "Egress", "Volumes", "Sampled"];
+const IO_NOTE = "Egress: outbound traffic/s. Volumes: used / total. Both use the latest history sample and may lag CPU/memory.";
+
 function overviewRows(services: ProjectEntityMetrics[]): string[][] {
   return services.map((s) => {
     const cpuLimit = s.limits.cpuMillis / 1000;
+    const egress = lastMeasurement(s, "network_tx");
+    const used = lastMeasurement(s, "disk_used");
+    const total = lastMeasurement(s, "disk_total");
+    const volumes = used === null ? chalk.dim("—") : fmtBytes(used);
     return [
       s.label,
       s.type,
       s.latest ? `${fmtVcpu(s.latest.cpu)} / ${cpuLimit}` : chalk.dim("—"),
       s.latest ? `${fmtMb(s.latest.memUsedMb)} / ${fmtMb(s.latest.memTotalMb)}` : chalk.dim("—"),
+      egress === null ? chalk.dim("—") : fmtRate(egress),
+      total !== null && total > 0 ? `${volumes} / ${fmtBytes(total)}` : volumes,
       s.latest ? timeAgo(s.latest.sampledAt) : chalk.dim("no data"),
     ];
   });
 }
 
 async function showProjectOverview(projectId: string, scope: ResourceScope) {
-  const services = await fetchLive(projectId, scope);
+  const [live, history] = await Promise.all([
+    fetchLive(projectId, scope), fetchOverviewHistory(projectId, scope),
+  ]);
+  const services = withHistory(live, history);
 
   if (isJSONMode()) {
     printJSON({ services });
@@ -270,7 +318,8 @@ async function showProjectOverview(projectId: string, scope: ResourceScope) {
     return;
   }
 
-  table(["Service", "Type", "CPU (vCPU)", "Memory", "Sampled"], overviewRows(services));
+  table(OVERVIEW_HEADERS, overviewRows(services));
+  info(chalk.dim(IO_NOTE));
   info(chalk.dim("\nDetails: lizard metrics -s <service>   Live: lizard metrics --watch"));
 }
 
@@ -278,12 +327,21 @@ async function showProjectOverview(projectId: string, scope: ResourceScope) {
 
 async function watchLive(projectId: string, scope: ResourceScope, serviceId?: string) {
   info(chalk.dim("Watching metrics... (Ctrl+C to stop)"));
+  let history: ProjectEntityMetrics[] = [];
+  let historyFetchedAt = 0;
   // Capture console output so each refresh replaces the previous frame
   // instead of scrolling.
   for (;;) {
     let services: ProjectEntityMetrics[];
     try {
-      services = await fetchLive(projectId, scope);
+      const refreshHistory = historyFetchedAt === 0 || Date.now() - historyFetchedAt >= 30_000;
+      const [live, nextHistory] = await Promise.all([
+        fetchLive(projectId, scope),
+        refreshHistory ? fetchOverviewHistory(projectId, scope) : Promise.resolve(history),
+      ]);
+      history = nextHistory;
+      if (refreshHistory) historyFetchedAt = Date.now();
+      services = withHistory(live, history);
     } catch (e: any) {
       fail(e.message || String(e));
     }
@@ -295,7 +353,8 @@ async function watchLive(projectId: string, scope: ResourceScope, serviceId?: st
     if (services.length === 0) {
       console.log(chalk.dim("No services."));
     } else {
-      table(["Service", "Type", "CPU (vCPU)", "Memory", "Sampled"], overviewRows(services));
+      table(OVERVIEW_HEADERS, overviewRows(services));
+      console.log(chalk.dim(IO_NOTE));
     }
 
     await new Promise((r) => setTimeout(r, 3000));
