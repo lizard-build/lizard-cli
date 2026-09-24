@@ -203,6 +203,10 @@ Rules:
 - `VITE_*` / `NEXT_PUBLIC_*` (build-time baked) → `lizard redeploy --service <svc>`; a plain restart won't pick them up.
 - Verify a non-secret value or the application's behavior. Do not print the full environment: it can expose credentials.
 
+## Sandboxes: volumes
+
+Use `lizard volume create <name> --size <gb> --project <project>` for persistent sandbox storage. Names are unique within a project; use lowercase letters, digits and dashes (up to 64 characters). Pass the name to `lizard sandbox create --volume <name>`. New volumes default to 5 GB and allow 1–50 GB. The CLI reads the server's current size limits before creating a volume; a server config override may change the maximum. Existing larger volumes keep their size. Storage charges cover used bytes, not the whole allocation.
+
 ## Sandboxes: timeout
 
 `lizard sandbox create` sends a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without expiration, or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. Check the current Sandboxes lifecycle documentation before relying on pause to retain state.

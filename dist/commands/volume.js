@@ -5,9 +5,9 @@ import { assertValidVolumeName, resolveVolume } from "../lib/volume.js";
 import { resolveProjectScope } from "../lib/resolve.js";
 import { success, info, isJSONMode, printJSON, table, isTTY } from "../lib/format.js";
 function parseIntOption(v) {
-    const n = parseInt(v, 10);
-    if (Number.isNaN(n))
-        throw new Error(`Invalid number: ${v}`);
+    const n = Number(v);
+    if (!Number.isSafeInteger(n) || n < 1)
+        throw new Error(`--size must be a positive whole number of GB (got ${v}).`);
     return n;
 }
 export function registerVolume(program) {
@@ -44,15 +44,16 @@ export function registerVolume(program) {
         .command("create")
         .argument("<name>", "Volume name")
         .description("Create a persistent volume")
-        .option("--size <gb>", "Size in GB (1-100, default 5)", parseIntOption)
+        .option("--size <gb>", "Size in GB (server limits apply; default 5)", parseIntOption)
         .option("--region <code>", "Region to place the volume in (must match the sandbox that will attach it)")
         .option("-p, --project <id>", "Project name, slug, or ID")
         .action(async (name, opts) => {
         assertValidVolumeName(name);
         const { projectId, scope } = await resolveProjectScope(opts.project);
-        const sizeGb = opts.size ?? 5;
-        if (sizeGb < 1 || sizeGb > 100) {
-            throw new Error(`--size must be between 1 and 100 (got ${sizeGb}).`);
+        const limits = await api.get(withScope(`/api/projects/${projectId}/volume-limits`, scope));
+        const sizeGb = opts.size ?? limits.defaultSizeGb;
+        if (!Number.isSafeInteger(sizeGb) || sizeGb < limits.minSizeGb || sizeGb > limits.maxSizeGb) {
+            throw new Error(`--size must be between ${limits.minSizeGb} and ${limits.maxSizeGb} GB (got ${sizeGb}).`);
         }
         if (!isJSONMode())
             info(`Creating volume ${chalk.cyan(name)}...`);
