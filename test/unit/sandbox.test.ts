@@ -4,8 +4,8 @@ import { registerSandbox } from "../../src/commands/sandbox.js";
 import { api } from "../../src/lib/api.js";
 
 vi.mock("../../src/lib/api.js", () => ({ api: { post: vi.fn() } }));
-vi.mock("../../src/lib/resolve.js", () => ({
-  resolveProjectScope: vi.fn().mockResolvedValue({ projectId: "project-test", scope: { workspaceId: "workspace-test" } }),
+vi.mock("../../src/lib/config.js", () => ({
+  resolveProjectId: vi.fn().mockResolvedValue("project-test"),
 }));
 vi.mock("../../src/lib/format.js", () => ({ isJSONMode: () => true, printJSON: vi.fn() }));
 
@@ -35,4 +35,20 @@ describe("sandbox create timeout", () => {
     await expect(create(["--timeout", value])).rejects.toThrow(/Timeout must be/);
     expect(api.post).not.toHaveBeenCalled();
   });
+});
+
+
+describe("unsupported sandbox commands", () => {
+  it.each(["pause", "resume", "fork", "snapshot", "restore", "snapshot-fork"])(
+    "rejects %s without making an API request", async (name) => {
+      vi.clearAllMocks();
+      const program = new Command().exitOverride().configureOutput({ writeErr: () => {} });
+      registerSandbox(program);
+      const sandbox = program.commands.find(command => command.name() === "sandbox")!;
+      expect(sandbox.commands.flatMap(command => [command.name(), ...command.aliases()])).not.toContain(name);
+      await expect(program.parseAsync(["sandbox", name, "test-id"], { from: "user" }))
+        .rejects.toMatchObject({ code: "commander.unknownCommand" });
+      expect(api.post).not.toHaveBeenCalled();
+    }
+  );
 });
