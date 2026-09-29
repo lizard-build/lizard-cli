@@ -4,8 +4,8 @@ import { registerSandbox } from "../../src/commands/sandbox.js";
 import { api } from "../../src/lib/api.js";
 
 vi.mock("../../src/lib/api.js", () => ({ api: { post: vi.fn() } }));
-vi.mock("../../src/lib/resolve.js", () => ({
-  resolveProjectScope: vi.fn().mockResolvedValue({ projectId: "project-test", scope: { workspaceId: "workspace-test" } }),
+vi.mock("../../src/lib/config.js", () => ({
+  resolveProjectId: vi.fn().mockResolvedValue("project-test"),
 }));
 vi.mock("../../src/lib/format.js", () => ({ isJSONMode: () => true, printJSON: vi.fn() }));
 
