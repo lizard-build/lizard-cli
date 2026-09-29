@@ -36,3 +36,19 @@ describe("sandbox create timeout", () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 });
+
+
+describe("unsupported sandbox commands", () => {
+  it.each(["pause", "resume", "fork", "snapshot", "restore", "snapshot-fork"])(
+    "rejects %s without making an API request", async (name) => {
+      vi.clearAllMocks();
+      const program = new Command().exitOverride().configureOutput({ writeErr: () => {} });
+      registerSandbox(program);
+      const sandbox = program.commands.find(command => command.name() === "sandbox")!;
+      expect(sandbox.commands.flatMap(command => [command.name(), ...command.aliases()])).not.toContain(name);
+      await expect(program.parseAsync(["sandbox", name, "test-id"], { from: "user" }))
+        .rejects.toMatchObject({ code: "commander.unknownCommand" });
+      expect(api.post).not.toHaveBeenCalled();
+    }
+  );
+});

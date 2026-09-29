@@ -209,7 +209,7 @@ Use `lizard volume create <name> --size <gb> --project <project>` for persistent
 
 ## Sandboxes: timeout
 
-`lizard sandbox create` sends a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without expiration, or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. Check the current Sandboxes lifecycle documentation before relying on pause to retain state.
+`lizard sandbox create` sends a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without expiration, or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. The CLI does not expose sandbox pause, resume, fork, snapshot creation or restore: the current backend does not support them. Use volumes for persistent files.
 
 ## Managed addons
 
