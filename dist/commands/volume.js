@@ -3,12 +3,19 @@ import * as p from "@clack/prompts";
 import { api, withScope } from "../lib/api.js";
 import { assertValidVolumeName, resolveVolume } from "../lib/volume.js";
 import { resolveProjectScope } from "../lib/resolve.js";
-import { success, info, isJSONMode, printJSON, table, isTTY } from "../lib/format.js";
+import { success, info, warn, isJSONMode, printJSON, table, isTTY } from "../lib/format.js";
 function parseIntOption(v) {
     const n = Number(v);
     if (!Number.isSafeInteger(n) || n < 1)
         throw new Error(`--size must be a positive whole number of GB (got ${v}).`);
     return n;
+}
+/** parseIntOption, but whole numbers only: parseInt("1.5") is 1, and a resize that
+ *  silently rounds a typo down is a shrink the user never asked for. */
+function parseSizeGbOption(v) {
+    if (!/^\s*\d+\s*$/.test(v))
+        throw new Error(`--size must be a whole number of GB (got ${v}).`);
+    return parseIntOption(v);
 }
 export function registerVolume(program) {
     const vol = program
@@ -64,6 +71,42 @@ export function registerVolume(program) {
         }
         success(`Volume ${chalk.bold(created.name)} created (${created.sizeGb} GB)`);
         info(chalk.dim(`  Attach it to a sandbox: lizard sandbox create --volume ${created.name}`));
+    });
+    vol
+        .command("resize")
+        .argument("<volume>", "Volume name or ID")
+        .description("Grow or shrink a volume in place. Online: no data is copied, it takes under a second, " +
+        "and an attached sandbox keeps running and sees the new size immediately. " +
+        "A shrink must leave at least 10% of the new size free.")
+        .requiredOption("--size <gb>", "New size in GB (whole number; the server enforces the project's min/max)", parseSizeGbOption)
+        .option("-p, --project <id>", "Project name, slug, or ID")
+        .action(async (nameOrId, opts) => {
+        const sizeGb = opts.size;
+        if (!Number.isInteger(sizeGb) || sizeGb < 1) {
+            throw new Error(`--size must be a whole number of GB, at least 1 (got ${opts.size}).`);
+        }
+        // No client-side upper bound: the limit is per-platform config (volume-limits),
+        // and the server reports it in its error when exceeded.
+        const { projectId, scope } = await resolveProjectScope(opts.project);
+        const volume = await resolveVolume(projectId, scope, nameOrId);
+        if (volume.sizeGb === sizeGb) {
+            if (isJSONMode()) {
+                printJSON(volume);
+            }
+            else {
+                info(`Volume ${chalk.bold(volume.name)} is already ${sizeGb} GB — nothing to do.`);
+            }
+            return;
+        }
+        const resized = await api.patch(withScope(`/api/projects/${projectId}/volumes/${encodeURIComponent(volume.name)}`, scope), { sizeGb });
+        if (isJSONMode()) {
+            printJSON(resized);
+            return;
+        }
+        success(`Volume ${chalk.bold(resized.name)} resized: ${volume.sizeGb} GB → ${resized.sizeGb} GB`);
+        if (resized.sizeEnforced === false) {
+            warn("This region's storage does not enforce volume size; the new size is recorded but not a hard limit.");
+        }
     });
     vol
         .command("rm")

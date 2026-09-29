@@ -211,6 +211,20 @@ Use `lizard volume create <name> --size <gb> --project <project>` for persistent
 
 `lizard sandbox create` sends a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without expiration, or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. The CLI does not expose sandbox pause, resume, fork, snapshot creation or restore: the current backend does not support them. Use volumes for persistent files.
 
+## Volumes
+
+Persistent volumes for sandboxes. A volume's name is its key within the project; every command takes a name or ID.
+
+```
+lizard volume create <name> [--size <gb>] [--region <code>]   # default 5 GB; region must match the sandbox's
+lizard volume list --json                                     # name, sizeGb, status, attachedTo
+lizard volume resize <name> --size <gb>                       # grow or shrink in place
+lizard volume rm <name> [-y]                                  # refused while attached; delete the sandbox first
+lizard sandbox create --volume <name>                         # attach at create time
+```
+
+`volume resize` is online: no data is copied, it finishes in under a second, and an attached sandbox keeps running and sees the new size immediately — don't stop the sandbox first. A shrink must leave at least 10% of the new size free (`volume_too_full_to_shrink` otherwise). Size limits are per-platform; the error names them. `volume_not_provisioned` right after create means retry in a few seconds.
+
 ## Managed addons
 
 Provision with `lizard add <type>`. Each addon exposes a fixed env-var set; reference by name from a consumer service via `${{<addon-name>.KEY}}`. The first addon of a given type gets the bare type as its name (so `${{postgres.DATABASE_URL}}` works out of the box); subsequent ones get `{type}-{adjective}-{noun}` like `postgres-autumn-bear`. There's no type-alias fallback — a ref must use the addon's actual name. Once written, refs are stored ID-based, so renaming the addon later does not break existing consumers.
