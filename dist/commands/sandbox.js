@@ -61,7 +61,7 @@ export function registerSandbox(program) {
     sb.command("create")
         .description("Create a sandbox")
         .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
-        .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default small`).choices(SANDBOX_SIZES))
+        .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium`).choices(SANDBOX_SIZES))
         .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
         .option("--region <code>", "Region to create the sandbox in")
         .option("--snapshot <id>", "Create from a private saved snapshot (runs on the machine it was captured on)")
