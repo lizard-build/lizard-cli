@@ -338,3 +338,11 @@ Only `paid` confirms that credits were added. x402 does not pay a plain
 Card and crypto Checkout top-ups remain available through `--method card` and
 `--method crypto`. x402 uses USDC; payment by an agent's card through MPP is not
 part of this command.
+
+## Sandboxes: private snapshots and pause/resume
+
+- `lizard sandbox snapshot <sandbox-id> --name my-app` saves files and running memory privately in the sandbox's project, and keeps **five** independent copies warm. `--warm 1..10` changes that count. It waits until ready; `--no-wait` returns the queued capture.
+- `lizard sandbox restore <snapshot-id>` starts a new sandbox from a warm copy. `sandbox create --snapshot <id> --project <project>` also works. Restores stay in the snapshot's project and region.
+- `lizard sandbox snapshots --project <project>` lists snapshots. `sandbox snapshot-warm <id> <count>` changes capacity. `sandbox snapshot-rm <id>` deletes the snapshot and free copies, preserving already running sandboxes.
+- `lizard sandbox pause <id>` saves state with CRIU, stops the pod, and freezes its remaining lifetime. `sandbox resume <id>` restores the same sandbox ID, files, processes, memory, published ports, and remaining lifetime. Paused sandboxes keep no warm copies; resume includes a cold restore. Both support `--no-wait`.
+- Disconnect clients and terminals and stop workspace writes before capturing or pausing. Active TCP connections and unsupported CRIU process state cause a clear failure. Attached persistent volumes are not supported by this snapshot workflow.

@@ -57,6 +57,7 @@ export function registerSandbox(program) {
         .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
         .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
         .option("--region <code>", "Region to create the sandbox in")
+        .option("--snapshot <id>", "Create from a private saved snapshot")
         .option("--volume <name-or-id>", "Attach a persistent volume")
         .option("--with-token [key]", "Install this liz_ key inside the sandbox so `lizard` works there (defaults to the key you are using)")
         .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
@@ -111,6 +112,7 @@ export function registerSandbox(program) {
             }
             const body = {
                 template: opts.template,
+                snapshotId: opts.snapshot,
                 timeoutMs: opts.timeout,
                 region: opts.region,
                 volumeId,
@@ -265,6 +267,62 @@ Examples:
             printJSON({ id, port, status: "unexposed" });
         else
             success(`Port ${port} unexposed`);
+    });
+    sb.command("snapshot")
+        .argument("<id>", "Running sandbox ID")
+        .requiredOption("--name <name>", "Name for this private project snapshot")
+        .option("--warm <count>", "Copies to keep ready (1–10)", parseWarmCount, 5)
+        .option("--no-wait", "Return once capture is queued")
+        .description("Save a running sandbox and keep five copies warm by default")
+        .action(async (id, opts) => {
+        let snapshot = await api.post(`/api/sandboxes/${id}/snapshot`, { name: opts.name, poolSize: opts.warm });
+        if (opts.wait)
+            snapshot = await waitForSnapshot(snapshot.id);
+        if (isJSONMode())
+            printJSON(snapshot);
+        else {
+            success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}`);
+            info(`Warm copies: ${snapshot.readyCount}/${snapshot.poolSize}`);
+        }
+    });
+    for (const operation of ["pause", "resume"]) {
+        sb.command(operation)
+            .argument("<id>", "Sandbox ID")
+            .option("--no-wait", "Return once the operation is queued")
+            .description(operation === "pause" ? "Save running state with CRIU and stop the sandbox" : "Restore a paused sandbox with its saved memory and files")
+            .action(async (id, opts) => {
+            const queued = await api.post(`/api/sandboxes/${id}/${operation}`, {});
+            if (opts.wait && operation === 'pause' && queued.snapshotId)
+                await waitForSnapshot(queued.snapshotId);
+            const result = opts.wait ? await waitForSandbox(id, operation === "pause" ? "paused" : "running") : queued;
+            if (isJSONMode())
+                printJSON(result);
+            else
+                success(`Sandbox ${chalk.bold(id)}: ${result.status}`);
+        });
+    }
+    sb.command("restore")
+        .argument("<snapshot-id>", "Saved snapshot ID")
+        .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
+        .description("Start a new sandbox from a private warm snapshot")
+        .action(async (snapshotId, opts) => {
+        const snapshot = await api.get(`/api/sandbox-snapshots/${snapshotId}`);
+        const sandbox = await api.post("/api/sandboxes", { snapshotId, projectId: snapshot.projectId, region: snapshot.region, timeoutMs: opts.timeout });
+        if (isJSONMode())
+            printJSON(sandbox);
+        else
+            success(`Sandbox ${chalk.bold(sandbox.id)} created from ${snapshot.name}`);
+    });
+    sb.command("snapshot-warm")
+        .argument("<snapshot-id>", "Saved snapshot ID")
+        .argument("<count>", "Copies to keep ready (1–10)", parseWarmCount)
+        .description("Change a snapshot's warm pool size")
+        .action(async (id, count) => {
+        const snapshot = await api.patch(`/api/sandbox-snapshots/${id}`, { poolSize: count });
+        if (isJSONMode())
+            printJSON(snapshot);
+        else
+            success(`Snapshot ${chalk.bold(id)} will keep ${count} copies warm`);
     });
     sb.command("snapshots")
         .description("List persistent sandbox snapshots in the linked (or given) project")
@@ -457,5 +515,36 @@ function shellQuote(arg) {
     if (/^[A-Za-z0-9_./:=@%+,-]+$/.test(arg))
         return arg;
     return "'" + arg.replace(/'/g, "'\\''") + "'";
+}
+function parseWarmCount(value) {
+    if (!/^[0-9]+$/.test(value) || Number(value) < 1 || Number(value) > 10)
+        throw new Error("Warm copies must be an integer between 1 and 10");
+    return Number(value);
+}
+async function waitForSnapshot(id) {
+    const deadline = Date.now() + 20 * 60_000;
+    while (Date.now() < deadline) {
+        const snapshot = await api.get(`/api/sandbox-snapshots/${id}`);
+        if (snapshot.status === "failed")
+            throw new Error(snapshot.error || "Snapshot capture failed");
+        if (snapshot.status === "ready")
+            return snapshot;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    throw new Error(`Snapshot is still processing. Check it with lizard sandbox snapshots.`);
+}
+async function waitForSandbox(id, target) {
+    const deadline = Date.now() + 5 * 60_000;
+    while (Date.now() < deadline) {
+        const sandbox = await api.get(`/api/sandboxes/${id}`);
+        if (sandbox.status === target)
+            return sandbox;
+        if (!["running", "pausing", "paused", "resuming"].includes(sandbox.status))
+            throw new Error(`Sandbox ${id} is ${sandbox.status}`);
+        if (target === 'running' && sandbox.status === 'paused')
+            throw new Error('Resume failed; the saved checkpoint is retained. Retry resume.');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    throw new Error(`Sandbox ${id} is still processing; check its status.`);
 }
 //# sourceMappingURL=sandbox.js.map

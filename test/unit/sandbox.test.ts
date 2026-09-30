@@ -40,7 +40,7 @@ describe("sandbox create timeout", () => {
 
 
 describe("unsupported sandbox commands", () => {
-  it.each(["pause", "resume", "fork", "snapshot", "restore", "snapshot-fork"])(
+  it.each(["fork", "snapshot-fork"])(
     "rejects %s without making an API request", async (name) => {
       vi.clearAllMocks();
       const program = new Command().exitOverride().configureOutput({ writeErr: () => {} });
@@ -52,4 +52,27 @@ describe("unsupported sandbox commands", () => {
       expect(api.post).not.toHaveBeenCalled();
     }
   );
+});
+
+describe("private sandbox snapshots", () => {
+  beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.post).mockResolvedValue({ id: 'snap-test', status: 'building' }); });
+  it("creates a snapshot with five warm copies by default", async () => {
+    const program = new Command().exitOverride(); registerSandbox(program);
+    await program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'My app', '--no-wait'], { from: 'user' });
+    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app', poolSize: 5 });
+  });
+  it.each(['0', '11', '1.5', '5junk'])("rejects invalid warm count %s", async count => {
+    const program = new Command().exitOverride(); registerSandbox(program);
+    await expect(program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'app', '--warm', count, '--no-wait'], { from: 'user' })).rejects.toThrow(/Warm copies/);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+  it.each(['pause', 'resume'])("queues %s without waiting when requested", async operation => {
+    const program = new Command().exitOverride(); registerSandbox(program);
+    await program.parseAsync(['sandbox', operation, 'sandbox-test', '--no-wait'], { from: 'user' });
+    expect(api.post).toHaveBeenCalledWith(`/api/sandboxes/sandbox-test/${operation}`, {});
+  });
+  it("passes the private snapshot ID to create", async () => {
+    await create(['--snapshot', 'snap-test']);
+    expect(api.post).toHaveBeenCalledWith('/api/sandboxes', expect.objectContaining({ snapshotId: 'snap-test' }));
+  });
 });
