@@ -4,6 +4,7 @@ import fs from "node:fs";
 import * as https from "node:https";
 import * as http from "node:http";
 import * as p from "@clack/prompts";
+import { Option } from "commander";
 import { api, getBaseURL, getRawText, streamSSE, withQuery, withScope } from "../lib/api.js";
 import { getToken } from "../lib/auth.js";
 import { resolveProjectScope } from "../lib/resolve.js";
@@ -16,6 +17,10 @@ import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAg
 // server validates against the region's actual list and answers with what IS available,
 // so let it.
 const TEMPLATE_HINT = "base, codex, interpreter";
+// The three machines a sandbox can be, each billed flat per hour by the server. The
+// platform rejects anything else, so the CLI offers exactly these.
+const SANDBOX_SIZES = ["small", "medium", "large"];
+const SIZE_HINT = "small 2 vCPU/4 GB, medium 4/8, large 8/16";
 function parseIntOption(v) {
     const n = parseInt(v, 10);
     if (Number.isNaN(n))
@@ -38,11 +43,12 @@ function printSandboxList(sandboxes) {
         console.log("No sandboxes. Use `lizard sandbox create`.");
         return;
     }
-    table(["ID", "Template", "Status", "Region", "CPU/Mem", "Created"], sandboxes.map((s) => [
+    table(["ID", "Template", "Status", "Region", "Size", "CPU/Mem", "Created"], sandboxes.map((s) => [
         s.id,
         s.template,
         statusColor(s.status),
         s.region,
+        s.size ?? "-",
         `${s.cpus} vCPU / ${s.memoryMb} MB`,
         timeAgo(s.startedAt),
     ]));
@@ -55,13 +61,19 @@ export function registerSandbox(program) {
     sb.command("create")
         .description("Create a sandbox")
         .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
+        .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default small`).choices(SANDBOX_SIZES))
         .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
         .option("--region <code>", "Region to create the sandbox in")
-        .option("--snapshot <id>", "Create from a private saved snapshot")
+        .option("--snapshot <id>", "Create from a private saved snapshot (runs on the machine it was captured on)")
         .option("--volume <name-or-id>", "Attach a persistent volume")
         .option("--with-token [key]", "Install this liz_ key inside the sandbox so `lizard` works there (defaults to the key you are using)")
         .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
         .action(async (opts) => {
+        // A snapshot restores onto the machine it was captured on, so the server ignores a
+        // size alongside it. Say so rather than quietly creating something other than asked.
+        if (opts.size && opts.snapshot) {
+            throw new Error("--size can't be combined with --snapshot: a snapshot runs on the machine it was captured on.");
+        }
         // A sandbox must belong to a project — billing is metered per project.
         // resolveProjectScope throws a clear "No project linked…" error when
         // there's no --project and the cwd isn't linked, so the CLI can never
@@ -112,6 +124,7 @@ export function registerSandbox(program) {
             }
             const body = {
                 template: opts.template,
+                size: opts.size,
                 snapshotId: opts.snapshot,
                 timeoutMs: opts.timeout,
                 region: opts.region,
@@ -145,6 +158,10 @@ export function registerSandbox(program) {
         }
         success(`Sandbox ${chalk.bold(sandbox.id)} created`);
         info(chalk.dim(`  Template: ${sandbox.template}  Region: ${sandbox.region}`));
+        const machine = `${sandbox.cpus} vCPU / ${sandbox.memoryMb} MB`;
+        info(chalk.dim(sandbox.size
+            ? `  Size: ${sandbox.size} (${machine})${sandbox.pricePerHour != null ? `, $${sandbox.pricePerHour}/h` : ""}`
+            : `  Machine: ${machine}`));
         info(chalk.dim(`  Exec: lizard sandbox exec ${sandbox.id} -- <cmd>`));
     });
     sb.command("list")
@@ -313,6 +330,18 @@ Examples:
         else
             success(`Sandbox ${chalk.bold(sandbox.id)} created from ${snapshot.name}`);
     });
+    for (const operation of ["pause", "resume"]) {
+        sb.command(`snapshot-${operation}`)
+            .argument("<snapshot-id>", "Saved snapshot ID")
+            .description(operation === "pause" ? "Release a snapshot's warm copies and keep its saved state" : "Refill a paused snapshot's warm pool")
+            .action(async (id) => {
+            const snapshot = await api.post(`/api/sandbox-snapshots/${id}/${operation}`, {});
+            if (isJSONMode())
+                printJSON(snapshot);
+            else
+                success(`Snapshot ${chalk.bold(id)}: ${snapshot.status}`);
+        });
+    }
     sb.command("snapshot-warm")
         .argument("<snapshot-id>", "Saved snapshot ID")
         .argument("<count>", "Copies to keep ready (1–10)", parseWarmCount)
