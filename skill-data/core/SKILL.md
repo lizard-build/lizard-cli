@@ -243,8 +243,11 @@ Agents drive the desktop from inside the sandbox once it is started (`DISPLAY=:1
 ```
 lizard sandbox exec <id> -- xdotool mousemove 400 300 click 1
 lizard sandbox exec <id> -- xdotool type 'hello'
-lizard sandbox exec <id> -- lizard-desktop screenshot | tail -n 1 | base64 -d > screen.png   # PNG, base64 on one line
+lizard sandbox exec <id> -- lizard-desktop screenshot | grep -E '^[A-Za-z0-9+/=]+$' | base64 -d > screen.png
+lizard sandbox exec <id> -- lizard-desktop screenshot --path   # writes the PNG to a file in the sandbox, prints its path
 ```
+
+`lizard-desktop screenshot` prints the PNG as base64 wrapped at 76 columns; the `grep` keeps only those lines (it drops the `$ <cmd>` header `sandbox exec` prints). `--path` suits tools running inside the sandbox (`lizard sandbox files get` is text-only and would corrupt the PNG). For large screens the SDKs' `desktop.screenshot()` is the most reliable way.
 
 ## Volumes
 
