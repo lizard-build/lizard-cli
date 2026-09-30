@@ -11,6 +11,7 @@ import { getToken } from "../lib/auth.js";
 import { resolveProjectScope } from "../lib/resolve.js";
 import { resolveProjectId } from "../lib/config.js";
 import { resolveVolume } from "../lib/volume.js";
+import { sandboxShell } from "./sandbox-ssh.js";
 import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAgo, isTTY } from "../lib/format.js";
 // Templates are per-region rows in sandbox_templates, not a constant. Hardcoding them
 // here meant a template that was built, registered and sitting warm in every region was
@@ -238,6 +239,22 @@ Examples:
                 process.stdout.write(line + "\n");
         });
         process.exit(exitCode);
+    });
+    sb.command("ssh")
+        .alias("shell")
+        .argument("<id>", "Sandbox ID")
+        .description("Open an interactive shell in a running sandbox")
+        .addHelpText("after", `
+Works for every running sandbox with no keys to set up: it uses your Lizard login,
+and a scoped API key only reaches sandboxes in its scope. Ctrl-C, arrows and tab
+completion go to the sandbox; type \`exit\` or press Ctrl-D to leave.
+
+To run one command non-interactively, use \`lizard sandbox exec <id> -- <cmd>\`.
+
+Example:
+  lizard sandbox ssh sb_abc123`)
+        .action(async (id) => {
+        process.exit(await sandboxShell(id));
     });
     sb.command("logs")
         .argument("<id>", "Sandbox ID")

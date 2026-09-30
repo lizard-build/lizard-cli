@@ -223,6 +223,14 @@ Use `lizard volume create <name> --size <gb> --project <project>` for persistent
 
 `lizard sandbox create` sends a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without expiration, or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. Pausing a sandbox freezes its remaining lifetime; resuming continues from it (see [private snapshots and pause/resume](#sandboxes-private-snapshots-and-pauseresume)). The CLI has no sandbox fork command. Use volumes for persistent files.
 
+## Sandboxes: interactive shell
+
+`lizard sandbox ssh <id>` (alias `shell`) opens an interactive shell in any running sandbox,
+in `/workspace` as root. It uses your Lizard login, so there are no SSH keys to set up; a
+scoped API key only reaches sandboxes in its scope. It needs a real terminal — from a script
+or an agent, use `lizard sandbox exec <id> -- <cmd>` instead, which returns output and an
+exit code.
+
 ## Sandboxes: Desktop (computer use)
 
 The `desktop` template is a sandbox with a graphical desktop (XFCE + Chromium) streamed to a browser over noVNC.
