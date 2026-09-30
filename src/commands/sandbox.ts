@@ -333,6 +333,17 @@ Examples:
       else success(`Sandbox ${chalk.bold(sandbox.id)} created from ${snapshot.name}`);
     });
 
+  for (const operation of ["pause", "resume"] as const) {
+    sb.command(`snapshot-${operation}`)
+      .argument("<snapshot-id>", "Saved snapshot ID")
+      .description(operation === "pause" ? "Release a snapshot's warm copies and keep its saved state" : "Refill a paused snapshot's warm pool")
+      .action(async (id: string) => {
+        const snapshot = await api.post<SnapshotRecord>(`/api/sandbox-snapshots/${id}/${operation}`, {});
+        if (isJSONMode()) printJSON(snapshot);
+        else success(`Snapshot ${chalk.bold(id)}: ${snapshot.status}`);
+      });
+  }
+
   sb.command("snapshot-warm")
     .argument("<snapshot-id>", "Saved snapshot ID")
     .argument("<count>", "Copies to keep ready (1–10)", parseWarmCount)

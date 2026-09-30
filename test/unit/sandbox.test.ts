@@ -76,3 +76,15 @@ describe("private sandbox snapshots", () => {
     expect(api.post).toHaveBeenCalledWith('/api/sandboxes', expect.objectContaining({ snapshotId: 'snap-test' }));
   });
 });
+
+
+describe("snapshot pause and resume", () => {
+  it.each(["pause", "resume"])("sends snapshot %s to its own lifecycle endpoint", async operation => {
+    vi.clearAllMocks();
+    vi.mocked(api.post).mockResolvedValue({ id: "snap-test", status: operation === "pause" ? "paused" : "warming" });
+    const program = new Command().exitOverride();
+    registerSandbox(program);
+    await program.parseAsync(["sandbox", `snapshot-${operation}`, "snap-test"], { from: "user" });
+    expect(api.post).toHaveBeenCalledWith(`/api/sandbox-snapshots/snap-test/${operation}`, {});
+  });
+});
