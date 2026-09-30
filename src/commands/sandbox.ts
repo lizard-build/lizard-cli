@@ -19,7 +19,7 @@ import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAg
 // so let it.
 const TEMPLATE_HINT = "base, codex, interpreter";
 
-// The three machines a sandbox can be, each billed flat per hour by the server. The
+// The three machines a sandbox can be, each priced per hour, billed per second by the server. The
 // platform rejects anything else, so the CLI offers exactly these.
 const SANDBOX_SIZES = ["small", "medium", "large"] as const;
 const SIZE_HINT = "small 2 vCPU/4 GB, medium 4/8, large 8/16";

@@ -203,13 +203,25 @@ Rules:
 - `VITE_*` / `NEXT_PUBLIC_*` (build-time baked) → `lizard redeploy --service <svc>`; a plain restart won't pick them up.
 - Verify a non-secret value or the application's behavior. Do not print the full environment: it can expose credentials.
 
+## Sandboxes: size and pricing
+
+`lizard sandbox create -s/--size small|medium|large` picks the machine; the default is `medium`. There are exactly three sizes:
+
+| Size | vCPU | RAM | Price |
+|---|---|---|---|
+| `small` | 2 | 4 GB | $0.009/h |
+| `medium` (default) | 4 | 8 GB | $0.018/h |
+| `large` | 8 | 16 GB | $0.036/h |
+
+Prices are per hour, billed per second while the sandbox is alive, flat by size: measured CPU/RAM is not charged and sandbox egress is free. Attached volumes bill separately. `--size` cannot be combined with `--snapshot`: a private snapshot runs on the machine it was captured on and bills by measured usage.
+
 ## Sandboxes: volumes
 
 Use `lizard volume create <name> --size <gb> --project <project>` for persistent sandbox storage. Names are unique within a project; use lowercase letters, digits and dashes (up to 64 characters). Pass the name to `lizard sandbox create --volume <name>`. New volumes default to 5 GB and allow 1–50 GB. The CLI reads the server's current size limits before creating a volume; a server config override may change the maximum. Existing larger volumes keep their size. Storage charges cover used bytes, not the whole allocation.
 
 ## Sandboxes: timeout
 
-`lizard sandbox create` sends a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without expiration, or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. The CLI does not expose sandbox pause, resume, fork, snapshot creation or restore: the current backend does not support them. Use volumes for persistent files.
+`lizard sandbox create` sends a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without expiration, or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. Pausing a sandbox freezes its remaining lifetime; resuming continues from it (see [private snapshots and pause/resume](#sandboxes-private-snapshots-and-pauseresume)). The CLI has no sandbox fork command. Use volumes for persistent files.
 
 ## Volumes
 
@@ -342,7 +354,7 @@ part of this command.
 ## Sandboxes: private snapshots and pause/resume
 
 - `lizard sandbox snapshot <sandbox-id> --name my-app` saves files and running memory privately in the sandbox's project, and keeps **five** independent copies warm. `--warm 1..10` changes that count. It waits until ready; `--no-wait` returns the queued capture.
-- `lizard sandbox restore <snapshot-id>` starts a new sandbox from a warm copy. `sandbox create --snapshot <id> --project <project>` also works. Restores stay in the snapshot's project and region.
+- `lizard sandbox restore <snapshot-id>` starts a new sandbox from a warm copy. `sandbox create --snapshot <id> --project <project>` also works. Restores stay in the snapshot's project and region. A restored sandbox runs on the machine the snapshot was captured on and bills by measured usage, not a flat size; `--size` with `--snapshot` is an error.
 - `lizard sandbox snapshots --project <project>` lists snapshots. `sandbox snapshot-warm <id> <count>` changes capacity. `sandbox snapshot-rm <id>` deletes the snapshot and free copies, preserving already running sandboxes.
 - `lizard sandbox pause <id>` saves state with CRIU, stops the pod, and freezes its remaining lifetime. `sandbox resume <id>` restores the same sandbox ID, files, processes, memory, published ports, and remaining lifetime. Paused sandboxes keep no warm copies; resume includes a cold restore. Both support `--no-wait`.
 - Disconnect clients and terminals and stop workspace writes before capturing or pausing. Active TCP connections and unsupported CRIU process state cause a clear failure. Attached persistent volumes are not supported by this snapshot workflow.

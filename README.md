@@ -65,6 +65,7 @@ lizard redeploy   # rebuild and redeploy from the current source
 lizard run        # run a command locally with project and service secrets injected
 lizard ssh        # run one command inside a service container
 lizard sandbox    # create and manage Sandboxes
+lizard sandbox create --size large # 8 vCPU / 16 GB; small, medium (default), large
 lizard volume     # Persistent Volumes for Sandboxes (create / list / resize / rm)
 lizard skills     # agent guides, version-matched to the CLI
 ```
