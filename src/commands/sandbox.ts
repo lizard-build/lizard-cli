@@ -5,7 +5,8 @@ import * as https from "node:https";
 import * as http from "node:http";
 import * as p from "@clack/prompts";
 import { Command, Option } from "commander";
-import { api, getBaseURL, getRawText, streamSSE, withQuery, withScope, type ResourceScope } from "../lib/api.js";
+import open from "open";
+import { api, APIError, getBaseURL, getRawText, streamSSE, withQuery, withScope, type ResourceScope } from "../lib/api.js";
 import { getToken } from "../lib/auth.js";
 import { resolveProjectScope } from "../lib/resolve.js";
 import { resolveProjectId } from "../lib/config.js";
@@ -17,7 +18,7 @@ import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAg
 // still rejected before a request was ever sent — codex and interpreter both were. The
 // server validates against the region's actual list and answers with what IS available,
 // so let it.
-const TEMPLATE_HINT = "base, codex, interpreter";
+const TEMPLATE_HINT = "base, codex, interpreter, desktop";
 
 // The three machines a sandbox can be, each priced per hour, billed per second by the server. The
 // platform rejects anything else, so the CLI offers exactly these.
@@ -316,6 +317,82 @@ Examples:
       else success(`Port ${port} unexposed`);
     });
 
+  sb.command("desktop")
+    .argument("<id>", "Sandbox ID (created with `-t desktop`)")
+    .description("Start a sandbox's graphical desktop and print its browser URL")
+    .option("--view-only", "Print/open only the view-only URL (watch, no control)")
+    .option("--resolution <WxH>", "Screen size, e.g. 1920x1080 (640-3840 x 480-2160)", parseResolution)
+    .option("--open", "Open the desktop in your default browser")
+    .option("--status", "Show the desktop's state and URLs without starting it")
+    .option("--stop", "Stop the desktop and unpublish its port")
+    .addHelpText(
+      "after",
+      `
+Examples:
+  lizard sandbox create -t desktop
+  lizard sandbox desktop sb_abc123 --open
+  lizard sandbox desktop sb_abc123 --resolution 1920x1080
+  lizard sandbox desktop sb_abc123 --stop`,
+    )
+    .action(async (id: string, opts: { viewOnly?: boolean; resolution?: { width: number; height: number }; open?: boolean; status?: boolean; stop?: boolean }) => {
+      if (opts.stop && opts.status) throw new Error("--stop and --status can't be combined.");
+      if (opts.resolution && (opts.stop || opts.status)) {
+        throw new Error("--resolution only applies when starting the desktop; drop --stop/--status.");
+      }
+      if (opts.open && opts.stop) throw new Error("--open can't be combined with --stop.");
+
+      const path = `/api/sandboxes/${id}/desktop`;
+      const label = opts.stop ? "Stopping desktop..." : opts.status ? "Checking desktop..." : "Starting desktop...";
+      const spinner = isJSONMode() ? null : ora(label).start();
+      let result: DesktopRecord;
+      try {
+        if (opts.stop) result = await api.delete<DesktopRecord>(path);
+        else if (opts.status) result = await api.get<DesktopRecord>(path);
+        else result = await api.post<DesktopRecord>(path, opts.resolution ?? {});
+      } catch (e) {
+        spinner?.stop();
+        if (e instanceof APIError && e.code === "DESKTOP_NOT_SUPPORTED") {
+          throw new APIError(
+            e.status,
+            `${e.message}\nSandbox ${id} has no desktop. Create one with: lizard sandbox create -t desktop`,
+            e.code,
+            e.body,
+          );
+        }
+        throw e;
+      }
+      spinner?.stop();
+
+      if (isJSONMode()) {
+        printJSON(result);
+        return;
+      }
+      if (opts.stop) {
+        success(`Desktop stopped on sandbox ${chalk.bold(id)}`);
+        return;
+      }
+      if (!result.running) {
+        info(`Desktop is not running on sandbox ${chalk.bold(id)}. Start it with: lizard sandbox desktop ${id}`);
+        return;
+      }
+      const size = result.width && result.height ? ` (${result.width}x${result.height})` : "";
+      success(`Desktop ${opts.status ? "running" : "ready"} on sandbox ${chalk.bold(id)}${size}`);
+      const target = opts.viewOnly ? result.viewOnlyUrl : result.url;
+      if (opts.viewOnly) {
+        info(`  View only: ${chalk.cyan(result.viewOnlyUrl)}`);
+      } else {
+        info(`  ${chalk.cyan(result.url)}`);
+        info(chalk.dim(`  View only: ${result.viewOnlyUrl}`));
+      }
+      info(chalk.yellow(opts.viewOnly
+        ? "  This link shows the sandbox's screen; treat it like a password."
+        : "  This link grants control of the sandbox; treat it like a password."));
+      if (opts.open && target) {
+        await open(target).catch(() => {});
+        info(chalk.dim("  Opened in browser"));
+      }
+    });
+
   sb.command("snapshot")
     .argument("<id>", "Running sandbox ID")
     .requiredOption("--name <name>", "Name for this private project snapshot")
@@ -573,6 +650,26 @@ function shellQuote(arg: string): string {
   if (arg === "") return "''";
   if (/^[A-Za-z0-9_./:=@%+,-]+$/.test(arg)) return arg;
   return "'" + arg.replace(/'/g, "'\\''") + "'";
+}
+
+interface DesktopRecord {
+  running: boolean;
+  width?: number | null;
+  height?: number | null;
+  url?: string;
+  viewOnlyUrl?: string;
+}
+
+/** Parse `WxH` (e.g. 1920x1080) and check the bounds the server enforces, so a typo
+ *  fails before a round trip that would start the desktop at the wrong size. */
+export function parseResolution(value: string): { width: number; height: number } {
+  const m = /^(\d+)[xX](\d+)$/.exec(value.trim());
+  if (!m) throw new Error(`Invalid resolution "${value}": use WxH, e.g. 1920x1080`);
+  const width = Number(m[1]);
+  const height = Number(m[2]);
+  if (width < 640 || width > 3840) throw new Error(`Resolution width must be 640-3840 (got ${width})`);
+  if (height < 480 || height > 2160) throw new Error(`Resolution height must be 480-2160 (got ${height})`);
+  return { width, height };
 }
 
 interface SnapshotRecord {

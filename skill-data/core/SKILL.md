@@ -223,6 +223,29 @@ Use `lizard volume create <name> --size <gb> --project <project>` for persistent
 
 `lizard sandbox create` sends a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without expiration, or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. Pausing a sandbox freezes its remaining lifetime; resuming continues from it (see [private snapshots and pause/resume](#sandboxes-private-snapshots-and-pauseresume)). The CLI has no sandbox fork command. Use volumes for persistent files.
 
+## Sandboxes: Desktop (computer use)
+
+The `desktop` template is a sandbox with a graphical desktop (XFCE + Chromium) streamed to a browser over noVNC.
+
+```
+lizard sandbox create -t desktop                          # only this template has a desktop
+lizard sandbox desktop <id> --open                        # start it (idempotent) and open it in the browser
+lizard sandbox desktop <id> --resolution 1920x1080        # 640-3840 x 480-2160
+lizard sandbox desktop <id> --view-only                   # watch-only link
+lizard sandbox desktop <id> --status                      # URLs/state without starting
+lizard sandbox desktop <id> --stop                        # stop and unpublish
+```
+
+The printed URLs embed secrets (a websockify token and the VNC password): the main URL grants control of the sandbox, so treat it like a password and don't paste it into logs, issues or chat; share `--view-only` for watching. On any other template the command fails with `DESKTOP_NOT_SUPPORTED`.
+
+Agents drive the desktop from inside the sandbox once it is started (`DISPLAY=:1` is preset in the image):
+
+```
+lizard sandbox exec <id> -- xdotool mousemove 400 300 click 1
+lizard sandbox exec <id> -- xdotool type 'hello'
+lizard sandbox exec <id> -- lizard-desktop screenshot | tail -n 1 | base64 -d > screen.png   # PNG, base64 on one line
+```
+
 ## Volumes
 
 Persistent volumes for sandboxes. A volume's name is its key within the project; every command takes a name or ID.

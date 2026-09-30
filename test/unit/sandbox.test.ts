@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Command } from "commander";
 import { registerSandbox } from "../../src/commands/sandbox.js";
-import { api } from "../../src/lib/api.js";
+import { api, APIError } from "../../src/lib/api.js";
+import { printJSON } from "../../src/lib/format.js";
 
-vi.mock("../../src/lib/api.js", () => ({ api: { post: vi.fn() } }));
+vi.mock("../../src/lib/api.js", () => {
+  class APIError extends Error {
+    constructor(public status: number, message: string, public code = "", public body: unknown = null) { super(message); }
+  }
+  return { api: { post: vi.fn(), get: vi.fn(), delete: vi.fn() }, APIError };
+});
+vi.mock("open", () => ({ default: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("../../src/lib/config.js", () => ({
   resolveProjectId: vi.fn().mockResolvedValue("project-test"),
 }));
@@ -86,5 +93,61 @@ describe("snapshot pause and resume", () => {
     registerSandbox(program);
     await program.parseAsync(["sandbox", `snapshot-${operation}`, "snap-test"], { from: "user" });
     expect(api.post).toHaveBeenCalledWith(`/api/sandbox-snapshots/snap-test/${operation}`, {});
+  });
+});
+
+
+describe("sandbox desktop", () => {
+  const desktop = { running: true, width: 1280, height: 800, url: "https://x/vnc.html?password=a", viewOnlyUrl: "https://x/vnc.html?password=b&view_only=true" };
+  function run(args: string[]) {
+    const program = new Command().exitOverride().configureOutput({ writeErr: () => {} });
+    registerSandbox(program);
+    return program.parseAsync(["sandbox", "desktop", "sb-test", ...args], { from: "user" });
+  }
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.post).mockResolvedValue(desktop);
+    vi.mocked(api.get).mockResolvedValue(desktop);
+    vi.mocked(api.delete).mockResolvedValue({ running: false });
+  });
+
+  it("starts the desktop and prints the API response in JSON mode", async () => {
+    await run([]);
+    expect(api.post).toHaveBeenCalledWith("/api/sandboxes/sb-test/desktop", {});
+    expect(printJSON).toHaveBeenCalledWith(desktop);
+  });
+
+  it("sends a validated --resolution as width/height", async () => {
+    await run(["--resolution", "1920x1080"]);
+    expect(api.post).toHaveBeenCalledWith("/api/sandboxes/sb-test/desktop", { width: 1920, height: 1080 });
+  });
+
+  it.each(["1920", "1920x", "abcx100", "639x480", "3841x1080", "1920x479", "1920x2161"])(
+    "rejects resolution %s before making a request", async (value) => {
+      await expect(run(["--resolution", value])).rejects.toThrow(/[Rr]esolution/);
+      expect(api.post).not.toHaveBeenCalled();
+    },
+  );
+
+  it("--status reads without starting", async () => {
+    await run(["--status"]);
+    expect(api.get).toHaveBeenCalledWith("/api/sandboxes/sb-test/desktop");
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("--stop deletes", async () => {
+    await run(["--stop"]);
+    expect(api.delete).toHaveBeenCalledWith("/api/sandboxes/sb-test/desktop");
+    expect(printJSON).toHaveBeenCalledWith({ running: false });
+  });
+
+  it("rejects --stop with --status", async () => {
+    await expect(run(["--stop", "--status"])).rejects.toThrow(/can't be combined/);
+    expect(api.delete).not.toHaveBeenCalled();
+  });
+
+  it("points at `sandbox create -t desktop` when the template has no desktop", async () => {
+    vi.mocked(api.post).mockRejectedValue(new APIError(400, "The 'base' template has no desktop.", "DESKTOP_NOT_SUPPORTED"));
+    await expect(run([])).rejects.toMatchObject({ code: "DESKTOP_NOT_SUPPORTED", message: expect.stringContaining("lizard sandbox create -t desktop") });
   });
 });
