@@ -227,8 +227,8 @@ Use `lizard volume create <name> --size <gb> --project <project>` for persistent
 
 Run a coding agent inside a sandbox (use `-t codex`) on the user's own credentials:
 
-- `lizard agents` — the credential pool (per user, per project) and which agents can run.
-  Credentials are shared: connect once, every agent that accepts it uses it.
+- `lizard agents` — your account's credentials and which agents can run. Connect once (here or in the
+  dashboard: Account settings › Agents); every sandbox and every agent that accepts it uses it.
 - `lizard agents login chatgpt` — ChatGPT subscription via device code.
   `lizard agents add claude` (token from `claude setup-token`), `add anthropic|openai|openrouter|llmgateway|deepseek` for API keys.
 - `lizard agents use <agent> --credential … --model … --effort …` — per-agent defaults.

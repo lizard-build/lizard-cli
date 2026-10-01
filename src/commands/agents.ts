@@ -4,7 +4,6 @@ import open from "open";
 import { Command } from "commander";
 import * as p from "@clack/prompts";
 import { api } from "../lib/api.js";
-import { resolveProjectId } from "../lib/config.js";
 import { success, info, isJSONMode, printJSON, table, timeAgo } from "../lib/format.js";
 
 // Built-in coding agents (platform: server/src/routes/agents.ts), Boat-style.
@@ -16,8 +15,7 @@ import { success, info, isJSONMode, printJSON, table, timeAgo } from "../lib/for
 //   lizard sandbox conversations <id>
 //   lizard sandbox interrupt <id>
 //
-// A login belongs to you and one project; every sandbox in that project runs agents on
-// it. The platform keeps the refresh token and hands a sandbox only a short-lived access
+// Credentials belong to your account: connect once, every sandbox can run agents on them. The platform keeps the refresh token and hands a sandbox only a short-lived access
 // token per run.
 
 // Agents that can run today; the platform lists the rest as coming (GET /agents).
@@ -50,8 +48,8 @@ function checkProvider(p: string) {
   if (!(PROVIDERS as readonly string[]).includes(p)) throw new Error(`Unknown agent '${p}'. Available: ${PROVIDERS.join(", ")}.`);
 }
 
-async function showPool(projectId: string) {
-  const r = await api.get<Pool>(`/api/projects/${projectId}/agents`);
+async function showPool() {
+  const r = await api.get<Pool>("/api/agents");
   if (isJSONMode()) return printJSON(r);
   const label = (k: string) => r.credentials.find((c) => c.kind === k)?.label ?? k;
   info(chalk.bold("Credentials") + chalk.dim("  — connect once, every agent that accepts it can use it"));
@@ -71,27 +69,26 @@ async function showPool(projectId: string) {
 
 export function registerAgents(program: Command) {
   const ag = program.command("agents")
-    .description("Coding agents in sandboxes: credentials (ChatGPT, Claude, API keys) and per-agent defaults")
-    .option("-p, --project <id>", "Project (name, slug, or ID). Defaults to the linked project.")
-    .action(async (opts) => showPool(await resolveProjectId(opts.project)));
+    .description("Coding agents in sandboxes: your account's credentials (ChatGPT, Claude, API keys) and per-agent defaults")
+    .option("-p, --project <id>", "Ignored: agent credentials belong to your account")
+    .action(async (opts) => showPool());
 
   ag.command("status")
-    .option("-p, --project <id>", "Project (name, slug, or ID). Defaults to the linked project.")
+    .option("-p, --project <id>", "Ignored: agent credentials belong to your account")
     .description("Show connected credentials and which agents can run")
-    .action(async (opts) => showPool(await resolveProjectId(opts.project ?? ag.opts().project)));
+    .action(async (opts) => showPool());
 
   ag.command("login")
     .argument("[credential]", "Subscription to sign in to (chatgpt)", "chatgpt")
-    .option("-p, --project <id>", "Project (name, slug, or ID). Defaults to the linked project.")
+    .option("-p, --project <id>", "Ignored: agent credentials belong to your account")
     .option("--open", "Open the sign-in page in your browser")
     .description("Sign in to your ChatGPT subscription with a device code (used by Codex)")
     .action(async (name: string, opts) => {
       const kind = kindOf(name);
       if (kind === "claude") throw new Error("Claude subscriptions are added with a token: run `claude setup-token`, then `lizard agents add claude`.");
       if (kind !== "chatgpt") throw new Error(`'${name}' is added with \`lizard agents add ${name}\`.`);
-      const projectId = await resolveProjectId(opts.project ?? ag.opts().project);
       const start = await api.post<{ loginId: string; verificationUrl: string; userCode: string; interval: number; expiresAt: number }>(
-        `/api/projects/${projectId}/agents/credentials/chatgpt/login`, {},
+        `/api/agents/credentials/chatgpt/login`, {},
       );
       if (isJSONMode()) printJSON(start);
       else {
@@ -104,7 +101,7 @@ export function registerAgents(program: Command) {
       for (;;) {
         await sleep(Math.max(2, start.interval) * 1000);
         const r = await api.get<{ status: string; email?: string | null; plan?: string | null }>(
-          `/api/projects/${projectId}/agents/credentials/chatgpt/login/${start.loginId}`,
+          `/api/agents/credentials/chatgpt/login/${start.loginId}`,
         ).catch((e) => { spinner?.stop(); throw e; });
         if (r.status === "pending") continue;
         spinner?.stop();
@@ -119,13 +116,12 @@ export function registerAgents(program: Command) {
 
   ag.command("add")
     .argument("<credential>", "claude | anthropic | openai | openrouter | llmgateway | deepseek | moonshot")
-    .option("-p, --project <id>", "Project (name, slug, or ID). Defaults to the linked project.")
+    .option("-p, --project <id>", "Ignored: agent credentials belong to your account")
     .option("--key <value>", "The key or token (otherwise read from stdin, or asked for)")
     .description("Add an API key, or a Claude subscription token from `claude setup-token`")
     .action(async (name: string, opts) => {
       const kind = kindOf(name);
       if (kind === "chatgpt") throw new Error("ChatGPT is added by signing in: `lizard agents login chatgpt`.");
-      const projectId = await resolveProjectId(opts.project ?? ag.opts().project);
       let key: string | undefined = opts.key;
       if (!key && !process.stdin.isTTY) key = (await new Promise<string>((res) => { let d = ""; process.stdin.on("data", (c) => (d += c)); process.stdin.on("end", () => res(d)); })).trim();
       if (!key) {
@@ -134,37 +130,35 @@ export function registerAgents(program: Command) {
         if (p.isCancel(v)) return;
         key = String(v).trim();
       }
-      const r = await api.put<{ kind: string; account: string }>(`/api/projects/${projectId}/agents/credentials/${kind}`, { apiKey: key });
+      const r = await api.put<{ kind: string; account: string }>(`/api/agents/credentials/${kind}`, { apiKey: key });
       if (isJSONMode()) printJSON(r); else success(`Added ${name} (${r.account}).`);
     });
 
   ag.command("remove")
     .alias("logout")
     .argument("<credential>", "chatgpt | claude | anthropic | openai | openrouter | llmgateway | deepseek | moonshot")
-    .option("-p, --project <id>", "Project (name, slug, or ID). Defaults to the linked project.")
+    .option("-p, --project <id>", "Ignored: agent credentials belong to your account")
     .description("Remove a credential from this project")
     .action(async (name: string, opts) => {
       const kind = kindOf(name);
-      const projectId = await resolveProjectId(opts.project ?? ag.opts().project);
-      await api.delete(`/api/projects/${projectId}/agents/credentials/${kind}`);
+      await api.delete(`/api/agents/credentials/${kind}`);
       if (isJSONMode()) printJSON({ kind, disconnected: true }); else success(`Removed ${name}.`);
     });
 
   ag.command("use")
     .argument("<agent>", "codex | claude | pi | opencode | prime | kimi")
-    .option("-p, --project <id>", "Project (name, slug, or ID). Defaults to the linked project.")
+    .option("-p, --project <id>", "Ignored: agent credentials belong to your account")
     .option("--credential <name>", "For Codex / Claude Code: which credential to use")
     .option("-m, --model <model>", "Default model (\"none\" to clear)")
     .option("--effort <level>", "Default reasoning effort (\"none\" to clear)")
     .description("Set an agent's credential and default model/effort")
     .action(async (agent: string, opts) => {
-      const projectId = await resolveProjectId(opts.project ?? ag.opts().project);
       const body: Record<string, string | null> = {};
       if (opts.credential) body.authKind = kindOf(opts.credential);
       if (opts.model) body.defaultModel = opts.model === "none" ? null : opts.model;
       if (opts.effort) body.defaultEffort = opts.effort === "none" ? null : opts.effort;
       if (!Object.keys(body).length) throw new Error("Nothing to set: pass --credential, --model or --effort.");
-      const r = await api.put(`/api/projects/${projectId}/agents/harnesses/${agent}`, body);
+      const r = await api.put(`/api/agents/harnesses/${agent}`, body);
       if (isJSONMode()) printJSON(r); else success(`Updated ${agent}.`);
     });
 }
