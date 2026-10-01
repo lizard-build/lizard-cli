@@ -249,7 +249,7 @@ exit code.
 
 ## Sandboxes: Desktop (computer use)
 
-The `desktop` template is a sandbox with a graphical desktop (XFCE + Chromium) streamed to a browser over noVNC.
+The `desktop` template is a sandbox with a graphical desktop (Openbox + Chromium) streamed to a browser over WebRTC (H.264), falling back to noVNC where WebRTC cannot connect. The viewer's side panel has fullscreen with keyboard lock, send-keys, type-clipboard and a switch to VNC.
 
 ```
 lizard sandbox create -t desktop                          # only this template has a desktop
@@ -258,9 +258,11 @@ lizard sandbox desktop <id> --resolution 1920x1080        # 640-3840 x 480-2160
 lizard sandbox desktop <id> --view-only                   # watch-only link
 lizard sandbox desktop <id> --status                      # URLs/state without starting
 lizard sandbox desktop <id> --stop                        # stop and unpublish
+lizard sandbox vnc <id>                                   # native VNC app: tunnels localhost:5900 to the desktop
+lizard sandbox vnc <id> --open                            # macOS: opens Screen Sharing; --view-only, --port N
 ```
 
-The printed URLs embed secrets (a websockify token and the VNC password): the main URL grants control of the sandbox, so treat it like a password and don't paste it into logs, issues or chat; share `--view-only` for watching. On any other template the command fails with `DESKTOP_NOT_SUPPORTED`.
+The printed URLs embed secrets (the desktop's token and its password): the main URL grants control of the sandbox, so treat it like a password and don't paste it into logs, issues or chat; share `--view-only` for watching. On any other template the command fails with `DESKTOP_NOT_SUPPORTED`.
 
 Agents drive the desktop from inside the sandbox once it is started (`DISPLAY=:1` is preset in the image):
 

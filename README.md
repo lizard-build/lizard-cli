@@ -67,6 +67,7 @@ lizard ssh        # run one command inside a service container
 lizard sandbox    # create and manage Sandboxes
 lizard sandbox create --size large # 8 vCPU / 16 GB; small, medium (default), large
 lizard sandbox desktop <id> --open # graphical desktop in the browser (sandbox create -t desktop)
+lizard sandbox vnc <id>            # the same desktop in a native VNC app (localhost:5900)
 lizard sandbox ssh <id>            # interactive shell in any running sandbox (no keys to set up)
 lizard agents                      # coding agents: connected credentials and which agents can run
 lizard agents login chatgpt        # ChatGPT subscription (device code); `agents add anthropic|openai|openrouter|claude …` for keys/tokens

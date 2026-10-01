@@ -12,6 +12,7 @@ import { resolveProjectScope } from "../lib/resolve.js";
 import { resolveProjectId } from "../lib/config.js";
 import { resolveVolume } from "../lib/volume.js";
 import { sandboxShell } from "./sandbox-ssh.js";
+import { startVncTunnel, vncTarget } from "./sandbox-vnc.js";
 import { registerSandboxAgentCommands } from "./agents.js";
 import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAgo, isTTY } from "../lib/format.js";
 // Templates are per-region rows in sandbox_templates, not a constant. Hardcoding them
@@ -376,6 +377,66 @@ Examples:
             await open(target).catch(() => { });
             info(chalk.dim("  Opened in browser"));
         }
+    });
+    sb.command("vnc")
+        .argument("<id>", "Sandbox ID (created with `-t desktop`)")
+        .description("Connect a VNC app (Screen Sharing, TigerVNC, RealVNC) to a sandbox's desktop")
+        .option("--port <port>", "Local port to listen on (the next free one is used if taken)", parseIntOption, 5900)
+        .option("--view-only", "Use the view-only password: watch, no control")
+        .option("--open", "Open the address in your VNC app (vnc:// — Screen Sharing on macOS)")
+        .addHelpText("after", `
+The desktop has no public VNC port. This listens on localhost and tunnels each
+connection over the desktop's secured WebSocket, so point any VNC app at the
+address it prints and enter the password. Runs until Ctrl-C.
+
+Examples:
+  lizard sandbox vnc sb_abc123            # then connect your VNC app to localhost:5900
+  lizard sandbox vnc sb_abc123 --open     # macOS: opens Screen Sharing
+  lizard sandbox vnc sb_abc123 --view-only`)
+        .action(async (id, opts) => {
+        const spinner = isJSONMode() ? null : ora("Starting desktop...").start();
+        let result;
+        try {
+            result = await api.post(`/api/sandboxes/${id}/desktop`, {});
+        }
+        catch (e) {
+            spinner?.stop();
+            if (e instanceof APIError && e.code === "DESKTOP_NOT_SUPPORTED") {
+                throw new APIError(e.status, `${e.message}\nCreate a desktop sandbox with: lizard sandbox create -t desktop`, e.code, e.body);
+            }
+            throw e;
+        }
+        spinner?.stop();
+        const desktopUrl = opts.viewOnly ? result.viewOnlyUrl : result.url;
+        if (!result.running || !desktopUrl)
+            throw new Error(`The desktop on sandbox ${id} did not start.`);
+        const { wsUrl, password } = vncTarget(desktopUrl);
+        const tunnel = await startVncTunnel(wsUrl, opts.port, {
+            onConnect: () => { if (!isJSONMode())
+                info(chalk.dim(`  VNC app connected`)); },
+            onClose: (reason) => { if (!isJSONMode())
+                info(chalk.dim(`  VNC app session ended: ${reason}`)); },
+        });
+        const address = `localhost:${tunnel.port}`;
+        if (isJSONMode()) {
+            printJSON({ id, address, host: "127.0.0.1", port: tunnel.port, password, viewOnly: !!opts.viewOnly });
+        }
+        else {
+            success(`VNC ready for sandbox ${chalk.bold(id)}${opts.viewOnly ? " (view only)" : ""}`);
+            info(`  Address:  ${chalk.cyan(address)}`);
+            info(`  Password: ${chalk.cyan(password)}`);
+            info(chalk.dim(`  Connect any VNC app to the address above; on macOS: open vnc://${address}`));
+            info(chalk.dim("  Ctrl-C to stop"));
+        }
+        if (opts.open) {
+            // Screen Sharing takes the password from the URL, so it connects without a prompt.
+            await open(`vnc://:${encodeURIComponent(password)}@${address}`).catch(() => { });
+        }
+        await new Promise((resolve) => {
+            const stop = () => { tunnel.close(); resolve(); };
+            process.once("SIGINT", stop);
+            process.once("SIGTERM", stop);
+        });
     });
     sb.command("snapshot")
         .argument("<id>", "Running sandbox ID")
