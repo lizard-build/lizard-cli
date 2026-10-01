@@ -223,6 +223,22 @@ Use `lizard volume create <name> --size <gb> --project <project>` for persistent
 
 `lizard sandbox create` sends a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without expiration, or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. Pausing a sandbox freezes its remaining lifetime; resuming continues from it (see [private snapshots and pause/resume](#sandboxes-private-snapshots-and-pauseresume)). The CLI has no sandbox fork command. Use volumes for persistent files.
 
+## Sandboxes: built-in coding agents
+
+Run a coding agent inside a sandbox (use `-t codex`) on the user's own credentials:
+
+- `lizard agents` — the credential pool (per user, per project) and which agents can run.
+  Credentials are shared: connect once, every agent that accepts it uses it.
+- `lizard agents login chatgpt` — ChatGPT subscription via device code.
+  `lizard agents add claude` (token from `claude setup-token`), `add anthropic|openai|openrouter|llmgateway|deepseek` for API keys.
+- `lizard agents use <agent> --credential … --model … --effort …` — per-agent defaults.
+- `lizard sandbox prompt <id> --agent codex|claude|pi|opencode|prime "task"` — streams tool calls and
+  the answer; `-c <conversation>` continues one; `--no-wait` returns at once.
+- `lizard sandbox conversations <id>`, `lizard sandbox interrupt <id> [-c <conversation>]`.
+
+Codex and Claude Code use one credential at a time; pi, OpenCode and Prime use every connected one
+they accept. Sandboxes never receive a subscription's refresh token, only a short-lived access token.
+
 ## Sandboxes: interactive shell
 
 `lizard sandbox ssh <id>` (alias `shell`) opens an interactive shell in any running sandbox,

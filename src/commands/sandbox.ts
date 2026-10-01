@@ -12,6 +12,7 @@ import { resolveProjectScope } from "../lib/resolve.js";
 import { resolveProjectId } from "../lib/config.js";
 import { resolveVolume } from "../lib/volume.js";
 import { sandboxShell } from "./sandbox-ssh.js";
+import { registerSandboxAgentCommands } from "./agents.js";
 import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAgo, isTTY } from "../lib/format.js";
 
 // Templates are per-region rows in sandbox_templates, not a constant. Hardcoding them
@@ -269,6 +270,8 @@ Examples:
       });
       process.exit(exitCode);
     });
+
+  registerSandboxAgentCommands(sb);
 
   sb.command("ssh")
     .alias("shell")
