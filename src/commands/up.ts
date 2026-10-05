@@ -6,7 +6,7 @@ import { createTarball } from "../lib/archive.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
-import { api, streamSSE, getBaseURL, APIError, type ResourceScope } from "../lib/api.js";
+import { api, streamSSE, getBaseURL, clientHeaders, APIError, type ResourceScope } from "../lib/api.js";
 import { updateProjectLink, DEFAULT_REGION } from "../lib/config.js";
 import { resolveContext, getScope } from "../lib/resolve.js";
 import { ensureLinked } from "./init.js";
@@ -174,6 +174,9 @@ async function deployFromLocal(args: {
     const res = await fetch(url, {
       method: "POST",
       headers: {
+        // Without these the platform cannot tell `lizard up` from a folder
+        // uploaded in the dashboard, and filed every CLI deploy as a dashboard one.
+        ...clientHeaders(),
         "Content-Type": "application/octet-stream",
         Authorization: `Bearer ${(await import("../lib/auth.js")).getToken()}`,
       },

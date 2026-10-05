@@ -1,10 +1,22 @@
 import { getToken } from "./auth.js";
 import { CURRENT_VERSION } from "./updater.js";
+import { detectAgent } from "./agent.js";
 import * as https from "node:https";
 import * as http from "node:http";
 
 const DEFAULT_BASE_URL = "https://lizard.build";
 const USER_AGENT = `lizard-cli/${CURRENT_VERSION}`;
+const AGENT = detectAgent();
+
+/**
+ * Headers that say who is calling: the CLI and its version, and the coding
+ * agent running it when there is one. The platform reads both to tell CLI
+ * traffic from the dashboard, and agent deploys from human ones. Every
+ * request to the platform sends them.
+ */
+export function clientHeaders(): Record<string, string> {
+  return { "User-Agent": USER_AGENT, ...(AGENT ? { "X-Lizard-Agent": AGENT } : {}) };
+}
 
 let baseURL = process.env.LIZARD_API_URL || DEFAULT_BASE_URL;
 let _accessToken: string | null = null;
@@ -108,7 +120,7 @@ async function request<T = any>(
   const token = _accessToken || getToken();
 
   const headers: Record<string, string> = {
-    "User-Agent": USER_AGENT,
+    ...clientHeaders(),
     ...extraHeaders,
   };
   if (token) {
@@ -153,7 +165,7 @@ async function request<T = any>(
 export async function getRawText(path: string): Promise<string> {
   const url = baseURL + path;
   const token = _accessToken || getToken();
-  const headers: Record<string, string> = { "User-Agent": USER_AGENT };
+  const headers: Record<string, string> = clientHeaders();
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(url, { method: "GET", headers });
@@ -268,7 +280,7 @@ export function streamSSE(
     const connect = () => {
       if (finished) return;
       const reqHeaders: Record<string, string> = {
-        "User-Agent": USER_AGENT,
+        ...clientHeaders(),
         Accept: "text/event-stream",
       };
       if (token) reqHeaders["Authorization"] = `Bearer ${token}`;
