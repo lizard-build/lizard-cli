@@ -1,6 +1,4 @@
-import { dollarsToCents, getX402Quote, payX402, getX402Status } from "../lib/x402.js";
 import chalk from "chalk";
-import open from "open";
 import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { api, withQuery, APIError } from "../lib/api.js";
@@ -40,16 +38,6 @@ interface BalanceView {
 function fmtCents(cents: number): string {
   const sign = cents < 0 ? "-" : "";
   return `${sign}$${(Math.abs(cents) / 100).toFixed(2)}`;
-}
-
-/** Accepts "10", "10.5", "$10.50" -> cents. Throws on anything else. */
-function parseDollarsToCents(input: string): number {
-  const cleaned = input.trim().replace(/^\$/, "");
-  const value = Number(cleaned);
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new Error(`Invalid amount: "${input}". Use a positive dollar amount, e.g. 10 or 10.50.`);
-  }
-  return Math.round(value * 100);
 }
 
 function statusLabel(status: string): string {
@@ -131,7 +119,7 @@ export function registerCredits(program: Command) {
   const cmd = program
     .command("credits")
     .alias("billing")
-    .description("Account balance, usage, and top-ups (prepaid credits)")
+    .description("Account balance and usage (prepaid credits)")
     .action(async () => {
       await printBalance();
     });
@@ -197,29 +185,13 @@ export function registerCredits(program: Command) {
         return;
       }
       if (items.length === 0) {
-        console.log("No saved payment methods. Add one with `lizard credits payment-methods add`.");
+        console.log("No saved payment methods.");
         return;
       }
       table(
         ["ID", "Card", "Expires", "Default"],
         items.map((m) => [m.id, `${m.brand} •••• ${m.last4}`, `${m.expMonth}/${m.expYear}`, m.isDefault ? "yes" : ""]),
       );
-    });
-
-  pm.command("add")
-    .description("Save a new card via a Stripe Checkout link")
-    .option("--return-url <url>", "Where to redirect after saving the card")
-    .option("--no-open", "Print the link instead of opening a browser")
-    .action(async (opts) => {
-      const { url } = await api.post<{ url: string }>("/api/billing/payment-methods/setup", {
-        returnUrl: opts.returnUrl,
-      });
-      if (isJSONMode()) {
-        printJSON({ url });
-        return;
-      }
-      console.log(`Open this link to save a card:\n${chalk.cyan(url)}`);
-      if (opts.open !== false && isTTY()) await open(url).catch(() => {});
     });
 
   pm.command("remove <id>")
@@ -237,124 +209,6 @@ export function registerCredits(program: Command) {
         printJSON(out);
       } else {
         success("Payment method removed");
-      }
-    });
-
-  // ── Top up ────────────────────────────────────────────────────────
-  cmd
-    .command("topup <amount>")
-    .alias("purchase")
-    .description("Buy credits (amount in dollars, e.g. `lizard credits topup 20`)")
-    .option("--method <method>", "card, crypto, or x402", "card")
-    .option("--quote", "Show an x402 quote without paying")
-    .option("--max-total <amount>", "Maximum x402 payment including fees, in dollars")
-    .option("--request-id <uuid>", "Reuse this ID to resume an x402 purchase")
-    .option("-y, --yes", "Confirm the x402 payment within --max-total")
-    .option("--return-url <url>", "Where to redirect after payment")
-    .option("--no-open", "Print the checkout link instead of opening a browser")
-    .action(async (amount: string, opts) => {
-      if (opts.method === "x402") {
-        const creditCents = dollarsToCents(amount);
-        const quote = await getX402Quote(creditCents);
-        if (opts.quote) {
-          if (isJSONMode()) printJSON(quote);
-          else console.log(`Credits ${fmtCents(quote.creditCents)}, fee ${fmtCents(quote.feeCents)}, total ${fmtCents(quote.totalCents)} USDC on Base`);
-          return;
-        }
-        if (!opts.maxTotal) throw new Error("Use --max-total to set a payment limit including fees.");
-        const limit = dollarsToCents(opts.maxTotal);
-        if (quote.totalCents > limit) throw new Error("Payment exceeds --max-total.");
-        if (!opts.yes) {
-          if (!isTTY()) throw new Error("Use --yes and --max-total to authorize an x402 payment.");
-          const confirmed = await p.confirm({ message: `Pay ${fmtCents(quote.totalCents)} USDC for ${fmtCents(quote.creditCents)} credits?` });
-          if (p.isCancel(confirmed) || !confirmed) throw new Error("Payment cancelled.");
-        }
-        const result = await payX402(creditCents, limit, quote, opts.requestId);
-        if (isJSONMode()) printJSON(result);
-        else console.log(`Payment ${result.status}. Attempt: ${result.attemptId}. Request: ${result.requestId}`);
-        return;
-      }
-      if (opts.quote || opts.maxTotal || opts.requestId) throw new Error("--quote, --max-total, and --request-id require --method x402.");
-      const creditCents = parseDollarsToCents(amount);
-      if (opts.method !== "card" && opts.method !== "crypto") {
-        throw new Error(`--method must be "card", "crypto", or "x402", got "${opts.method}"`);
-      }
-      let out: { url?: string; sessionId?: string };
-      try {
-        out = await api.post("/api/billing/purchase", {
-          creditCents,
-          paymentMethod: opts.method,
-          returnUrl: opts.returnUrl,
-        });
-      } catch (e) {
-        if (e instanceof APIError && e.status === 409 && e.message === "CREDITS_NOT_ENABLED") {
-          throw new Error("Credits purchases aren't available yet on this account.");
-        }
-        throw e;
-      }
-      if (isJSONMode()) {
-        printJSON(out);
-        return;
-      }
-      if (!out.url) throw new Error("No checkout URL returned.");
-      console.log(`Complete payment (${fmtCents(creditCents)}) at:\n${chalk.cyan(out.url)}`);
-      if (opts.open !== false && isTTY()) await open(out.url).catch(() => {});
-    });
-
-  cmd.command("payment-status <attempt-id>")
-    .description("Check or recover an x402 credit purchase")
-    .action(async (attemptId: string) => {
-      const result = await getX402Status(attemptId);
-      if (isJSONMode()) printJSON(result);
-      else console.log(`Payment ${result.status}. Attempt: ${result.attemptId}`);
-    });
-
-  // ── Auto top-up ───────────────────────────────────────────────────
-  const auto = cmd.command("auto-topup").description("Show or configure automatic top-up");
-
-  auto.action(async () => {
-    const settings = await api.get("/api/billing/auto-topup");
-    if (isJSONMode()) { printJSON(settings); return; }
-    console.log(JSON.stringify(settings, null, 2));
-  });
-
-  auto
-    .command("set")
-    .description("Configure automatic top-up")
-    .requiredOption("--payment-method <id...>", "Payment method ID(s) to charge, in priority order")
-    .option("--threshold <amount>", "Top up when balance drops below this (dollars)", "5")
-    .option("--amount <amount>", "How much to add per top-up (dollars)", "20")
-    .option("--disable", "Turn auto top-up off instead of configuring it")
-    .action(async (opts) => {
-      const body = {
-        enabled: !opts.disable,
-        thresholdCents: parseDollarsToCents(opts.threshold),
-        amountCents: parseDollarsToCents(opts.amount),
-        paymentMethodIds: opts.paymentMethod,
-      };
-      const out = await api.put("/api/billing/auto-topup", body);
-      if (isJSONMode()) { printJSON(out); return; }
-      success(opts.disable ? "Auto top-up disabled" : "Auto top-up configured");
-    });
-
-  auto
-    .command("run")
-    .description("Manually trigger an auto top-up check now")
-    .action(async () => {
-      try {
-        const out = await api.post<{ ok: boolean; creditedCents?: number; balanceCents?: number }>(
-          "/api/billing/auto-topup/run",
-          {},
-        );
-        if (isJSONMode()) { printJSON(out); return; }
-        if (out.ok) {
-          success(`Topped up ${fmtCents(out.creditedCents ?? 0)} — new balance ${fmtCents(out.balanceCents ?? 0)}`);
-        }
-      } catch (e) {
-        if (e instanceof APIError && e.status === 429) {
-          throw new Error(`Auto top-up rate-limited: ${(e.body as any)?.reason ?? e.message}`);
-        }
-        throw e;
       }
     });
 
