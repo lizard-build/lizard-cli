@@ -57,6 +57,7 @@ lizard ps         # list services
 lizard status     # show the linked workspace, project and service
 lizard logs       # stream runtime logs
 lizard metrics    # resource metrics (CPU, memory, network, disk); --cost for spend
+lizard billing    # plan, trial, credits used this month; start, cancel or resume Pro
 lizard metrics --all # all services in the project, even with a linked service
 lizard scale      # scale replicas / CPU / memory / storage
 lizard secrets    # manage secrets
@@ -86,6 +87,19 @@ lizard ssh -s my-app -- printenv
 ```
 
 Run `lizard --help` for the full list.
+
+## Billing
+
+```bash
+lizard billing          # plan, trial, credits used this month, next charge
+lizard billing start    # start the Pro trial in Stripe Checkout
+lizard billing promo X  # redeem a promo code for a longer trial
+```
+
+Pro costs $19/month, taxes included, with $19 in credits each month. Usage
+above that is pay as you go. A new account starts with a 7-day trial with $5 in
+credits. When the account has no plan, commands that create something fail
+with the reason and the link to open next.
 
 ## For agents and scripts
 
