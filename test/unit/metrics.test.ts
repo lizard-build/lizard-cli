@@ -253,3 +253,75 @@ describe("metrics service selection", () => {
     expect(vi.mocked(table).mock.calls[10][1][0][4]).toBe("2.0 KB/s");
   });
 });
+
+describe("metrics --cost", () => {
+  const live = {
+    resources: [{ projectId: "project-test", type: "app", name: "web", vcpu: 0.5, memoryGb: 0.5, storageGb: 0, costPerHour: 0.01 }],
+    costPerHour: 0.02,
+  };
+  const prices = { cpuPerVcpuPerSec: 0.000005, memoryPerGbPerSec: 0.000002, storagePerGbPerSec: 0, egressPerGb: 0.05 };
+  const summary = {
+    projects: [{ projectId: "project-test", cpuVcpuSeconds: 3600, memoryGbSeconds: 3600, storageGbSeconds: 0, egressBytes: 0, costUsd: 0.03 }],
+    periodStart: Date.now() - 86_400_000,
+    periodEnd: Date.now() + 86_400_000,
+    prices,
+  };
+  const period = { start: 1, end: 2, includedCents: 1900, usedCents: 3140, overageCents: 1240 };
+
+  function mockCost(subscription: unknown) {
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      const p = String(path);
+      if (p.startsWith("/api/billing/live")) return live;
+      if (p.startsWith("/api/billing/summary")) return summary;
+      if (p.startsWith("/api/billing/account")) return { status: "active" };
+      if (p.startsWith("/api/billing/subscription")) {
+        if (subscription instanceof Error) throw subscription;
+        return subscription;
+      }
+      return { apps: [], addons: [] };
+    });
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    vi.mocked(getProjectLink).mockReturnValue({ projectId: "project-test", projectName: "test" });
+    vi.mocked(resolveProjectScope).mockResolvedValue({ projectId: "project-test", scope: { workspaceId: "workspace-test" } });
+  });
+
+  it("shows Pro credits used of $19 and the overage", async () => {
+    vi.mocked(isJSONMode).mockReturnValue(false);
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { lines.push(a.join(" ")); });
+    mockCost({ plan: "pro", status: "active", period: { kind: "paid", ...period } });
+    await run(["--cost"]);
+    expect(api.get).toHaveBeenCalledWith("/api/billing/subscription?workspaceId=workspace-test");
+    expect(lines.join("\n").replace(/\x1b\[[0-9;]*m/g, "")).toContain("Pro       $31.40 of $19 in monthly credits used, overage $12.40");
+  });
+
+  it("shows trial credits left during the trial", async () => {
+    vi.mocked(isJSONMode).mockReturnValue(false);
+    const lines: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { lines.push(a.join(" ")); });
+    mockCost({ plan: "pro", status: "trialing", period: { ...period, kind: "trial", includedCents: 500, usedCents: 120, overageCents: 0 } });
+    await run(["--cost"]);
+    expect(lines.join("\n").replace(/\x1b\[[0-9;]*m/g, "")).toContain("Pro trial $1.20 of $5 in trial credits used, $3.80 left");
+  });
+
+  it("adds proCredits to JSON for Pro, and nothing for prepaid credits or older servers", async () => {
+    vi.mocked(isJSONMode).mockReturnValue(true);
+    mockCost({ plan: "pro", status: "active", period: { kind: "paid", ...period } });
+    await run(["--cost"]);
+    expect(vi.mocked(printJSON).mock.calls[0][0]).toMatchObject({
+      proCredits: { status: "active", kind: "paid", periodStart: 1, periodEnd: 2, includedCents: 1900, usedCents: 3140, overageCents: 1240 },
+    });
+
+    for (const sub of [{ plan: "payg", status: "none", period: null }, new Error("404")]) {
+      vi.mocked(printJSON).mockClear();
+      mockCost(sub);
+      await run(["--cost"]);
+      const json = vi.mocked(printJSON).mock.calls[0][0] as Record<string, unknown>;
+      expect(json).not.toHaveProperty("proCredits");
+      expect(json).toMatchObject({ projectId: "project-test", workspaceCostPerHour: 0.02 });
+    }
+  });
+});
