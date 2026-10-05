@@ -5,7 +5,7 @@ import { createTarball } from "../lib/archive.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
-import { api, streamSSE, getBaseURL, APIError } from "../lib/api.js";
+import { api, streamSSE, getBaseURL, clientHeaders, APIError, apiErrorFrom, isPaymentRequired } from "../lib/api.js";
 import { updateProjectLink } from "../lib/config.js";
 import { resolveContext, getScope } from "../lib/resolve.js";
 import { ensureLinked } from "./init.js";
@@ -133,6 +133,9 @@ async function deployFromLocal(args) {
         const res = await fetch(url, {
             method: "POST",
             headers: {
+                // Without these the platform cannot tell `lizard up` from a folder
+                // uploaded in the dashboard, and filed every CLI deploy as a dashboard one.
+                ...clientHeaders(),
                 "Content-Type": "application/octet-stream",
                 Authorization: `Bearer ${(await import("../lib/auth.js")).getToken()}`,
             },
@@ -148,8 +151,15 @@ async function deployFromLocal(args) {
                 parsed = text ? JSON.parse(text) : null;
             }
             catch { }
-            const detail = parsed?.error || parsed?.message || text || res.statusText;
-            throw new APIError(res.status, `Upload failed (${res.status}): ${detail}`, parsed?.code || "", parsed);
+            if (parsed && typeof parsed === "object") {
+                const err = apiErrorFrom(res.status, res.statusText, parsed);
+                // "Start Pro to deploy" is not an upload failure: print the platform's
+                // sentence and its Billing link as they are.
+                if (!isPaymentRequired(err))
+                    err.message = `Upload failed (${res.status}): ${err.message}`;
+                throw err;
+            }
+            throw new APIError(res.status, `Upload failed (${res.status}): ${text || res.statusText}`, "", null);
         }
         newApp = (await res.json());
         spinner.succeed(`Service ${chalk.bold(newApp.name)} ${args.existingServiceId ? "updated" : "created"}`);

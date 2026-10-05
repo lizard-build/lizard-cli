@@ -1,3 +1,10 @@
+/**
+ * Headers that say who is calling: the CLI and its version, and the coding
+ * agent running it when there is one. The platform reads both to tell CLI
+ * traffic from the dashboard, and agent deploys from human ones. Every
+ * request to the platform sends them.
+ */
+export declare function clientHeaders(): Record<string, string>;
 export declare function setBaseURL(url: string): void;
 export declare function getBaseURL(): string;
 export declare function setAccessToken(token: string): void;
@@ -22,6 +29,31 @@ export declare class APIError extends Error {
     body: unknown;
     constructor(status: number, message: string, code?: string, body?: unknown);
 }
+/**
+ * Builds the APIError for a failed platform call from its parsed JSON body (or null).
+ *
+ * The platform uses two error shapes. Most routes send {error: "human text"}; the
+ * billing and credits routes send {error: "SCREAMING_CODE", message: "human text"}.
+ * Taking `error` unconditionally printed the bare code for the second shape and threw
+ * away the sentence explaining it — so a scoped key hitting billing showed
+ * "ACCOUNT_SCOPE_REQUIRED" and nothing else.
+ *
+ * When the body carries a link the user has to open next (Billing, the open invoice,
+ * the Pro trial), the link goes on a second line of the message, so every command
+ * prints it without handling the error itself.
+ */
+export declare function apiErrorFrom(status: number, statusText: string, body: unknown): APIError;
+/**
+ * True for the platform's "pay first" answer to creating anything. Servers send
+ * `code: "PAYMENT_REQUIRED"`; older ones only `error: "INSUFFICIENT_CREDITS"`.
+ */
+export declare function isPaymentRequired(err: unknown): boolean;
+/** The page an error body points to, with a label, and a CLI command that does the same. */
+export declare function errorLink(body: unknown): {
+    label: string;
+    url: string;
+    hint?: string;
+} | null;
 export declare function isNotFound(err: unknown): boolean;
 export declare function isAuthError(err: unknown): boolean;
 /**

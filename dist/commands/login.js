@@ -1,12 +1,12 @@
 import chalk from "chalk";
 import { saveCredentials, savePendingAuth, openURL, jwtExpiryMs, } from "../lib/auth.js";
-import { getBaseURL } from "../lib/api.js";
+import { getBaseURL, clientHeaders } from "../lib/api.js";
 import { success, isJSONMode, printJSON } from "../lib/format.js";
 /** Create a CLI login session on the server */
 export async function createSession() {
     const res = await fetch(`${getBaseURL()}/api/auth/cli/session`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { ...clientHeaders(), "Content-Type": "application/json" },
     });
     if (!res.ok)
         throw new Error(`Failed to create login session: ${res.statusText}`);
@@ -16,7 +16,9 @@ export async function createSession() {
 export async function checkSession(sessionId, sessionSecret) {
     const res = await fetch(`${getBaseURL()}/api/auth/cli/poll`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        // The platform records the login from this request; its User-Agent is
+        // what files it under the CLI and the agent running it.
+        headers: { ...clientHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ sessionId, sessionSecret }),
     });
     if (!res.ok)

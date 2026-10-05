@@ -1,9 +1,20 @@
 import { getToken } from "./auth.js";
 import { CURRENT_VERSION } from "./updater.js";
+import { detectAgent } from "./agent.js";
 import * as https from "node:https";
 import * as http from "node:http";
 const DEFAULT_BASE_URL = "https://lizard.build";
 const USER_AGENT = `lizard-cli/${CURRENT_VERSION}`;
+const AGENT = detectAgent();
+/**
+ * Headers that say who is calling: the CLI and its version, and the coding
+ * agent running it when there is one. The platform reads both to tell CLI
+ * traffic from the dashboard, and agent deploys from human ones. Every
+ * request to the platform sends them.
+ */
+export function clientHeaders() {
+    return { "User-Agent": USER_AGENT, ...(AGENT ? { "X-Lizard-Agent": AGENT } : {}) };
+}
 let baseURL = process.env.LIZARD_API_URL || DEFAULT_BASE_URL;
 let _accessToken = null;
 export function setBaseURL(url) { baseURL = url; }
@@ -40,6 +51,83 @@ export class APIError extends Error {
         this.body = body;
     }
 }
+/**
+ * Builds the APIError for a failed platform call from its parsed JSON body (or null).
+ *
+ * The platform uses two error shapes. Most routes send {error: "human text"}; the
+ * billing and credits routes send {error: "SCREAMING_CODE", message: "human text"}.
+ * Taking `error` unconditionally printed the bare code for the second shape and threw
+ * away the sentence explaining it — so a scoped key hitting billing showed
+ * "ACCOUNT_SCOPE_REQUIRED" and nothing else.
+ *
+ * When the body carries a link the user has to open next (Billing, the open invoice,
+ * the Pro trial), the link goes on a second line of the message, so every command
+ * prints it without handling the error itself.
+ */
+export function apiErrorFrom(status, statusText, body) {
+    let msg = statusText;
+    let code = "";
+    if (body && typeof body === "object") {
+        const j = body;
+        const error = typeof j.error === "string" ? j.error : "";
+        const message = typeof j.message === "string" ? j.message : "";
+        const errIsCode = /^[A-Z][A-Z0-9_]*$/.test(error);
+        msg = (errIsCode ? message || error : error) || message || msg;
+        code = (typeof j.code === "string" && j.code) || (errIsCode ? error : "") || "";
+        const next = errorLink(j);
+        if (next)
+            msg = `${msg}\n  ${next.label}: ${next.url}${next.hint ? ` (or run \`${next.hint}\`)` : ""}`;
+    }
+    return new APIError(status, msg, code, body);
+}
+/** Old prepaid credits (`plan: "payg"`) statuses: the next step is the Credits page. */
+const CREDITS_STATUSES = new Set(["grace", "frozen", "card_required", "credits_required"]);
+/**
+ * True for the platform's "pay first" answer to creating anything. Servers send
+ * `code: "PAYMENT_REQUIRED"`; older ones only `error: "INSUFFICIENT_CREDITS"`.
+ */
+export function isPaymentRequired(err) {
+    if (!(err instanceof APIError))
+        return false;
+    return isPaymentRequiredBody(err.body);
+}
+function isPaymentRequiredBody(body) {
+    if (!body || typeof body !== "object")
+        return false;
+    const j = body;
+    return j.code === "PAYMENT_REQUIRED" || j.error === "INSUFFICIENT_CREDITS";
+}
+function httpUrl(value) {
+    return typeof value === "string" && /^https?:\/\//.test(value) ? value : null;
+}
+/** The page an error body points to, with a label, and a CLI command that does the same. */
+export function errorLink(body) {
+    if (!body || typeof body !== "object")
+        return null;
+    const j = body;
+    const invoiceUrl = httpUrl(j.invoiceUrl);
+    if (invoiceUrl)
+        return { label: "Pay the open invoice", url: invoiceUrl };
+    const billingUrl = httpUrl(j.billingUrl);
+    if (!isPaymentRequiredBody(j))
+        return billingUrl ? { label: "Billing", url: billingUrl } : null;
+    const subscribeUrl = httpUrl(j.subscribeUrl);
+    const topupUrl = httpUrl(j.topupUrl);
+    const status = typeof j.status === "string" ? j.status : "";
+    if (status === "trial_available" && subscribeUrl) {
+        return { label: "Start your trial", url: subscribeUrl, hint: "lizard billing start" };
+    }
+    if (status === "subscription_required" && subscribeUrl) {
+        return { label: "Start Pro", url: subscribeUrl, hint: "lizard billing start" };
+    }
+    if (status === "trial_credits_used" && billingUrl) {
+        return { label: "Billing", url: billingUrl, hint: "lizard billing start-now" };
+    }
+    if (CREDITS_STATUSES.has(status) && topupUrl)
+        return { label: "Add credits", url: topupUrl };
+    const url = billingUrl ?? subscribeUrl ?? topupUrl;
+    return url ? { label: "Billing", url } : null;
+}
 export function isNotFound(err) {
     return err instanceof APIError && err.status === 404;
 }
@@ -72,7 +160,7 @@ async function request(method, path, body, extraHeaders = {}) {
     const url = baseURL + path;
     const token = _accessToken || getToken();
     const headers = {
-        "User-Agent": USER_AGENT,
+        ...clientHeaders(),
         ...extraHeaders,
     };
     if (token) {
@@ -87,23 +175,12 @@ async function request(method, path, body, extraHeaders = {}) {
         body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
-        let msg = res.statusText;
-        let code = "";
         let body = null;
         try {
-            const j = (await res.json());
-            body = j;
-            // The platform uses two error shapes. Most routes send {error: "human text"};
-            // the billing and credits routes send {error: "SCREAMING_CODE", message: "human
-            // text"}. Taking j.error unconditionally printed the bare code for the second
-            // shape and threw away the sentence explaining it — so a scoped key hitting
-            // billing showed "ACCOUNT_SCOPE_REQUIRED" and nothing else.
-            const errIsCode = typeof j.error === "string" && /^[A-Z][A-Z0-9_]*$/.test(j.error);
-            msg = (errIsCode ? j.message || j.error : j.error) || j.message || msg;
-            code = j.code || (errIsCode ? j.error : "") || "";
+            body = await res.json();
         }
         catch { }
-        throw new APIError(res.status, msg, code, body);
+        throw apiErrorFrom(res.status, res.statusText, body);
     }
     const text = await res.text();
     if (!text)
@@ -115,28 +192,17 @@ async function request(method, path, body, extraHeaders = {}) {
 export async function getRawText(path) {
     const url = baseURL + path;
     const token = _accessToken || getToken();
-    const headers = { "User-Agent": USER_AGENT };
+    const headers = clientHeaders();
     if (token)
         headers["Authorization"] = `Bearer ${token}`;
     const res = await fetch(url, { method: "GET", headers });
     if (!res.ok) {
-        let msg = res.statusText;
-        let code = "";
         let body = null;
         try {
-            const j = (await res.json());
-            body = j;
-            // The platform uses two error shapes. Most routes send {error: "human text"};
-            // the billing and credits routes send {error: "SCREAMING_CODE", message: "human
-            // text"}. Taking j.error unconditionally printed the bare code for the second
-            // shape and threw away the sentence explaining it — so a scoped key hitting
-            // billing showed "ACCOUNT_SCOPE_REQUIRED" and nothing else.
-            const errIsCode = typeof j.error === "string" && /^[A-Z][A-Z0-9_]*$/.test(j.error);
-            msg = (errIsCode ? j.message || j.error : j.error) || j.message || msg;
-            code = j.code || (errIsCode ? j.error : "") || "";
+            body = await res.json();
         }
         catch { }
-        throw new APIError(res.status, msg, code, body);
+        throw apiErrorFrom(res.status, res.statusText, body);
     }
     return res.text();
 }
@@ -213,7 +279,7 @@ export function streamSSE(path, handler, opts = {}) {
             if (finished)
                 return;
             const reqHeaders = {
-                "User-Agent": USER_AGENT,
+                ...clientHeaders(),
                 Accept: "text/event-stream",
             };
             if (token)

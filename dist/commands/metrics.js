@@ -13,7 +13,7 @@ export function registerMetrics(program) {
         .option("--all", "Show all services in the project, ignoring the linked service")
         .option("-r, --range <range>", `Time range: ${RANGES.join("|")}`, "1h")
         .option("-w, --watch", "Live view, refreshed every 3s (Ctrl+C to stop)")
-        .option("--cost", "Show running resources, cost per hour, and current billing-period usage (incl. egress)")
+        .option("--cost", "Show running resources, cost per hour, current billing-period usage (incl. egress) and Pro credits used this month")
         .action(async (opts) => {
         if (opts.all && opts.service) {
             fail("--all cannot be combined with --service. Choose all services or one service.");
@@ -364,6 +364,31 @@ async function fetchPeriodUsage(projectId, workspaceId) {
         totalEstimatedUsd: rows.reduce((s, r) => s + r.estimatedUsd, 0),
     };
 }
+async function fetchProCredits(workspaceId) {
+    const sub = await api
+        .get(withQuery("/api/billing/subscription", { workspaceId }))
+        .catch(() => null);
+    if (!sub || sub.plan !== "pro" || !sub.period)
+        return null;
+    return {
+        status: sub.status,
+        kind: sub.period.kind,
+        periodStart: sub.period.start,
+        periodEnd: sub.period.end,
+        includedCents: sub.period.includedCents,
+        usedCents: sub.period.usedCents,
+        overageCents: sub.period.overageCents,
+    };
+}
+const dollars = (cents) => (cents % 100 === 0 ? `$${cents / 100}` : `$${(cents / 100).toFixed(2)}`);
+/** "$4.10 of $19 in monthly credits used, overage $0" — the account-wide line for Pro. */
+export function proCreditsLine(pro) {
+    if (pro.kind === "trial") {
+        const left = Math.max(0, pro.includedCents - pro.usedCents);
+        return `${dollars(pro.usedCents)} of ${dollars(pro.includedCents)} in trial credits used, ${dollars(left)} left`;
+    }
+    return `${dollars(pro.usedCents)} of ${dollars(pro.includedCents)} in monthly credits used, overage ${dollars(pro.overageCents)}`;
+}
 function fmtPeriodDate(ms) {
     return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
@@ -373,10 +398,12 @@ async function showCost(projectId, scope) {
     }
     let data;
     let usage;
+    let pro;
     try {
-        [data, usage] = await Promise.all([
+        [data, usage, pro] = await Promise.all([
             api.get(withQuery("/api/billing/live", { workspaceId: scope.workspaceId })),
             fetchPeriodUsage(projectId, scope.workspaceId),
+            fetchProCredits(scope.workspaceId),
         ]);
     }
     catch (e) {
@@ -394,6 +421,8 @@ async function showCost(projectId, scope) {
             projectCostPerHour: projectCost,
             workspaceCostPerHour: data.costPerHour,
             currentPeriod: usage,
+            // Pro only: the account's credits this month (the trial's while trialing).
+            ...(pro ? { proCredits: pro } : {}),
         });
         return;
     }
@@ -415,6 +444,8 @@ async function showCost(projectId, scope) {
             chalk.dim(` (~$${(projectCost * 730).toFixed(2)}/mo at current usage)`));
     }
     console.log(chalk.dim("Workspace ") + `$${data.costPerHour.toFixed(4)}/hr`);
+    if (pro)
+        console.log(chalk.dim(pro.kind === "trial" ? "Pro trial " : "Pro       ") + proCreditsLine(pro));
     if (usage && usage.rows.length > 0) {
         console.log();
         console.log(chalk.bold("This billing period") +
