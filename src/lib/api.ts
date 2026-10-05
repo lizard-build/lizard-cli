@@ -79,6 +79,83 @@ export class APIError extends Error {
   }
 }
 
+/**
+ * Builds the APIError for a failed platform call from its parsed JSON body (or null).
+ *
+ * The platform uses two error shapes. Most routes send {error: "human text"}; the
+ * billing and credits routes send {error: "SCREAMING_CODE", message: "human text"}.
+ * Taking `error` unconditionally printed the bare code for the second shape and threw
+ * away the sentence explaining it — so a scoped key hitting billing showed
+ * "ACCOUNT_SCOPE_REQUIRED" and nothing else.
+ *
+ * When the body carries a link the user has to open next (Billing, the open invoice,
+ * the Pro trial), the link goes on a second line of the message, so every command
+ * prints it without handling the error itself.
+ */
+export function apiErrorFrom(status: number, statusText: string, body: unknown): APIError {
+  let msg = statusText;
+  let code = "";
+  if (body && typeof body === "object") {
+    const j = body as Record<string, unknown>;
+    const error = typeof j.error === "string" ? j.error : "";
+    const message = typeof j.message === "string" ? j.message : "";
+    const errIsCode = /^[A-Z][A-Z0-9_]*$/.test(error);
+    msg = (errIsCode ? message || error : error) || message || msg;
+    code = (typeof j.code === "string" && j.code) || (errIsCode ? error : "") || "";
+    const next = errorLink(j);
+    if (next) msg = `${msg}\n  ${next.label}: ${next.url}${next.hint ? ` (or run \`${next.hint}\`)` : ""}`;
+  }
+  return new APIError(status, msg, code, body);
+}
+
+/** Old prepaid credits (`plan: "payg"`) statuses: the next step is the Credits page. */
+const CREDITS_STATUSES = new Set(["grace", "frozen", "card_required", "credits_required"]);
+
+/**
+ * True for the platform's "pay first" answer to creating anything. Servers send
+ * `code: "PAYMENT_REQUIRED"`; older ones only `error: "INSUFFICIENT_CREDITS"`.
+ */
+export function isPaymentRequired(err: unknown): boolean {
+  if (!(err instanceof APIError)) return false;
+  return isPaymentRequiredBody(err.body);
+}
+
+function isPaymentRequiredBody(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const j = body as Record<string, unknown>;
+  return j.code === "PAYMENT_REQUIRED" || j.error === "INSUFFICIENT_CREDITS";
+}
+
+function httpUrl(value: unknown): string | null {
+  return typeof value === "string" && /^https?:\/\//.test(value) ? value : null;
+}
+
+/** The page an error body points to, with a label, and a CLI command that does the same. */
+export function errorLink(body: unknown): { label: string; url: string; hint?: string } | null {
+  if (!body || typeof body !== "object") return null;
+  const j = body as Record<string, unknown>;
+  const invoiceUrl = httpUrl(j.invoiceUrl);
+  if (invoiceUrl) return { label: "Pay the open invoice", url: invoiceUrl };
+  const billingUrl = httpUrl(j.billingUrl);
+  if (!isPaymentRequiredBody(j)) return billingUrl ? { label: "Billing", url: billingUrl } : null;
+
+  const subscribeUrl = httpUrl(j.subscribeUrl);
+  const topupUrl = httpUrl(j.topupUrl);
+  const status = typeof j.status === "string" ? j.status : "";
+  if (status === "trial_available" && subscribeUrl) {
+    return { label: "Start your trial", url: subscribeUrl, hint: "lizard billing start" };
+  }
+  if (status === "subscription_required" && subscribeUrl) {
+    return { label: "Start Pro", url: subscribeUrl, hint: "lizard billing start" };
+  }
+  if (status === "trial_credits_used" && billingUrl) {
+    return { label: "Billing", url: billingUrl, hint: "lizard billing start-now" };
+  }
+  if (CREDITS_STATUSES.has(status) && topupUrl) return { label: "Add credits", url: topupUrl };
+  const url = billingUrl ?? subscribeUrl ?? topupUrl;
+  return url ? { label: "Billing", url } : null;
+}
+
 export function isNotFound(err: unknown): boolean {
   return err instanceof APIError && err.status === 404;
 }
@@ -137,22 +214,11 @@ async function request<T = any>(
   });
 
   if (!res.ok) {
-    let msg = res.statusText;
-    let code = "";
     let body: unknown = null;
     try {
-      const j = (await res.json()) as any;
-      body = j;
-      // The platform uses two error shapes. Most routes send {error: "human text"};
-      // the billing and credits routes send {error: "SCREAMING_CODE", message: "human
-      // text"}. Taking j.error unconditionally printed the bare code for the second
-      // shape and threw away the sentence explaining it — so a scoped key hitting
-      // billing showed "ACCOUNT_SCOPE_REQUIRED" and nothing else.
-      const errIsCode = typeof j.error === "string" && /^[A-Z][A-Z0-9_]*$/.test(j.error);
-      msg = (errIsCode ? j.message || j.error : j.error) || j.message || msg;
-      code = j.code || (errIsCode ? j.error : "") || "";
+      body = await res.json();
     } catch {}
-    throw new APIError(res.status, msg, code, body);
+    throw apiErrorFrom(res.status, res.statusText, body);
   }
 
   const text = await res.text();
@@ -170,22 +236,11 @@ export async function getRawText(path: string): Promise<string> {
 
   const res = await fetch(url, { method: "GET", headers });
   if (!res.ok) {
-    let msg = res.statusText;
-    let code = "";
     let body: unknown = null;
     try {
-      const j = (await res.json()) as any;
-      body = j;
-      // The platform uses two error shapes. Most routes send {error: "human text"};
-      // the billing and credits routes send {error: "SCREAMING_CODE", message: "human
-      // text"}. Taking j.error unconditionally printed the bare code for the second
-      // shape and threw away the sentence explaining it — so a scoped key hitting
-      // billing showed "ACCOUNT_SCOPE_REQUIRED" and nothing else.
-      const errIsCode = typeof j.error === "string" && /^[A-Z][A-Z0-9_]*$/.test(j.error);
-      msg = (errIsCode ? j.message || j.error : j.error) || j.message || msg;
-      code = j.code || (errIsCode ? j.error : "") || "";
+      body = await res.json();
     } catch {}
-    throw new APIError(res.status, msg, code, body);
+    throw apiErrorFrom(res.status, res.statusText, body);
   }
   return res.text();
 }

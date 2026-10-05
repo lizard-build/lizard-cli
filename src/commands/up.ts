@@ -6,7 +6,7 @@ import { createTarball } from "../lib/archive.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
-import { api, streamSSE, getBaseURL, clientHeaders, APIError, type ResourceScope } from "../lib/api.js";
+import { api, streamSSE, getBaseURL, clientHeaders, APIError, apiErrorFrom, isPaymentRequired, type ResourceScope } from "../lib/api.js";
 import { updateProjectLink, DEFAULT_REGION } from "../lib/config.js";
 import { resolveContext, getScope } from "../lib/resolve.js";
 import { ensureLinked } from "./init.js";
@@ -191,13 +191,14 @@ async function deployFromLocal(args: {
       try {
         parsed = text ? JSON.parse(text) : null;
       } catch {}
-      const detail = parsed?.error || parsed?.message || text || res.statusText;
-      throw new APIError(
-        res.status,
-        `Upload failed (${res.status}): ${detail}`,
-        parsed?.code || "",
-        parsed,
-      );
+      if (parsed && typeof parsed === "object") {
+        const err = apiErrorFrom(res.status, res.statusText, parsed);
+        // "Start Pro to deploy" is not an upload failure: print the platform's
+        // sentence and its Billing link as they are.
+        if (!isPaymentRequired(err)) err.message = `Upload failed (${res.status}): ${err.message}`;
+        throw err;
+      }
+      throw new APIError(res.status, `Upload failed (${res.status}): ${text || res.statusText}`, "", null);
     }
     newApp = (await res.json()) as App & { buildId?: string };
     spinner.succeed(`Service ${chalk.bold(newApp.name)} ${args.existingServiceId ? "updated" : "created"}`);
