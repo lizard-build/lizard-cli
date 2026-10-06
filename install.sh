@@ -1,4 +1,7 @@
 #!/bin/bash
+# Served at https://lizard.build/install.sh. Every release attaches this file,
+# install.ps1 and install.cmd, and the platform serves them from the latest
+# release, so this repo holds the only copy.
 set -e
 
 BOLD="\033[1m"
