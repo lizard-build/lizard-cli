@@ -70,6 +70,26 @@ esac
 if [ -n "$SHELL_RC" ] && ! grep -q "\.lizard/bin" "$SHELL_RC" 2>/dev/null; then
   echo 'export PATH="$HOME/.lizard/bin:$PATH"' >> "$SHELL_RC"
 fi
+
+# Coding agents and terminals that are already open keep the PATH they started
+# with, so they see ~/.lizard/bin only in new shells. Link lizard into a
+# directory that is already on PATH and writable without sudo, so it works
+# right away. Skip a directory that holds some other lizard, such as npm's.
+LINK=""
+for dir in "$HOME/.local/bin" "$HOME/bin" /opt/homebrew/bin /usr/local/bin; do
+  case ":$PATH:" in *":$dir:"*) ;; *) continue ;; esac
+  [ -d "$dir" ] && [ -w "$dir" ] || continue
+  if [ -e "$dir/lizard" ] || [ -L "$dir/lizard" ]; then
+    [ "$(readlink "$dir/lizard")" = "$INSTALL_DIR/lizard" ] || continue
+  fi
+  if ln -sf "$INSTALL_DIR/lizard" "$dir/lizard" 2>/dev/null; then
+    LINK="$dir/lizard"
+    break
+  fi
+done
+
+# The lizard that the caller's shell will actually run.
+FOUND="$(command -v lizard 2>/dev/null || true)"
 export PATH="$INSTALL_DIR:$PATH"
 
 # `lizard version` is not a command — the flag is the only way to read it.
@@ -79,5 +99,10 @@ echo ""
 echo -e "${GREEN}✓${RESET} Lizard CLI ${BOLD}v${VERSION}${RESET} installed"
 echo ""
 echo -e "  Run ${CYAN}lizard login${RESET} to get started"
-echo -e "  ${DIM}(if 'lizard' is not found, run: export PATH="\$HOME/.lizard/bin:\$PATH")${RESET}"
+if [ -n "$FOUND" ] && [ "$FOUND" != "$LINK" ] && [ "$FOUND" != "$INSTALL_DIR/lizard" ]; then
+  echo -e "  ${RED}Note:${RESET} another lizard comes first on your PATH: $FOUND"
+  echo -e "  ${DIM}If it is the npm package, remove it: npm uninstall -g @lizard-build/cli${RESET}"
+elif [ -z "$LINK" ]; then
+  echo -e "  ${DIM}(if 'lizard' is not found, open a new terminal or run: export PATH=\"\$HOME/.lizard/bin:\$PATH\")${RESET}"
+fi
 echo ""
