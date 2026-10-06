@@ -16,6 +16,12 @@ Every command is agent-readable: add `--json` for structured output, or run
 curl -fsSL https://lizard.build/install.sh | bash
 ```
 
+On Windows (PowerShell):
+
+```powershell
+irm https://lizard.build/api/cli/install.ps1 | iex
+```
+
 Or via npm:
 
 ```bash

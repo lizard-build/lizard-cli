@@ -101,4 +101,7 @@ jobs:
             bin/lizard-linux-x64
             bin/lizard-linux-arm64
             bin/lizard-windows-x64.exe
+            install.sh
+            install.ps1
+            install.cmd
           generate_release_notes: true
