@@ -226,9 +226,8 @@ async function request<T = any>(
   return JSON.parse(text) as T;
 }
 
-/** Like api.get, but returns the raw response body instead of JSON.parse-ing
- *  it — for endpoints that reply with `text/plain` (e.g. sandbox file reads). */
-export async function getRawText(path: string): Promise<string> {
+/** Read a response as bytes, preserving binary files and text alike. */
+export async function getRawBytes(path: string): Promise<Buffer> {
   const url = baseURL + path;
   const token = _accessToken || getToken();
   const headers: Record<string, string> = clientHeaders();
@@ -242,7 +241,11 @@ export async function getRawText(path: string): Promise<string> {
     } catch {}
     throw apiErrorFrom(res.status, res.statusText, body);
   }
-  return res.text();
+  return Buffer.from(await res.arrayBuffer());
+}
+
+export async function getRawText(path: string): Promise<string> {
+  return (await getRawBytes(path)).toString("utf8");
 }
 
 export const api = {

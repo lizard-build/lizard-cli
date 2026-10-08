@@ -71,8 +71,8 @@ export declare function isAuthError(err: unknown): boolean;
  */
 export declare function isAccountScopeError(err: unknown): err is APIError;
 export declare function isProjectDeletedError(err: unknown): err is APIError;
-/** Like api.get, but returns the raw response body instead of JSON.parse-ing
- *  it — for endpoints that reply with `text/plain` (e.g. sandbox file reads). */
+/** Read a response as bytes, preserving binary files and text alike. */
+export declare function getRawBytes(path: string): Promise<Buffer>;
 export declare function getRawText(path: string): Promise<string>;
 export declare const api: {
     get: <T = any>(path: string) => Promise<T>;

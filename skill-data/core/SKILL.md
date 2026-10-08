@@ -239,6 +239,8 @@ Run a coding agent inside a sandbox (use `-t codex`) on the user's own credentia
 Codex and Claude Code use one credential at a time; pi, OpenCode and Prime use every connected one
 they accept. Sandboxes never receive a subscription's refresh token, only a short-lived access token.
 
+`sandbox logs` is not supported on Firecracker yet (HTTP 501). Use `sandbox exec` to read a log file written by your process.
+
 ## Sandboxes: interactive shell
 
 `lizard sandbox ssh <id>` (alias `shell`) opens an interactive shell in any running sandbox,
@@ -273,7 +275,7 @@ lizard sandbox exec <id> -- lizard-desktop screenshot | grep -E '^[A-Za-z0-9+/=]
 lizard sandbox exec <id> -- lizard-desktop screenshot --path   # writes the PNG to a file in the sandbox, prints its path
 ```
 
-`lizard-desktop screenshot` prints the PNG as base64 wrapped at 76 columns; the `grep` keeps only those lines (it drops the `$ <cmd>` header `sandbox exec` prints). `--path` suits tools running inside the sandbox (`lizard sandbox files get` is text-only and would corrupt the PNG). For large screens the SDKs' `desktop.screenshot()` is the most reliable way.
+`lizard-desktop screenshot` prints the PNG as base64 wrapped at 76 columns; the `grep` keeps only those lines (it drops the `$ <cmd>` header `sandbox exec` prints). Use `--path` to save the PNG, then download that path with `lizard sandbox files get <id> <remote-path> screen.png`. `files put` and `files get` preserve binary files.
 
 ## Volumes
 
@@ -287,7 +289,7 @@ lizard volume rm <name> [-y]                                  # refused while at
 lizard sandbox create --volume <name>                         # attach at create time
 ```
 
-`volume resize` is online: no data is copied, it finishes in under a second, and an attached sandbox keeps running and sees the new size immediately — don't stop the sandbox first. A shrink must leave at least 10% of the new size free (`volume_too_full_to_shrink` otherwise). Size limits are per-platform; the error names them. `volume_not_provisioned` right after create means retry in a few seconds.
+`volume resize` works on Kubernetes volumes; Firecracker volumes do not support resize yet. On Kubernetes, resize is online: an attached sandbox keeps running and sees the new size. A shrink must leave at least 10% of the new size free (`volume_too_full_to_shrink` otherwise). Size limits are per-platform; the error names them. `volume_not_provisioned` right after create means retry in a few seconds.
 
 ## Managed addons
 

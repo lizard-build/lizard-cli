@@ -16,13 +16,14 @@
 export declare function vncTarget(desktopUrl: string): {
     wsUrl: string;
     password: string;
+    headers: Record<string, string>;
 };
 /** Serve the tunnel until Ctrl-C. Resolves with the port once listening; `onConnect`
  *  and `onClose` report each VNC app session. */
 export declare function startVncTunnel(wsUrl: string, startPort: number, events?: {
     onConnect?: () => void;
     onClose?: (reason: string) => void;
-}): Promise<{
+}, headers?: Record<string, string>): Promise<{
     port: number;
     close: () => void;
 }>;
