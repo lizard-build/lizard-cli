@@ -47,7 +47,7 @@ describe("sandbox create timeout", () => {
 
 
 describe("unsupported sandbox commands", () => {
-  it.each(["fork", "snapshot-fork"])(
+  it.each(["fork", "snapshot-fork", "logs"])(
     "rejects %s without making an API request", async (name) => {
       vi.clearAllMocks();
       const program = new Command().exitOverride().configureOutput({ writeErr: () => {} });
