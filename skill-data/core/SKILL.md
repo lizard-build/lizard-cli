@@ -239,7 +239,7 @@ Run a coding agent inside a sandbox (use `-t codex`) on the user's own credentia
 Codex and Claude Code use one credential at a time; pi, OpenCode and Prime use every connected one
 they accept. Sandboxes never receive a subscription's refresh token, only a short-lived access token.
 
-`sandbox logs` is not supported on Firecracker yet (HTTP 501). Use `sandbox exec` to read a log file written by your process.
+Use `sandbox exec` to read a log file written by your process.
 
 ## Sandboxes: interactive shell
 
@@ -284,12 +284,10 @@ Persistent volumes for sandboxes. A volume's name is its key within the project;
 ```
 lizard volume create <name> [--size <gb>] [--region <code>]   # default 5 GB; region must match the sandbox's
 lizard volume list --json                                     # name, sizeGb, status, attachedTo
-lizard volume resize <name> --size <gb>                       # grow or shrink in place
 lizard volume rm <name> [-y]                                  # refused while attached; delete the sandbox first
 lizard sandbox create --volume <name>                         # attach at create time
 ```
 
-`volume resize` works on Kubernetes volumes; Firecracker volumes do not support resize yet. On Kubernetes, resize is online: an attached sandbox keeps running and sees the new size. A shrink must leave at least 10% of the new size free (`volume_too_full_to_shrink` otherwise). Size limits are per-platform; the error names them. `volume_not_provisioned` right after create means retry in a few seconds.
 
 ## Managed addons
 

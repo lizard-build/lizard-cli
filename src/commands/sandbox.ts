@@ -6,7 +6,7 @@ import * as http from "node:http";
 import * as p from "@clack/prompts";
 import { Command, Option } from "commander";
 import open from "open";
-import { api, APIError, getBaseURL, getRawBytes, apiErrorFrom, clientHeaders, getRequestToken, streamSSE, withQuery, withScope, type ResourceScope } from "../lib/api.js";
+import { api, APIError, getBaseURL, getRawBytes, apiErrorFrom, clientHeaders, getRequestToken, withQuery, withScope, type ResourceScope } from "../lib/api.js";
 import { getToken } from "../lib/auth.js";
 import { resolveProjectScope } from "../lib/resolve.js";
 import { resolveProjectId } from "../lib/config.js";
@@ -294,28 +294,6 @@ Example:
     )
     .action(async (id: string) => {
       process.exit(await sandboxShell(id));
-    });
-
-  sb.command("logs")
-    .argument("<id>", "Sandbox ID")
-    .description("Stream sandbox vm-agent logs (not supported on Firecracker yet)")
-    .option("--tail <n>", "Number of historical lines to include before following", "200")
-    .action(async (id: string, opts) => {
-      info(chalk.dim("Streaming logs... (Ctrl+C to stop)\n"));
-      await streamSSE(withQuery(`/api/sandboxes/${id}/logs`, { tail: opts.tail }), (_event, data) => {
-        let parsed: any;
-        try {
-          parsed = JSON.parse(data);
-        } catch {
-          parsed = { message: data };
-        }
-        if (isJSONMode()) {
-          process.stdout.write(JSON.stringify(parsed) + "\n");
-        } else {
-          process.stdout.write((parsed.message ?? data) + "\n");
-        }
-        return true;
-      });
     });
 
   sb.command("expose")
