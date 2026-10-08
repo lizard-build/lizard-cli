@@ -95,7 +95,7 @@ export function registerVolume(program: Command) {
     .command("resize")
     .argument("<volume>", "Volume name or ID")
     .description(
-      "Grow or shrink a volume in place. Online: no data is copied, it takes under a second, " +
+      "Grow or shrink a volume in place (not supported on Firecracker yet). Online: no data is copied, " +
         "and an attached sandbox keeps running and sees the new size immediately. " +
         "A shrink must leave at least 10% of the new size free.",
     )

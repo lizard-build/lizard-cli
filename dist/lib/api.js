@@ -187,9 +187,8 @@ async function request(method, path, body, extraHeaders = {}) {
         return undefined;
     return JSON.parse(text);
 }
-/** Like api.get, but returns the raw response body instead of JSON.parse-ing
- *  it — for endpoints that reply with `text/plain` (e.g. sandbox file reads). */
-export async function getRawText(path) {
+/** Read a response as bytes, preserving binary files and text alike. */
+export async function getRawBytes(path) {
     const url = baseURL + path;
     const token = _accessToken || getToken();
     const headers = clientHeaders();
@@ -204,7 +203,10 @@ export async function getRawText(path) {
         catch { }
         throw apiErrorFrom(res.status, res.statusText, body);
     }
-    return res.text();
+    return Buffer.from(await res.arrayBuffer());
+}
+export async function getRawText(path) {
+    return (await getRawBytes(path)).toString("utf8");
 }
 export const api = {
     get: (path) => request("GET", path),

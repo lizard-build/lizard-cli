@@ -17,7 +17,7 @@ import WebSocket from "ws";
 /** The VNC WebSocket URL and password, from a desktop URL the API returned. Handles
  *  both viewer generations: stream.html/lizard.html take `token` directly; the oldest
  *  (noVNC's vnc.html) carries it inside `path=websockify?token=…`. */
-export function vncTarget(desktopUrl: string): { wsUrl: string; password: string } {
+export function vncTarget(desktopUrl: string): { wsUrl: string; password: string; headers: Record<string, string> } {
   const u = new URL(desktopUrl);
   let token = u.searchParams.get("token");
   if (!token) {
@@ -26,12 +26,15 @@ export function vncTarget(desktopUrl: string): { wsUrl: string; password: string
   }
   const password = u.searchParams.get("password") ?? "";
   if (!token || !password) throw new Error("The desktop URL has no token or password; is the desktop running?");
-  return { wsUrl: `wss://${u.host}/websockify?token=${encodeURIComponent(token)}`, password };
+  const accessToken = u.searchParams.get("lizard_token");
+  const headers: Record<string, string> = {};
+  if (accessToken) headers["x-lizard-access-token"] = accessToken;
+  return { wsUrl: `${u.protocol === "http:" ? "ws:" : "wss:"}//${u.host}/websockify?token=${encodeURIComponent(token)}`, password, headers };
 }
 
 /** Listen on 127.0.0.1 at the first free port from `startPort` (up to +20). */
 async function listenFree(server: net.Server, startPort: number): Promise<number> {
-  for (let port = startPort; port < startPort + 20; port++) {
+  for (let port = startPort; port <= Math.min(startPort + 19, 65535); port++) {
     const ok = await new Promise<boolean>((resolve, reject) => {
       const onError = (e: NodeJS.ErrnoException) => {
         server.off("listening", onListening);
@@ -54,12 +57,13 @@ export async function startVncTunnel(
   wsUrl: string,
   startPort: number,
   events: { onConnect?: () => void; onClose?: (reason: string) => void } = {},
+  headers: Record<string, string> = {},
 ): Promise<{ port: number; close: () => void }> {
   const server = net.createServer((sock) => {
     sock.setNoDelay(true);
     sock.pause();
     // websockify speaks the "binary" subprotocol: frames are raw RFB bytes.
-    const ws = new WebSocket(wsUrl, ["binary"], { perMessageDeflate: false });
+    const ws = new WebSocket(wsUrl, ["binary"], { perMessageDeflate: false, headers });
     const end = (reason: string) => {
       if (!sock.destroyed) sock.destroy();
       if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.terminate();

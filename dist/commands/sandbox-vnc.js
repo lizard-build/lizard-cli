@@ -25,11 +25,15 @@ export function vncTarget(desktopUrl) {
     const password = u.searchParams.get("password") ?? "";
     if (!token || !password)
         throw new Error("The desktop URL has no token or password; is the desktop running?");
-    return { wsUrl: `wss://${u.host}/websockify?token=${encodeURIComponent(token)}`, password };
+    const accessToken = u.searchParams.get("lizard_token");
+    const headers = {};
+    if (accessToken)
+        headers["x-lizard-access-token"] = accessToken;
+    return { wsUrl: `${u.protocol === "http:" ? "ws:" : "wss:"}//${u.host}/websockify?token=${encodeURIComponent(token)}`, password, headers };
 }
 /** Listen on 127.0.0.1 at the first free port from `startPort` (up to +20). */
 async function listenFree(server, startPort) {
-    for (let port = startPort; port < startPort + 20; port++) {
+    for (let port = startPort; port <= Math.min(startPort + 19, 65535); port++) {
         const ok = await new Promise((resolve, reject) => {
             const onError = (e) => {
                 server.off("listening", onListening);
@@ -50,12 +54,12 @@ async function listenFree(server, startPort) {
 }
 /** Serve the tunnel until Ctrl-C. Resolves with the port once listening; `onConnect`
  *  and `onClose` report each VNC app session. */
-export async function startVncTunnel(wsUrl, startPort, events = {}) {
+export async function startVncTunnel(wsUrl, startPort, events = {}, headers = {}) {
     const server = net.createServer((sock) => {
         sock.setNoDelay(true);
         sock.pause();
         // websockify speaks the "binary" subprotocol: frames are raw RFB bytes.
-        const ws = new WebSocket(wsUrl, ["binary"], { perMessageDeflate: false });
+        const ws = new WebSocket(wsUrl, ["binary"], { perMessageDeflate: false, headers });
         const end = (reason) => {
             if (!sock.destroyed)
                 sock.destroy();

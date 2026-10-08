@@ -6,7 +6,7 @@ import * as http from "node:http";
 import * as p from "@clack/prompts";
 import { Command, Option } from "commander";
 import open from "open";
-import { api, APIError, getBaseURL, getRawText, streamSSE, withQuery, withScope, type ResourceScope } from "../lib/api.js";
+import { api, APIError, getBaseURL, getRawBytes, apiErrorFrom, clientHeaders, getRequestToken, streamSSE, withQuery, withScope, type ResourceScope } from "../lib/api.js";
 import { getToken } from "../lib/auth.js";
 import { resolveProjectScope } from "../lib/resolve.js";
 import { resolveProjectId } from "../lib/config.js";
@@ -48,8 +48,10 @@ interface SandboxRecord {
 }
 
 function parseIntOption(v: string): number {
-  const n = parseInt(v, 10);
-  if (Number.isNaN(n)) throw new Error(`Invalid number: ${v}`);
+  const n = Number(v);
+  if (!/^\d+$/.test(v) || !Number.isSafeInteger(n) || n < 1 || n > 65535) {
+    throw new Error("Port must be an integer between 1 and 65535");
+  }
   return n;
 }
 
@@ -296,7 +298,7 @@ Example:
 
   sb.command("logs")
     .argument("<id>", "Sandbox ID")
-    .description("Stream sandbox vm-agent logs")
+    .description("Stream sandbox vm-agent logs (not supported on Firecracker yet)")
     .option("--tail <n>", "Number of historical lines to include before following", "200")
     .action(async (id: string, opts) => {
       info(chalk.dim("Streaming logs... (Ctrl+C to stop)\n"));
@@ -451,12 +453,12 @@ Examples:
       spinner?.stop();
       const desktopUrl = opts.viewOnly ? result.viewOnlyUrl : result.url;
       if (!result.running || !desktopUrl) throw new Error(`The desktop on sandbox ${id} did not start.`);
-      const { wsUrl, password } = vncTarget(desktopUrl);
+      const { wsUrl, password, headers } = vncTarget(desktopUrl);
 
       const tunnel = await startVncTunnel(wsUrl, opts.port, {
         onConnect: () => { if (!isJSONMode()) info(chalk.dim(`  VNC app connected`)); },
         onClose: (reason) => { if (!isJSONMode()) info(chalk.dim(`  VNC app session ended: ${reason}`)); },
-      });
+      }, headers);
       const address = `localhost:${tunnel.port}`;
       if (isJSONMode()) {
         printJSON({ id, address, host: "127.0.0.1", port: tunnel.port, password, viewOnly: !!opts.viewOnly });
@@ -603,7 +605,7 @@ function registerSandboxFiles(sb: Command) {
     .argument("<path>", "File path inside the sandbox")
     .description("Print a file from inside a sandbox")
     .action(async (id: string, path: string) => {
-      const content = await getRawText(withQuery(`/api/sandboxes/${id}/files`, { path }));
+      const content = await getRawBytes(withQuery(`/api/sandboxes/${id}/files`, { path }));
       process.stdout.write(content);
     });
 
@@ -614,8 +616,8 @@ function registerSandboxFiles(sb: Command) {
     .argument("<remote>", "Destination path inside the sandbox")
     .description("Upload a local file into a sandbox")
     .action(async (id: string, local: string, remote: string) => {
-      const content = fs.readFileSync(local, "utf-8");
-      await api.post(`/api/sandboxes/${id}/files`, { path: remote, content });
+      const content = fs.readFileSync(local).toString("base64");
+      await api.post(`/api/sandboxes/${id}/files`, { path: remote, content, encoding: "base64" });
       if (isJSONMode()) printJSON({ id, path: remote, status: "written" });
       else success(`Wrote ${chalk.bold(remote)} in sandbox ${id}`);
     });
@@ -627,7 +629,7 @@ function registerSandboxFiles(sb: Command) {
     .argument("<local>", "Local destination path")
     .description("Download a file from a sandbox")
     .action(async (id: string, remote: string, local: string) => {
-      const content = await getRawText(withQuery(`/api/sandboxes/${id}/files`, { path: remote }));
+      const content = await getRawBytes(withQuery(`/api/sandboxes/${id}/files`, { path: remote }));
       fs.writeFileSync(local, content);
       if (isJSONMode()) printJSON({ id, path: remote, local, status: "downloaded" });
       else success(`Downloaded ${chalk.bold(remote)} to ${local}`);
@@ -648,7 +650,7 @@ function registerSandboxFiles(sb: Command) {
 /** Run a command inside a sandbox, streaming output. Resolves with the exit
  *  code: the remote command's code from the `exit` event, or 1 when the
  *  server reported an `error` event without one. Mirrors ssh.ts's parser. */
-function execStream(
+export function execStream(
   sandboxId: string,
   cmd: string,
   onLine: (stream: string, line: string) => void,
@@ -658,10 +660,11 @@ function execStream(
     let sawError = false;
     const baseURL = getBaseURL();
     const url = new URL(`${baseURL}/api/sandboxes/${sandboxId}/exec`);
-    const token = getToken();
+    const token = getRequestToken();
     const body = JSON.stringify({ cmd });
 
     const reqHeaders: Record<string, string> = {
+      ...clientHeaders(),
       "Content-Type": "application/json",
       "Content-Length": String(Buffer.byteLength(body)),
       Accept: "text/event-stream",
@@ -673,57 +676,78 @@ function execStream(
       {
         hostname: url.hostname,
         port: url.port || (url.protocol === "https:" ? 443 : 80),
-        path: url.pathname,
+        path: url.pathname + url.search,
         method: "POST",
         headers: reqHeaders,
       },
       (res) => {
+        res.on("error", reject);
         if (res.statusCode && res.statusCode >= 400) {
           let errBody = "";
           res.on("data", (c: Buffer) => (errBody += c.toString()));
-          res.on("end", () => reject(new Error(`exec failed ${res.statusCode}: ${errBody}`)));
+          res.on("end", () => {
+            let body: unknown = null;
+            try { body = JSON.parse(errBody); } catch {}
+            reject(apiErrorFrom(res.statusCode!, res.statusMessage || "Exec failed", body));
+          });
           return;
         }
 
         let buf = "";
         let currentEvent = "";
+        let dataLines: string[] = [];
+        const dispatch = () => {
+          if (!dataLines.length) { currentEvent = ""; return; }
+          const data = dataLines.join("\n");
+          if (currentEvent === "exit") {
+            try {
+              const code: unknown = JSON.parse(data).exitCode;
+              if (!Number.isInteger(code) || (code as number) < 0 || (code as number) > 255) {
+                throw new Error("Invalid exec exit code");
+              }
+              exitCode = code as number;
+            } catch { reject(new Error("Invalid exec exit event")); }
+          } else if (currentEvent === "error") {
+            sawError = true;
+            error(data);
+          } else {
+            try {
+              const parsed = JSON.parse(data);
+              onLine(parsed.stream ?? "stdout", parsed.line ?? data);
+            } catch { onLine("stdout", data); }
+          }
+          currentEvent = "";
+          dataLines = [];
+        };
+        const line = (value: string) => {
+          const trimmed = value.replace(/\r$/, "");
+          if (!trimmed) dispatch();
+          else if (trimmed.startsWith("event:")) currentEvent = trimmed.slice(6).trim();
+          else if (trimmed.startsWith("data:")) dataLines.push(trimmed.slice(5).replace(/^ /, ""));
+        };
         res.setEncoding("utf8");
         res.on("data", (chunk: string) => {
           buf += chunk;
           const lines = buf.split("\n");
           buf = lines.pop() ?? "";
-
-          for (const line of lines) {
-            const trimmed = line.replace(/\r$/, "");
-            if (trimmed === "") {
-              currentEvent = "";
-            } else if (trimmed.startsWith("event:")) {
-              currentEvent = trimmed.slice(6).trim();
-            } else if (trimmed.startsWith("data:")) {
-              const data = trimmed.slice(5).trimStart();
-              if (currentEvent === "exit") {
-                try { exitCode = JSON.parse(data).exitCode ?? 0; } catch {}
-              } else if (currentEvent === "error") {
-                sawError = true;
-                error(data);
-              } else {
-                try {
-                  const parsed = JSON.parse(data);
-                  onLine(parsed.stream ?? "stdout", parsed.line ?? data);
-                } catch {
-                  onLine("stdout", data);
-                }
-              }
-            }
-          }
+          for (const value of lines) line(value);
         });
-
-        res.on("end", () => resolve(exitCode ?? (sawError ? 1 : 0)));
-        res.on("error", reject);
+        res.on("end", () => {
+          if (buf) line(buf);
+          dispatch();
+          if (sawError && (exitCode === null || exitCode === 0)) { resolve(1); return; }
+          if (exitCode === null) {
+            reject(new APIError(502, "Exec stream ended without an exit event", "EXEC_STREAM_INCOMPLETE"));
+            return;
+          }
+          resolve(exitCode);
+        });
       },
     );
 
-    req.on("error", reject);
+    req.on("error", (err: NodeJS.ErrnoException) => {
+      reject(err.code === "ETIMEDOUT" ? new APIError(408, "Exec request timed out") : err);
+    });
     req.write(body);
     req.end();
   });
