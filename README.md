@@ -42,10 +42,13 @@ from flag docs alone.
 ## Usage
 
 ```bash
-lizard login
+lizard onboard
 lizard init
 lizard up
 ```
+
+`lizard onboard` signs you in and offers a plan if the account has none. The
+install script runs it for you. `lizard login` still works on its own.
 
 `lizard up` uploads the code, builds it and returns a live URL on onlizard.com.
 Add managed data services in one command:

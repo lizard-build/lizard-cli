@@ -17,6 +17,18 @@ export declare function loadPendingAuth(): PendingAuth | null;
 export declare function savePendingAuth(pending: PendingAuth): void;
 export declare function clearPendingAuth(): void;
 export declare function isLoggedIn(): boolean;
+/** The token a command would use right now, or null when a sign-in is needed. */
+export declare function validToken(): string | null;
+/** Store what an approved CLI session returned, and drop the pending session. */
+export declare function saveSessionLogin(result: {
+    accessToken: string;
+    user: {
+        id: string;
+        username: string;
+        email?: string;
+        avatarUrl?: string;
+    };
+}): Credentials;
 /**
  * Expiry of a JWT in epoch-ms, decoded from the `exp` claim. Returns null
  * for opaque/undecodable tokens — those are treated as valid and left for

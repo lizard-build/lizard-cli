@@ -23,8 +23,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$dir = $env:INSTALL_DIR;
 echo.
 echo Installed to %INSTALL_DIR%\lizard.exe
 echo.
-echo   Run: lizard login
-echo.
+
+rem Set the machine up right away: sign in, then whatever the account still
+rem needs. lizard picks the mode itself: questions for a person at a terminal,
+rem JSON lines for a coding agent whose shell captures the output.
+rem LIZARD_NO_ONBOARD=1 skips this, as does CI.
+if defined LIZARD_NO_ONBOARD (
+  echo   Run: lizard onboard
+  echo.
+) else if defined CI (
+  echo   Run: lizard onboard
+  echo.
+) else (
+  "%INSTALL_DIR%\lizard.exe" onboard
+)
 
 rem Make lizard available in this window too; endlocal would drop a plain set.
 endlocal & set "PATH=%PATH%;%USERPROFILE%\.lizard\bin"

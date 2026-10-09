@@ -24,7 +24,7 @@ export function usd(cents) {
 function fmtDate(ms) {
     return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
-function daysLeft(endMs, now = Date.now()) {
+export function daysLeft(endMs, now = Date.now()) {
     const days = Math.max(0, Math.ceil((endMs - now) / 86_400_000));
     return days === 1 ? "1 day left" : `${days} days left`;
 }

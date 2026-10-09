@@ -61,6 +61,32 @@ export function isLoggedIn(): boolean {
   return getToken() !== null;
 }
 
+/** The token a command would use right now, or null when a sign-in is needed. */
+export function validToken(): string | null {
+  const fromEnv = envToken();
+  if (fromEnv) return fromEnv;
+  const creds = loadCredentials();
+  return creds && !isExpired(creds) ? creds.accessToken : null;
+}
+
+/** Store what an approved CLI session returned, and drop the pending session. */
+export function saveSessionLogin(result: {
+  accessToken: string;
+  user: { id: string; username: string; email?: string; avatarUrl?: string };
+}): Credentials {
+  const expMs = jwtExpiryMs(result.accessToken);
+  saveCredentials({
+    accessToken: result.accessToken,
+    expiresAt: expMs ? new Date(expMs).toISOString() : undefined,
+    userId: result.user.id,
+    username: result.user.username,
+    email: result.user.email,
+    avatarUrl: result.user.avatarUrl,
+  });
+  clearPendingAuth();
+  return loadCredentials()!;
+}
+
 function isTTY(): boolean {
   return Boolean(process.stdout.isTTY);
 }
@@ -117,17 +143,7 @@ export async function requireAuth(): Promise<Credentials> {
     try {
       const result = await checkSession(pending.sessionId, pending.sessionSecret);
       if (result.status === "complete" && result.accessToken && result.user) {
-        const expMs = jwtExpiryMs(result.accessToken);
-        saveCredentials({
-          accessToken: result.accessToken,
-          expiresAt: expMs ? new Date(expMs).toISOString() : undefined,
-          userId: result.user.id,
-          username: result.user.username,
-          email: result.user.email,
-          avatarUrl: result.user.avatarUrl,
-        });
-        clearPendingAuth();
-        return loadCredentials()!;
+        return saveSessionLogin({ accessToken: result.accessToken, user: result.user });
       }
       if (result.status === "expired") {
         clearPendingAuth();
@@ -164,6 +180,7 @@ export async function requireAuth(): Promise<Credentials> {
     sessionSecret: session.sessionSecret,
     authUrl,
     createdAt: Date.now(),
+    expiresAt: Date.now() + session.expiresIn * 1000,
   });
   await openURL(authUrl);
   printAuthPrompt(authUrl);

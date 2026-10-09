@@ -10,6 +10,10 @@ import {
 import { getBaseURL, clientHeaders } from "../lib/api.js";
 import { success, isJSONMode, printJSON } from "../lib/format.js";
 
+/** The sign-in methods the /auth/cli page can send a person to. */
+export type AuthProvider = "github" | "google";
+export const AUTH_PROVIDERS: AuthProvider[] = ["github", "google"];
+
 interface SessionResponse {
   sessionId: string;
   sessionSecret: string;
@@ -25,6 +29,34 @@ export interface CheckResponse {
     email?: string;
     avatarUrl?: string;
   };
+}
+
+/**
+ * The page that approves a CLI session. With a provider it signs a signed-out
+ * browser in with that method; without one it uses GitHub, as it always has.
+ */
+export function authUrlFor(sessionId: string, provider?: AuthProvider): string {
+  const url = `${getBaseURL()}/auth/cli?session=${sessionId}`;
+  return provider ? `${url}&provider=${provider}` : url;
+}
+
+/** Which sign-in methods the platform offers. Both, if it cannot be asked. */
+export async function fetchAuthProviders(): Promise<AuthProvider[]> {
+  try {
+    const res = await fetch(`${getBaseURL()}/api/auth/providers`, { headers: clientHeaders() });
+    if (!res.ok) return AUTH_PROVIDERS;
+    const body = (await res.json()) as Partial<Record<AuthProvider, boolean>>;
+    const on = AUTH_PROVIDERS.filter((p) => body[p]);
+    return on.length ? on : AUTH_PROVIDERS;
+  } catch {
+    return AUTH_PROVIDERS;
+  }
+}
+
+/** `--github` / `--google`, or undefined when neither is given. */
+export function providerFlag(opts: { github?: boolean; google?: boolean }): AuthProvider | undefined {
+  if (opts.github && opts.google) throw new Error("Pass --github or --google, not both.");
+  return opts.google ? "google" : opts.github ? "github" : undefined;
 }
 
 /** Create a CLI login session on the server */
@@ -60,15 +92,16 @@ export async function checkSession(
  * user authenticates and re-runs their original command — requireAuth will
  * pick up the pending session.
  */
-export async function performLogin(): Promise<never> {
+export async function performLogin(provider?: AuthProvider): Promise<never> {
   const session = await createSession();
-  const authUrl = `${getBaseURL()}/auth/cli?session=${session.sessionId}`;
+  const authUrl = authUrlFor(session.sessionId, provider);
 
   savePendingAuth({
     sessionId: session.sessionId,
     sessionSecret: session.sessionSecret,
     authUrl,
     createdAt: Date.now(),
+    expiresAt: Date.now() + session.expiresIn * 1000,
   });
 
   // In JSON mode emit the URL as machine-readable output and never spawn a
@@ -90,7 +123,10 @@ export function registerLogin(program: Command) {
     .command("login")
     .description("Log in to Lizard")
     .option("--token <token>", "Authenticate with an API token")
+    .option("--github", "Sign in with GitHub")
+    .option("--google", "Sign in with Google")
     .action(async (opts) => {
+      const provider = providerFlag(opts);
       const token = opts.token;
       if (token) {
         // Direct token auth — validate it
@@ -116,6 +152,6 @@ export function registerLogin(program: Command) {
         return;
       }
 
-      await performLogin();
+      await performLogin(provider);
     });
 }
