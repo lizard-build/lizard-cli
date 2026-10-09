@@ -38,14 +38,13 @@ export declare function jwtExpiryMs(token: string): number | null;
 /**
  * Ensure the user is authenticated.
  *
- * On first call with no credentials: creates a CLI auth session, saves it to
- * disk, opens the browser, prints the URL, and exits. The user authenticates
- * in the browser, then re-runs their command.
- *
- * On subsequent calls while a session is pending: checks once (no loop) if
- * the user has completed authentication. If yes, stores credentials and
- * returns them. If still pending, prints the URL and exits. If the session
- * expired, starts a fresh one.
+ * A token from the environment or a saved login that has not expired wins.
+ * Otherwise a session the browser already approved finishes here. Failing
+ * that, a person at a terminal signs in on the spot (pick GitHub or Google,
+ * the browser opens, the CLI waits) and the command carries on. Anything else
+ * (an agent, a pipe, --json) gets a NOT_AUTHENTICATED error whose body holds
+ * the sign-in links; once the user approves, the same command run again
+ * picks the session up.
  */
 export declare function requireAuth(): Promise<Credentials>;
 /** Open a URL in the default browser, or print it if headless. */

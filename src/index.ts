@@ -73,7 +73,6 @@ import { registerLogin } from "./commands/login.js";
 import { registerLogout } from "./commands/logout.js";
 import { registerLogs } from "./commands/logs.js";
 import { registerMetrics } from "./commands/metrics.js";
-import { registerOnboard } from "./commands/onboard.js";
 import { registerOpen } from "./commands/open.js";
 import { registerPort } from "./commands/port.js";
 import { registerProjects } from "./commands/projects.js";
@@ -136,7 +135,7 @@ program
     // Walk up to the top-level ancestor so subcommands inherit (`skills list`
     // matches via `skills`). Leaf names like `git status` don't false-positive
     // because we check the ancestor's name, not the action's.
-    const noAuth = new Set(["login", "logout", "onboard", "upgrade", "help", "docs", "status", "skills"]);
+    const noAuth = new Set(["login", "logout", "upgrade", "help", "docs", "status", "skills"]);
     let topLevel: Command = actionCommand;
     while (topLevel.parent && topLevel.parent !== thisCommand) {
       topLevel = topLevel.parent;
@@ -170,7 +169,6 @@ registerLogin(program);
 registerLogout(program);
 registerLogs(program);
 registerMetrics(program);
-registerOnboard(program);
 registerOpen(program);
 registerPort(program);
 registerProjects(program);

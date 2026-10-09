@@ -24,18 +24,19 @@ echo.
 echo Installed to %INSTALL_DIR%\lizard.exe
 echo.
 
-rem Set the machine up right away: sign in, then whatever the account still
-rem needs. lizard picks the mode itself: questions for a person at a terminal,
-rem JSON lines for a coding agent whose shell captures the output.
-rem LIZARD_NO_ONBOARD=1 skips this, as does CI.
-if defined LIZARD_NO_ONBOARD (
-  echo   Run: lizard onboard
+rem Sign in right away, then set up what the account still needs: `lizard
+rem login` offers Pro when there is no plan. lizard picks the mode itself:
+rem questions for a person at a terminal, JSON with the sign-in links for a
+rem coding agent whose shell captures the output.
+rem LIZARD_NO_LOGIN=1 skips this, as does CI.
+if defined LIZARD_NO_LOGIN (
+  echo   Run: lizard login
   echo.
 ) else if defined CI (
-  echo   Run: lizard onboard
+  echo   Run: lizard login
   echo.
 ) else (
-  "%INSTALL_DIR%\lizard.exe" onboard
+  "%INSTALL_DIR%\lizard.exe" login
 )
 
 rem Make lizard available in this window too; endlocal would drop a plain set.

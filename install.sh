@@ -105,10 +105,11 @@ elif [ -z "$LINK" ]; then
 fi
 echo ""
 
-# Set the machine up right away: sign in, then whatever the account still
-# needs. A person at a terminal gets questions and a browser. A coding agent,
-# whose shell captures the output, gets JSON lines that say what to do next,
-# and the installer returns at once. LIZARD_NO_ONBOARD=1 skips this, as does CI.
+# Sign in right away, then set up what the account still needs: `lizard
+# login` offers Pro when there is no plan. A person at a terminal gets
+# questions and a browser. A coding agent, whose shell captures the output,
+# gets JSON with the sign-in links and what to do next, and the installer
+# returns at once. LIZARD_NO_LOGIN=1 skips this, as does CI.
 #
 # `curl | bash` feeds this script on stdin, so the questions need the terminal
 # opened by its own name (/dev/ttys003, /dev/pts/1). /dev/tty does not do: on
@@ -117,11 +118,11 @@ echo ""
 exec 3>&1
 TERMINAL="$(tty <&3 2>/dev/null || true)"
 exec 3>&-
-if [ -n "$LIZARD_NO_ONBOARD" ] || [ -n "$CI" ]; then
-  echo -e "  Run ${CYAN}lizard onboard${RESET} to sign in and get started"
+if [ -n "$LIZARD_NO_LOGIN" ] || [ -n "$CI" ]; then
+  echo -e "  Run ${CYAN}lizard login${RESET} to get started"
   echo ""
 elif [ -t 1 ] && [ -c "$TERMINAL" ] && [ -r "$TERMINAL" ]; then
-  "$INSTALL_DIR/lizard" onboard < "$TERMINAL" || true
+  "$INSTALL_DIR/lizard" login < "$TERMINAL" || true
 else
-  "$INSTALL_DIR/lizard" onboard --json || true
+  "$INSTALL_DIR/lizard" login --json || true
 fi

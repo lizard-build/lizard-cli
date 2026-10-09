@@ -1,132 +1,229 @@
 import chalk from "chalk";
+import * as p from "@clack/prompts";
 import { Command } from "commander";
-import {
-  saveCredentials,
-  savePendingAuth,
-  openURL,
-  jwtExpiryMs,
-  type Credentials,
-} from "../lib/auth.js";
-import { getBaseURL, clientHeaders } from "../lib/api.js";
+import { saveCredentials, jwtExpiryMs, envToken, openURL } from "../lib/auth.js";
+import { api, getBaseURL } from "../lib/api.js";
+import { getProjectLink } from "../lib/config.js";
 import { success, isJSONMode, printJSON } from "../lib/format.js";
+import {
+  currentUser,
+  fetchAuthProviders,
+  pendingPayload,
+  providerFlag,
+  resumePending,
+  signInInteractive,
+  startSession,
+  type AuthProvider,
+  type Me,
+} from "../lib/signin.js";
+import { CREDITS_END, billingUrl, daysLeft, describeSubscription, usd, type Subscription } from "./billing.js";
 
-/** The sign-in methods the /auth/cli page can send a person to. */
-export type AuthProvider = "github" | "google";
-export const AUTH_PROVIDERS: AuthProvider[] = ["github", "google"];
+// `lizard login` signs the machine in, then does only what the account still
+// needs: an account with no plan is offered Pro. The install scripts run it as
+// their last step, and it is safe to re-run: a signed-in machine skips to the
+// plan. Every other command signs in through requireAuth instead, without the
+// plan step, and carries on.
+//
+// At a terminal it asks GitHub or Google, opens the browser and waits. For a
+// coding agent (no terminal, or --json) it prints one JSON object: the links
+// and an instruction while sign-in is pending, the account and its plan once
+// it is done. It never waits there; the next run picks up the sign-in.
 
-interface SessionResponse {
-  sessionId: string;
-  sessionSecret: string;
-  expiresIn: number;
+export type AccountState =
+  | "unknown"
+  | "not_owner"
+  | "enterprise"
+  | "credits"
+  | "past_due"
+  | "trialing"
+  | "active"
+  | "trial_available"
+  | "subscription_required"
+  | "checkout_unavailable";
+
+/** What the account still needs, from `GET /api/billing/subscription` (null when it could not be read). */
+export function accountState(sub: Subscription | null): AccountState {
+  if (!sub) return "unknown";
+  if (sub.isOwner === false) return "not_owner";
+  if (sub.plan === "enterprise") return "enterprise";
+  if (sub.plan === "payg") return "credits";
+  if (sub.plan === "pro") {
+    if (sub.pastDue || sub.status === "past_due") return "past_due";
+    return sub.status === "trialing" ? "trialing" : "active";
+  }
+  if (!sub.checkoutAvailable) return "checkout_unavailable";
+  return sub.trial.eligible && sub.trial.days ? "trial_available" : "subscription_required";
 }
 
-export interface CheckResponse {
-  status: "pending" | "complete" | "expired";
-  accessToken?: string;
-  user?: {
-    id: string;
-    username: string;
-    email?: string;
-    avatarUrl?: string;
-  };
+/** What an agent should do about the plan. Spells out the don'ts, since an agent takes a link as a hint to open it. */
+export function accountInstruction(state: AccountState, sub: Subscription | null, now = Date.now()): string {
+  const price = usd(sub?.priceCents ?? 1900);
+  const start =
+    "Ask before starting it. If they agree, run `lizard billing start --json` and give them the url it prints to finish in Stripe Checkout.";
+  switch (state) {
+    case "unknown":
+      return "Could not read this account's plan, so nothing about it is known. Do NOT start billing. The user is signed in: carry on with their task.";
+    case "not_owner":
+      return (
+        "This account deploys on its workspace owner's plan. Do NOT start or change a subscription: only the owner can." +
+        (sub?.plan === "none" ? " Deploys stay blocked until the owner starts Pro." : "")
+      );
+    case "enterprise":
+      return "Enterprise plan, invoiced monthly. Nothing to set up.";
+    case "credits":
+      return `This account runs on prepaid credits, which end on ${CREDITS_END}. Deploys work until then. Tell the user that Pro replaces them (\`lizard billing start\`), but do not run it unless they ask.`;
+    case "past_due":
+      return "A payment failed, so new resources are blocked. Send the user to payUrl to pay the open invoice. Do NOT start a second subscription.";
+    case "trialing": {
+      const ends = sub?.trial.endsAt;
+      const left = sub?.trial.remainingCents;
+      const parts = [ends ? daysLeft(ends, now) : null, left != null ? `${usd(left)} of trial credits left` : null].filter(Boolean);
+      return `The Pro trial is on${parts.length ? ` (${parts.join(", ")})` : ""}. Do NOT open billing or start a subscription.`;
+    }
+    case "active":
+      return "Pro is active. Do NOT open billing or start a subscription.";
+    case "trial_available":
+      return (
+        `No plan yet, and deploys need one. Offer the user the ${sub?.trial.days}-day Pro trial with ${usd(sub?.trial.creditCents ?? 0)} in credits: ` +
+        `no charge today, then ${price}/month, taxes included. ${start}`
+      );
+    case "subscription_required":
+      return (
+        "No plan yet, and deploys need one. This account has had its trial, so do NOT promise one. " +
+        `Pro is ${price}/month, taxes included, with ${usd(sub?.includedCents ?? 1900)} in credits each month. ${start}`
+      );
+    case "checkout_unavailable":
+      return "No plan, and Pro is not open for this account yet. Do NOT try to start billing.";
+  }
 }
 
-/**
- * The page that approves a CLI session. With a provider it signs a signed-out
- * browser in with that method; without one it uses GitHub, as it always has.
- */
-export function authUrlFor(sessionId: string, provider?: AuthProvider): string {
-  const url = `${getBaseURL()}/auth/cli?session=${sessionId}`;
-  return provider ? `${url}&provider=${provider}` : url;
+/** Commands an agent can run next. */
+export function nextSteps(linked: boolean): Array<{ command: string; why: string }> {
+  return [
+    {
+      command: "lizard skills get core",
+      why: "The guide to every command, matched to this CLI version. Read it before running others.",
+    },
+    ...(linked ? [] : [{ command: "lizard init", why: "Create a project and link the current folder to it." }]),
+    { command: "lizard up", why: linked ? "Deploy the linked folder." : "Deploy the folder once it is linked." },
+  ];
 }
 
-/** Which sign-in methods the platform offers. Both, if it cannot be asked. */
-export async function fetchAuthProviders(): Promise<AuthProvider[]> {
+async function fetchSubscription(): Promise<Subscription | null> {
+  return api.get<Subscription>("/api/billing/subscription").catch(() => null);
+}
+
+// ── For agents ──────────────────────────────────────────────────────────
+
+async function loginForAgent(flag?: AuthProvider): Promise<void> {
+  let source: "env" | "saved" | "browser" = envToken() ? "env" : "saved";
+  let me = await currentUser();
+  if (!me) {
+    const resumed = await resumePending();
+    if (resumed.kind !== "complete") {
+      const pending = resumed.kind === "pending" ? resumed.pending : await startSession(flag);
+      const methods = flag ? [flag] : await fetchAuthProviders();
+      const why = resumed.kind === "pending" ? "waiting" : resumed.kind === "expired" ? "expired" : "new";
+      printJSON(pendingPayload(pending, methods, why, { flag, nextCommand: flag ? `lizard login --${flag}` : "lizard login" }));
+      return;
+    }
+    source = "browser";
+    me = await api.get<Me>("/api/auth/me");
+  }
+
+  const sub = await fetchSubscription();
+  const state = accountState(sub);
+  printJSON({
+    status: "complete",
+    username: me.username,
+    ...(me.email ? { email: me.email } : {}),
+    ...(me.scoped ? { scoped: true } : {}),
+    source,
+    account: {
+      state,
+      plan: sub?.plan ?? null,
+      status: sub?.status ?? null,
+      billingUrl: billingUrl(),
+      ...(state === "past_due" ? { payUrl: sub?.openInvoiceUrl || billingUrl() } : {}),
+      instruction: accountInstruction(state, sub),
+    },
+    next: nextSteps(Boolean(getProjectLink())),
+  });
+}
+
+// ── For people ──────────────────────────────────────────────────────────
+
+async function offerPlan(canAsk: boolean): Promise<void> {
+  const sub = await fetchSubscription();
+  const state = accountState(sub);
+  if (!sub) {
+    p.log.message(chalk.dim("Could not read the plan. Run `lizard billing` to see it."));
+    return;
+  }
+  if (state !== "trial_available" && state !== "subscription_required") {
+    p.log.message(describeSubscription(sub).join("\n"));
+    return;
+  }
+
+  const trial = state === "trial_available";
+  const offer = trial
+    ? `Pro trial: ${sub.trial.days} days with ${usd(sub.trial.creditCents ?? 0)} in credits. No charge today, then ${usd(sub.priceCents)}/month, taxes included.`
+    : `Pro: ${usd(sub.priceCents)}/month, taxes included, with ${usd(sub.includedCents)} in credits each month.`;
+  p.log.info(`No plan yet. Deploys need one.\n${offer}`);
+
+  const go = canAsk ? await p.confirm({ message: trial ? "Start the trial now?" : "Start Pro now?" }) : false;
+  if (p.isCancel(go) || !go) {
+    p.log.message(`Start it later: ${chalk.cyan("lizard billing start")}`);
+    return;
+  }
   try {
-    const res = await fetch(`${getBaseURL()}/api/auth/providers`, { headers: clientHeaders() });
-    if (!res.ok) return AUTH_PROVIDERS;
-    const body = (await res.json()) as Partial<Record<AuthProvider, boolean>>;
-    const on = AUTH_PROVIDERS.filter((p) => body[p]);
-    return on.length ? on : AUTH_PROVIDERS;
-  } catch {
-    return AUTH_PROVIDERS;
+    const out = await api.post<{ url: string }>("/api/billing/subscription/checkout", {});
+    const opened = await openURL(out.url);
+    p.log.info(`${opened ? "Opened Stripe Checkout. If it did not open, use this link" : "Finish in Stripe Checkout"}:\n${chalk.cyan(out.url)}`);
+  } catch (err: any) {
+    p.log.warn(`Could not open Stripe Checkout: ${err?.message || err}\nTry again with ${chalk.cyan("lizard billing start")}`);
   }
 }
 
-/** `--github` / `--google`, or undefined when neither is given. */
-export function providerFlag(opts: { github?: boolean; google?: boolean }): AuthProvider | undefined {
-  if (opts.github && opts.google) throw new Error("Pass --github or --google, not both.");
-  return opts.google ? "google" : opts.github ? "github" : undefined;
-}
+async function loginInteractive(flag?: AuthProvider): Promise<void> {
+  // The install script hands the terminal over as stdin. Without it there is
+  // nothing to answer with, so skip the questions and print the links.
+  const canAsk = Boolean(process.stdin.isTTY);
+  p.intro(chalk.bold("Lizard CLI"));
 
-/** Create a CLI login session on the server */
-export async function createSession(): Promise<SessionResponse> {
-  const res = await fetch(`${getBaseURL()}/api/auth/cli/session`, {
-    method: "POST",
-    headers: { ...clientHeaders(), "Content-Type": "application/json" },
-  });
-  if (!res.ok) throw new Error(`Failed to create login session: ${res.statusText}`);
-  return res.json() as Promise<SessionResponse>;
-}
-
-/** Check once if the user has completed authentication (no polling loop) */
-export async function checkSession(
-  sessionId: string,
-  sessionSecret: string,
-): Promise<CheckResponse> {
-  const res = await fetch(`${getBaseURL()}/api/auth/cli/poll`, {
-    method: "POST",
-    // The platform records the login from this request; its User-Agent is
-    // what files it under the CLI and the agent running it.
-    headers: { ...clientHeaders(), "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionId, sessionSecret }),
-  });
-  if (!res.ok) throw new Error(`Auth check failed: ${res.statusText}`);
-  return res.json() as Promise<CheckResponse>;
-}
-
-/**
- * Start the login flow: creates a session, saves it to disk, surfaces the
- * auth URL, then exits. In human mode it opens the browser and prints the
- * URL; in JSON mode it emits the URL as JSON and never opens a browser. The
- * user authenticates and re-runs their original command — requireAuth will
- * pick up the pending session.
- */
-export async function performLogin(provider?: AuthProvider): Promise<never> {
-  const session = await createSession();
-  const authUrl = authUrlFor(session.sessionId, provider);
-
-  savePendingAuth({
-    sessionId: session.sessionId,
-    sessionSecret: session.sessionSecret,
-    authUrl,
-    createdAt: Date.now(),
-    expiresAt: Date.now() + session.expiresIn * 1000,
-  });
-
-  // In JSON mode emit the URL as machine-readable output and never spawn a
-  // browser — agents drive this flow and popping open a browser on a
-  // headless/agent host is wrong. In human mode, open it and print the URL.
-  if (isJSONMode()) {
-    printJSON({ status: "pending", authUrl });
+  const me = await currentUser();
+  if (me) {
+    p.log.success(`Signed in as ${chalk.bold(me.username)}`);
+    p.log.message(chalk.dim("To use another account: lizard logout, then lizard login."));
+  } else if ((await resumePending()).kind === "complete") {
+    const resumed = await api.get<Me>("/api/auth/me");
+    p.log.success(`Signed in as ${chalk.bold(resumed.username)}`);
   } else {
-    await openURL(authUrl);
-    process.stderr.write(
-      `\nAuthenticate with Lizard:\n  ${chalk.cyan(authUrl)}\n\nOnce authenticated, run your command again.\n\n`,
-    );
+    await signInInteractive(flag);
   }
-  process.exit(0);
+
+  await offerPlan(canAsk);
+
+  const linked = Boolean(getProjectLink());
+  p.note(
+    (linked
+      ? [`${chalk.cyan("lizard up")}     Deploy this folder`]
+      : [`${chalk.cyan("lizard init")}   Create a project and link this folder`, `${chalk.cyan("lizard up")}     Deploy it`]
+    ).join("\n"),
+    "Next",
+  );
+  p.outro("You're all set");
 }
 
 export function registerLogin(program: Command) {
   program
     .command("login")
-    .description("Log in to Lizard")
+    .description("Sign in to Lizard, then offer Pro if the account has no plan. Safe to re-run")
     .option("--token <token>", "Authenticate with an API token")
     .option("--github", "Sign in with GitHub")
     .option("--google", "Sign in with Google")
     .action(async (opts) => {
-      const provider = providerFlag(opts);
+      const flag = providerFlag(opts);
       const token = opts.token;
       if (token) {
         // Direct token auth — validate it
@@ -152,6 +249,7 @@ export function registerLogin(program: Command) {
         return;
       }
 
-      await performLogin(provider);
+      if (isJSONMode()) await loginForAgent(flag);
+      else await loginInteractive(flag);
     });
 }

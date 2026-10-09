@@ -3,16 +3,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Command } from "commander";
-import {
-  registerOnboard,
-  accountState,
-  accountInstruction,
-  loginPendingEvent,
-  nextSteps,
-} from "../../src/commands/onboard.js";
-import { authUrlFor, providerFlag } from "../../src/commands/login.js";
+import { registerLogin, accountState, accountInstruction, nextSteps } from "../../src/commands/login.js";
+import { authUrlFor, providerFlag, pendingPayload } from "../../src/lib/signin.js";
 import type { Subscription } from "../../src/commands/billing.js";
-import { setBaseURL } from "../../src/lib/api.js";
+import { requireAuth } from "../../src/lib/auth.js";
+import { APIError, setBaseURL } from "../../src/lib/api.js";
 import { setJSONMode } from "../../src/lib/format.js";
 import { loadConfig, saveConfig } from "../../src/lib/config.js";
 
@@ -39,14 +34,14 @@ function requested(): string[] {
   return fetchMock.mock.calls.map(([url, init]) => `${init?.method ?? "GET"} ${new URL(url).pathname}`);
 }
 
-/** The JSON lines the command wrote. */
-function events(): Array<Record<string, any>> {
-  return stdout.join("").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+/** The one JSON object `lizard login --json` printed. */
+function output(): Record<string, any> {
+  return JSON.parse(stdout.join("\n"));
 }
 
 function run(args: string[]) {
   const program = new Command().exitOverride().configureOutput({ writeErr: () => {}, writeOut: () => {} });
-  registerOnboard(program);
+  registerLogin(program);
   return program.parseAsync(args, { from: "user" });
 }
 
@@ -54,6 +49,15 @@ function run(args: string[]) {
 function jwt(inMs: number) {
   const part = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
   return `${part({ alg: "none" })}.${part({ exp: Math.floor((Date.now() + inMs) / 1000) })}.sig`;
+}
+
+async function authError(): Promise<APIError> {
+  try {
+    await requireAuth();
+  } catch (err) {
+    return err as APIError;
+  }
+  throw new Error("requireAuth did not throw");
 }
 
 const DAY = 86_400_000;
@@ -78,12 +82,18 @@ const none: Subscription = {
 
 const session = { sessionId: "sess123", sessionSecret: "secret456", expiresIn: 300 };
 const me = { id: "u1", username: "ada", email: "ada@example.com" };
+const both = () => reply(200, { github: true, google: true });
+
+function savePending(createdAt = Date.now()) {
+  saveConfig({ pendingAuth: { sessionId: "sess123", sessionSecret: "secret456", authUrl: "x", createdAt } });
+}
 
 beforeEach(() => {
-  for (const k of ["LIZARD_HOME", "LIZARD_TOKEN", "LIZARD_API_KEY"]) savedEnv[k] = process.env[k];
+  for (const k of ["LIZARD_HOME", "LIZARD_TOKEN", "LIZARD_API_KEY", "CI"]) savedEnv[k] = process.env[k];
   delete process.env.LIZARD_TOKEN;
   delete process.env.LIZARD_API_KEY;
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "lizard-onboard-test-"));
+  delete process.env.CI;
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "lizard-login-test-"));
   process.env.LIZARD_HOME = tmpDir;
 
   fetchMock.mockReset();
@@ -91,7 +101,7 @@ beforeEach(() => {
   setBaseURL("https://lizard.build");
   setJSONMode(true);
   stdout = [];
-  vi.spyOn(process.stdout, "write").mockImplementation((chunk: any) => { stdout.push(String(chunk)); return true; });
+  vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { stdout.push(a.join(" ")); });
 });
 
 afterEach(() => {
@@ -102,7 +112,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   setJSONMode(false);
-  process.exitCode = undefined;
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
@@ -118,23 +127,31 @@ describe("sign-in links", () => {
     expect(() => providerFlag({ github: true, google: true })).toThrow(/not both/);
   });
 
-  test("with two methods the agent gets both links and the same-method rule", () => {
-    const ev = loginPendingEvent({ sessionId: "s", sessionSecret: "x", expiresAt: Date.now() + 300_000 }, ["github", "google"], "new");
-    expect(ev.authUrl).toBeUndefined();
+  test("two methods: both links, the old authUrl, and the same-method rule", () => {
+    const ev = pendingPayload({ sessionId: "s", sessionSecret: "x", expiresAt: Date.now() + 300_000 }, ["github", "google"], "new");
+    expect(ev.status).toBe("pending");
+    expect(ev.authUrl).toBe("https://lizard.build/auth/cli?session=s");
     expect(ev.authUrls).toEqual({
       github: "https://lizard.build/auth/cli?session=s&provider=github",
       google: "https://lizard.build/auth/cli?session=s&provider=google",
     });
-    expect(ev.nextCommand).toBe("lizard onboard");
+    expect(ev).not.toHaveProperty("nextCommand");
     expect(ev.instruction).toContain("same method as before");
+    expect(ev.instruction).toContain("run the same command again");
     expect(ev.instruction).toContain("5 more minutes");
   });
 
-  test("a chosen method gives one link and keeps the flag in nextCommand", () => {
-    const ev = loginPendingEvent({ sessionId: "s", sessionSecret: "x", expiresAt: Date.now() + 60_000 }, ["google"], "expired", "google");
+  test("a chosen method: one link, and nextCommand keeps the flag", () => {
+    const ev = pendingPayload(
+      { sessionId: "s", sessionSecret: "x", expiresAt: Date.now() + 60_000 },
+      ["google"],
+      "expired",
+      { flag: "google", nextCommand: "lizard login --google" },
+    );
     expect(ev.authUrl).toBe("https://lizard.build/auth/cli?session=s&provider=google");
-    expect(ev.nextCommand).toBe("lizard onboard --google");
+    expect(ev.nextCommand).toBe("lizard login --google");
     expect(ev.instruction).toMatch(/^The last sign-in link expired/);
+    expect(ev.instruction).toContain("run nextCommand");
     expect(ev.instruction).toContain("1 more minute;");
   });
 });
@@ -172,103 +189,83 @@ describe("account state", () => {
   });
 });
 
-describe("lizard onboard --json", () => {
-  test("signed out: starts a session, saves it, prints the links and exits", async () => {
-    routes({
-      "POST /api/auth/cli/session": () => reply(200, session),
-      "GET /api/auth/providers": () => reply(200, { github: true, google: true }),
-    });
-    await run(["onboard"]);
+describe("lizard login --json", () => {
+  test("signed out: saves a session and prints the links as one object", async () => {
+    routes({ "POST /api/auth/cli/session": () => reply(200, session), "GET /api/auth/providers": both });
+    await run(["login"]);
 
-    const [pending, done] = events();
-    expect(pending.event).toBe("login_pending");
-    expect(Object.keys(pending.authUrls)).toEqual(["github", "google"]);
-    expect(pending.nextCommand).toBe("lizard onboard");
-    expect(done).toEqual({ event: "done", signedIn: false });
-
+    const out = output();
+    expect(out.status).toBe("pending");
+    expect(out.authUrl).toBe("https://lizard.build/auth/cli?session=sess123");
+    expect(Object.keys(out.authUrls)).toEqual(["github", "google"]);
+    expect(out.nextCommand).toBe("lizard login");
     const saved = loadConfig().pendingAuth!;
     expect(saved.sessionId).toBe("sess123");
     expect(saved.expiresAt).toBeGreaterThan(Date.now());
-    expect(requested()).not.toContain("POST /api/auth/cli/poll");
   });
 
-  test("--google prints one Google link and no provider list request", async () => {
+  test("--google prints one Google link without asking which methods exist", async () => {
     routes({ "POST /api/auth/cli/session": () => reply(200, session) });
-    await run(["onboard", "--google"]);
-    const [pending] = events();
-    expect(pending.authUrl).toBe("https://lizard.build/auth/cli?session=sess123&provider=google");
-    expect(pending.nextCommand).toBe("lizard onboard --google");
+    await run(["login", "--google"]);
+    expect(output().authUrl).toBe("https://lizard.build/auth/cli?session=sess123&provider=google");
+    expect(output().nextCommand).toBe("lizard login --google");
     expect(requested()).toEqual(["POST /api/auth/cli/session"]);
   });
 
   test("the next run finishes an approved session and reports the plan", async () => {
-    saveConfig({
-      pendingAuth: { sessionId: "sess123", sessionSecret: "secret456", authUrl: "x", createdAt: Date.now() },
-    });
+    savePending();
     routes({
       "POST /api/auth/cli/poll": () => reply(200, { status: "complete", accessToken: jwt(DAY), user: { id: "u1", username: "ada" } }),
       "GET /api/auth/me": () => reply(200, me),
       "GET /api/billing/subscription": () => reply(200, none),
     });
-    await run(["onboard"]);
+    await run(["login"]);
 
-    const [signedIn, account, done] = events();
-    expect(signedIn).toEqual({ event: "signed_in", username: "ada", email: "ada@example.com", source: "browser" });
-    expect(account.event).toBe("account");
-    expect(account.state).toBe("trial_available");
-    expect(account.billingUrl).toBe("https://lizard.build/profile/account-billing");
-    expect(account.next.map((s: { command: string }) => s.command)).toContain("lizard init");
-    expect(done).toEqual({ event: "done", signedIn: true });
-
-    const config = loadConfig();
-    expect(config.pendingAuth).toBeUndefined();
-    expect(config.credentials?.username).toBe("ada");
+    const out = output();
+    expect(out).toMatchObject({ status: "complete", username: "ada", email: "ada@example.com", source: "browser" });
+    expect(out.account.state).toBe("trial_available");
+    expect(out.account.billingUrl).toBe("https://lizard.build/profile/account-billing");
+    expect(out.next.map((s: { command: string }) => s.command)).toContain("lizard init");
+    expect(loadConfig().pendingAuth).toBeUndefined();
+    expect(loadConfig().credentials?.username).toBe("ada");
   });
 
   test("a session the browser has not approved yet keeps its links", async () => {
-    saveConfig({
-      pendingAuth: { sessionId: "sess123", sessionSecret: "secret456", authUrl: "x", createdAt: Date.now() },
-    });
+    savePending();
     routes({
       "POST /api/auth/cli/poll": () => reply(200, { status: "pending" }),
       "GET /api/auth/providers": () => reply(200, { github: true, google: false }),
     });
-    await run(["onboard"]);
+    await run(["login"]);
 
-    const [pending] = events();
-    expect(pending.authUrl).toBe("https://lizard.build/auth/cli?session=sess123&provider=github");
-    expect(pending.instruction).toMatch(/^The user has not finished signing in yet/);
+    expect(output().authUrl).toBe("https://lizard.build/auth/cli?session=sess123&provider=github");
+    expect(output().instruction).toMatch(/^The user has not finished signing in yet/);
     expect(requested()).not.toContain("POST /api/auth/cli/session");
   });
 
   test("an expired session is replaced by a new one", async () => {
-    saveConfig({
-      pendingAuth: { sessionId: "old", sessionSecret: "s", authUrl: "x", createdAt: Date.now() - 10 * 60_000 },
-    });
+    saveConfig({ pendingAuth: { sessionId: "old", sessionSecret: "s", authUrl: "x", createdAt: Date.now() - 10 * 60_000 } });
     routes({
       "POST /api/auth/cli/poll": () => reply(200, { status: "expired" }),
       "POST /api/auth/cli/session": () => reply(200, session),
-      "GET /api/auth/providers": () => reply(200, { github: true, google: true }),
+      "GET /api/auth/providers": both,
     });
-    await run(["onboard"]);
+    await run(["login"]);
 
-    const [pending] = events();
-    expect(pending.authUrls.github).toContain("session=sess123");
-    expect(pending.instruction).toMatch(/^The last sign-in link expired/);
+    expect(output().authUrls.github).toContain("session=sess123");
+    expect(output().instruction).toMatch(/^The last sign-in link expired/);
     expect(loadConfig().pendingAuth?.sessionId).toBe("sess123");
   });
 
-  test("a saved login skips sign-in", async () => {
+  test("a saved login is reported instead of starting a new one", async () => {
     saveConfig({ credentials: { accessToken: jwt(DAY), userId: "u1", username: "ada" } });
     routes({
       "GET /api/auth/me": () => reply(200, me),
       "GET /api/billing/subscription": () => reply(200, { ...none, plan: "pro", status: "active" }),
     });
-    await run(["onboard"]);
+    await run(["login"]);
 
-    const [signedIn, account] = events();
-    expect(signedIn.source).toBe("saved");
-    expect(account.state).toBe("active");
+    expect(output()).toMatchObject({ status: "complete", source: "saved", account: { state: "active" } });
     expect(requested()).toEqual(["GET /api/auth/me", "GET /api/billing/subscription"]);
   });
 
@@ -277,34 +274,86 @@ describe("lizard onboard --json", () => {
     routes({
       "GET /api/auth/me": () => reply(401, { error: "Unauthorized" }),
       "POST /api/auth/cli/session": () => reply(200, session),
-      "GET /api/auth/providers": () => reply(200, { github: true, google: true }),
+      "GET /api/auth/providers": both,
     });
-    await run(["onboard"]);
+    await run(["login"]);
 
-    expect(events()[0].event).toBe("login_pending");
+    expect(output().status).toBe("pending");
     expect(loadConfig().credentials).toBeUndefined();
   });
 
-  test("a token from the environment counts as signed in, and a plan it cannot read is unknown", async () => {
+  test("a token from the environment counts, and a plan it cannot read is unknown", async () => {
     process.env.LIZARD_API_KEY = "liz_scoped";
     routes({
       "GET /api/auth/me": () => reply(200, { id: "u1", username: "ada", scoped: true }),
       "GET /api/billing/subscription": () => reply(403, { error: "ACCOUNT_SCOPE_REQUIRED", message: "no" }),
     });
-    await run(["onboard"]);
+    await run(["login"]);
 
-    const [signedIn, account] = events();
-    expect(signedIn).toEqual({ event: "signed_in", username: "ada", scoped: true, source: "env" });
-    expect(account.state).toBe("unknown");
-    expect(account.instruction).toContain("Do NOT start billing");
+    expect(output()).toMatchObject({ status: "complete", scoped: true, source: "env", account: { state: "unknown" } });
+  });
+});
+
+describe("requireAuth without a terminal", () => {
+  test("no login: fails with NOT_AUTHENTICATED and the sign-in links in the body", async () => {
+    routes({ "POST /api/auth/cli/session": () => reply(200, session), "GET /api/auth/providers": both });
+    const err = await authError();
+
+    expect(err).toBeInstanceOf(APIError);
+    expect(err.status).toBe(401);
+    expect(err.code).toBe("NOT_AUTHENTICATED");
+    expect(err.message).toMatch(/^Not signed in to Lizard\. Sign-in is needed/);
+    const login = (err.body as { login: Record<string, any> }).login;
+    expect(login.authUrls.google).toBe("https://lizard.build/auth/cli?session=sess123&provider=google");
+    expect(login.instruction).toContain("run the same command again");
+    expect(loadConfig().pendingAuth?.sessionId).toBe("sess123");
   });
 
-  test("a rejected environment token ends in an error event", async () => {
-    process.env.LIZARD_TOKEN = "bad";
-    routes({ "GET /api/auth/me": () => reply(401, { error: "Invalid token" }) });
-    await run(["onboard"]);
+  test("the same command run again picks up the approved session", async () => {
+    savePending();
+    routes({
+      "POST /api/auth/cli/poll": () => reply(200, { status: "complete", accessToken: jwt(DAY), user: { id: "u1", username: "ada" } }),
+    });
+    const creds = await requireAuth();
+    expect(creds.username).toBe("ada");
+    expect(loadConfig().pendingAuth).toBeUndefined();
+  });
 
-    expect(events()).toEqual([{ event: "error", code: "ERROR", message: "Invalid token" }]);
-    expect(process.exitCode).toBe(2);
+  test("a session still waiting is handed out again, not replaced", async () => {
+    savePending();
+    routes({ "POST /api/auth/cli/poll": () => reply(200, { status: "pending" }), "GET /api/auth/providers": both });
+    const err = await authError();
+
+    expect(err.message).toContain("The user has not finished signing in yet");
+    expect(requested()).not.toContain("POST /api/auth/cli/session");
+  });
+
+  test("an expired saved login says so", async () => {
+    saveConfig({ credentials: { accessToken: jwt(-DAY), userId: "u1", username: "ada" } });
+    routes({ "POST /api/auth/cli/session": () => reply(200, session), "GET /api/auth/providers": both });
+    expect((await authError()).message).toMatch(/^The Lizard sign-in on this machine expired\./);
+  });
+
+  test("CI gets the plain error and no session", async () => {
+    process.env.CI = "true";
+    routes({});
+    const err = await authError();
+    expect(err.code).toBe("NOT_AUTHENTICATED");
+    expect(err.body).toBeNull();
+    expect(err.message).toContain("LIZARD_TOKEN");
+    expect(requested()).toEqual([]);
+  });
+
+  test("a platform it cannot reach gives the plain error", async () => {
+    fetchMock.mockRejectedValue(new TypeError("fetch failed"));
+    const err = await authError();
+    expect(err.code).toBe("NOT_AUTHENTICATED");
+    expect(err.body).toBeNull();
+  });
+
+  test("a token in the environment skips all of it", async () => {
+    process.env.LIZARD_TOKEN = "tok";
+    expect((await requireAuth()).accessToken).toBe("tok");
+    expect(requested()).toEqual([]);
   });
 });

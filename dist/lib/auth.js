@@ -1,5 +1,5 @@
 import open from "open";
-import chalk from "chalk";
+import { isJSONMode } from "./format.js";
 import { loadConfig, saveConfig, } from "./config.js";
 /**
  * The env var carrying a token or a `liz_` API key. LIZARD_TOKEN is the
@@ -96,14 +96,13 @@ function isExpired(creds) {
 /**
  * Ensure the user is authenticated.
  *
- * On first call with no credentials: creates a CLI auth session, saves it to
- * disk, opens the browser, prints the URL, and exits. The user authenticates
- * in the browser, then re-runs their command.
- *
- * On subsequent calls while a session is pending: checks once (no loop) if
- * the user has completed authentication. If yes, stores credentials and
- * returns them. If still pending, prints the URL and exits. If the session
- * expired, starts a fresh one.
+ * A token from the environment or a saved login that has not expired wins.
+ * Otherwise a session the browser already approved finishes here. Failing
+ * that, a person at a terminal signs in on the spot (pick GitHub or Google,
+ * the browser opens, the CLI waits) and the command carries on. Anything else
+ * (an agent, a pipe, --json) gets a NOT_AUTHENTICATED error whose body holds
+ * the sign-in links; once the user approves, the same command run again
+ * picks the session up.
  */
 export async function requireAuth() {
     const fromEnv = envToken();
@@ -113,56 +112,15 @@ export async function requireAuth() {
     const creds = loadCredentials();
     if (creds && !isExpired(creds))
         return creds;
-    // Check pending session before the TTY guard — completing auth doesn't need interactivity
-    const pending = loadPendingAuth();
-    if (pending) {
-        const { checkSession } = await import("../commands/login.js");
-        try {
-            const result = await checkSession(pending.sessionId, pending.sessionSecret);
-            if (result.status === "complete" && result.accessToken && result.user) {
-                return saveSessionLogin({ accessToken: result.accessToken, user: result.user });
-            }
-            if (result.status === "expired") {
-                clearPendingAuth();
-                // Fall through to start a fresh session below
-            }
-            else {
-                // Still pending — user hasn't authenticated yet
-                printAuthPrompt(pending.authUrl);
-                process.exit(0);
-            }
-        }
-        catch {
-            // Network error — assume still pending, show URL
-            printAuthPrompt(pending.authUrl);
-            process.exit(0);
-        }
+    const signin = await import("./signin.js");
+    const resumed = await signin.resumePending();
+    if (resumed.kind === "complete")
+        return loadCredentials();
+    if (isTTY() && !isJSONMode()) {
+        await signin.signInInteractive();
+        return loadCredentials();
     }
-    // No credentials and no pending session — need to start a new auth flow
-    if (!isTTY()) {
-        const err = new Error(creds
-            ? "Session expired. Run `lizard login` again or set LIZARD_TOKEN / LIZARD_API_KEY."
-            : "Not authenticated. Set LIZARD_TOKEN (or LIZARD_API_KEY) or run `lizard login` first.");
-        err.code = "NOT_AUTHENTICATED";
-        throw err;
-    }
-    const { createSession } = await import("../commands/login.js");
-    const { getBaseURL } = await import("./api.js");
-    const session = await createSession();
-    const authUrl = `${getBaseURL()}/auth/cli?session=${session.sessionId}`;
-    savePendingAuth({
-        sessionId: session.sessionId,
-        sessionSecret: session.sessionSecret,
-        authUrl,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + session.expiresIn * 1000,
-    });
-    await openURL(authUrl);
-    printAuthPrompt(authUrl);
-    process.exit(0);
-}
-function printAuthPrompt(authUrl) {
-    process.stderr.write(`\nAuthenticate with Lizard:\n  ${chalk.cyan(authUrl)}\n\nThen run your command again.\n\n`);
+    throw await signin.loginRequiredError(resumed, Boolean(creds));
 }
 /** Open a URL in the default browser, or print it if headless. */
 export async function openURL(url) {
