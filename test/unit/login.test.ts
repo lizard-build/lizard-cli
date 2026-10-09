@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { Command } from "commander";
-import { registerLogin, accountState, accountInstruction, nextSteps } from "../../src/commands/login.js";
+import { Readable } from "node:stream";
+import { registerLogin, accountState, accountInstruction, nextSteps, readTokenFromStdin } from "../../src/commands/login.js";
 import { authUrlFor, providerFlag, pendingPayload } from "../../src/lib/signin.js";
 import type { Subscription } from "../../src/commands/billing.js";
 import { requireAuth } from "../../src/lib/auth.js";
@@ -355,5 +356,43 @@ describe("requireAuth without a terminal", () => {
     process.env.LIZARD_TOKEN = "tok";
     expect((await requireAuth()).accessToken).toBe("tok");
     expect(requested()).toEqual([]);
+  });
+});
+
+describe("lizard login with a token", () => {
+  test("--token works as before: checks it, saves it, prints the username", async () => {
+    routes({ "GET /api/auth/me": () => reply(200, me) });
+    await run(["login", "--token", "tok_abc"]);
+
+    expect(output()).toEqual({ status: "complete", username: "ada" });
+    const [, init] = fetchMock.mock.calls[0];
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok_abc");
+    expect(loadConfig().credentials).toMatchObject({ accessToken: "tok_abc", username: "ada", email: "ada@example.com" });
+  });
+
+  test("--token-stdin reads the piped token and does the same", async () => {
+    vi.spyOn(process, "stdin", "get").mockReturnValue(Readable.from(["  tok_piped\n"]) as any);
+    routes({ "GET /api/auth/me": () => reply(200, me) });
+    await run(["login", "--token-stdin"]);
+
+    expect(output()).toEqual({ status: "complete", username: "ada" });
+    expect(loadConfig().credentials?.accessToken).toBe("tok_piped");
+  });
+
+  test("a rejected token is not saved", async () => {
+    routes({ "GET /api/auth/me": () => reply(401, { error: "Unauthorized" }) });
+    await expect(run(["login", "--token", "bad"])).rejects.toThrow("Invalid token");
+    expect(loadConfig().credentials).toBeUndefined();
+  });
+
+  test("--token and --token-stdin together are refused", async () => {
+    await expect(run(["login", "--token", "a", "--token-stdin"])).rejects.toThrow(/not both/);
+    expect(requested()).toEqual([]);
+  });
+
+  test("stdin must be a pipe with something in it", async () => {
+    const tty = Object.assign(Readable.from([]), { isTTY: true });
+    await expect(readTokenFromStdin(tty)).rejects.toThrow(/piped token/);
+    await expect(readTokenFromStdin(Readable.from(["\n  "]))).rejects.toThrow(/nothing on stdin/);
   });
 });

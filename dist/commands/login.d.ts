@@ -10,4 +10,12 @@ export declare function nextSteps(linked: boolean): Array<{
     command: string;
     why: string;
 }>;
+/**
+ * The token piped into `--token-stdin`. A token in `--token` shows up in the
+ * process list and the shell history; one on stdin does not. A terminal on
+ * stdin would sit waiting for an end-of-file nobody knows to type, so refuse.
+ */
+export declare function readTokenFromStdin(stdin?: NodeJS.ReadableStream & {
+    isTTY?: boolean;
+}): Promise<string>;
 export declare function registerLogin(program: Command): void;

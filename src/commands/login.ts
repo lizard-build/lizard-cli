@@ -215,37 +215,58 @@ async function loginInteractive(flag?: AuthProvider): Promise<void> {
   p.outro("You're all set");
 }
 
+/** Validate a token, save it as this machine's login, and say who it belongs to. */
+async function loginWithToken(token: string): Promise<void> {
+  const res = await fetch(`${getBaseURL()}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Invalid token");
+  const user = (await res.json()) as any;
+  const expMs = jwtExpiryMs(token);
+  saveCredentials({
+    accessToken: token,
+    expiresAt: expMs ? new Date(expMs).toISOString() : undefined,
+    userId: user.id,
+    username: user.username,
+    email: user.email,
+    avatarUrl: user.avatarUrl,
+  });
+  if (isJSONMode()) {
+    printJSON({ status: "complete", username: user.username });
+  } else {
+    success(`Logged in as ${chalk.bold(user.username)}`);
+  }
+}
+
+/**
+ * The token piped into `--token-stdin`. A token in `--token` shows up in the
+ * process list and the shell history; one on stdin does not. A terminal on
+ * stdin would sit waiting for an end-of-file nobody knows to type, so refuse.
+ */
+export async function readTokenFromStdin(stdin: NodeJS.ReadableStream & { isTTY?: boolean } = process.stdin): Promise<string> {
+  if (stdin.isTTY) {
+    throw new Error('--token-stdin reads a piped token, e.g. printf \'%s\' "$LIZARD_TOKEN" | lizard login --token-stdin');
+  }
+  let raw = "";
+  for await (const chunk of stdin) raw += chunk.toString();
+  const token = raw.trim();
+  if (!token) throw new Error("--token-stdin got nothing on stdin.");
+  return token;
+}
+
 export function registerLogin(program: Command) {
   program
     .command("login")
     .description("Sign in to Lizard, then offer Pro if the account has no plan. Safe to re-run")
     .option("--token <token>", "Authenticate with an API token")
+    .option("--token-stdin", "Read the API token from stdin, which keeps it out of the process list and shell history")
     .option("--github", "Sign in with GitHub")
     .option("--google", "Sign in with Google")
     .action(async (opts) => {
       const flag = providerFlag(opts);
-      const token = opts.token;
-      if (token) {
-        // Direct token auth — validate it
-        const res = await fetch(`${getBaseURL()}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error("Invalid token");
-        const user = (await res.json()) as any;
-        const expMs = jwtExpiryMs(token);
-        saveCredentials({
-          accessToken: token,
-          expiresAt: expMs ? new Date(expMs).toISOString() : undefined,
-          userId: user.id,
-          username: user.username,
-          email: user.email,
-          avatarUrl: user.avatarUrl,
-        });
-        if (isJSONMode()) {
-          printJSON({ status: "complete", username: user.username });
-        } else {
-          success(`Logged in as ${chalk.bold(user.username)}`);
-        }
+      if (opts.token && opts.tokenStdin) throw new Error("Pass --token or --token-stdin, not both.");
+      if (opts.token || opts.tokenStdin) {
+        await loginWithToken(opts.token ?? (await readTokenFromStdin()));
         return;
       }
 
