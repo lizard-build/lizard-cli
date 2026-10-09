@@ -284,10 +284,12 @@ Persistent volumes for sandboxes. A volume's name is its key within the project;
 ```
 lizard volume create <name> [--size <gb>] [--region <code>]   # default 5 GB; region must match the sandbox's
 lizard volume list --json                                     # name, sizeGb, status, attachedTo
+lizard volume resize <name> --size <gb>                       # grow in place
 lizard volume rm <name> [-y]                                  # refused while attached; delete the sandbox first
 lizard sandbox create --volume <name>                         # attach at create time
 ```
 
+`volume resize` is online: an attached sandbox keeps running, and its `/workspace` shows the new size right away. A volume grown while detached gets the new size when a sandbox next mounts it. Firecracker volumes (the default) only grow; asking for less fails with `volume_shrink_unsupported`. A Kubernetes volume can also shrink if at least 10% of the new size stays free (`volume_too_full_to_shrink` otherwise). The size limit (`volume_too_large`) and the workspace's volume quota apply as at create. `The volume is not ready` (HTTP 409) right after create means retry in a few seconds.
 
 ## Managed addons
 
