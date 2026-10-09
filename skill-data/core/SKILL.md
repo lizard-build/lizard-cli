@@ -194,7 +194,7 @@ Default to service-scope. `--global` puts the value into `process.env` of every 
 Rules:
 
 - Check first: `lizard secrets list` (+ `--global`) before set/update — avoid creating a duplicate or shadowing an existing key (service scope wins over global; see [Precedence](#precedence-last-writer-wins)).
-- Default — service-scope: `lizard secrets set KEY=v --service <svc>` per consumer. For addon DSNs, bind on each consumer with `lizard secrets set DATABASE_URL='${{postgres.DATABASE_URL}}' --service <svc>` (no separate `env` command — refs are interpolated at deploy time wherever they appear) — rotation still happens once on the addon, every reference updates.
+- Default — service-scope: `lizard secrets set KEY=v --service <svc>` per consumer. For addon DSNs, prefer a private reference when the consumer can reach it: `lizard secrets set DATABASE_URL='${{postgres.DATABASE_PRIVATE_URL}}' --service <svc>` (no separate `env` command — refs are interpolated at deploy time wherever they appear) — rotation still happens once on the addon, every reference updates.
 - `--global` only for non-secrets and provably-public values: `LOG_LEVEL`, `NODE_ENV`, feature flags, frontend `SENTRY_DSN`. If unsure whether a value is a secret, treat it as one. A compromised service reads its own env; broader scope = more credentials exposed for no reason.
 
 ### Applying an env change
@@ -291,9 +291,9 @@ lizard sandbox create --volume <name>                         # attach at create
 
 ## Managed addons
 
-Provision with `lizard add <type>`. Each addon exposes a fixed env-var set; reference by name from a consumer service via `${{<addon-name>.KEY}}`. The first addon of a given type gets the bare type as its name (so `${{postgres.DATABASE_URL}}` works out of the box); subsequent ones get `{type}-{adjective}-{noun}` like `postgres-autumn-bear`. There's no type-alias fallback — a ref must use the addon's actual name. Once written, refs are stored ID-based, so renaming the addon later does not break existing consumers.
+Provision with `lizard add <type>`. Each addon exposes a fixed env-var set; reference by name from a consumer service via `${{<addon-name>.KEY}}`. The first addon of a given type gets the bare type as its name (so use `postgres` in the reference for the first Managed Postgres instance); subsequent ones get `{type}-{adjective}-{noun}` like `postgres-autumn-bear`. There's no type-alias fallback — a ref must use the addon's actual name. Once written, refs are stored ID-based, so renaming the addon later does not break existing consumers.
 
-- `postgres` — `DATABASE_URL`, `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PASSWORD`.
+- `postgres` — two connection URLs: prefer `DATABASE_PRIVATE_URL` when available and reachable within the same project and region (no ingress/egress charges); use `DATABASE_URL` for public access, such as local clients or external CI (network charges may apply). Also exposes `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PASSWORD`.
 - `redis` — `REDIS_URL`.
 - `s3` — `S3_ENDPOINT`, `S3_DEFAULT_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`. Auto-creates a public-read bucket named `default`; objects in any public bucket are served without auth two ways: the gateway URL the dashboard shows, `https://s3-<region>.onlizard.com/<addonId>/<bucket>/<key>`, or the platform proxy `<dashboard-host>/api/s3/<addonId>/public/<bucket>/<key>` (the host `lizard open` launches; long-lived immutable cache headers). For AWS SDK use, set `forcePathStyle: true`. ACL flips aren't on the CLI yet — point users at the dashboard. To push a local file into a bucket directly (no AWS SDK needed), use `lizard s3 upload <file> [--addon <name>] [--bucket <name>] [--key <key>] [--content-type <type>]` — auto-resolves the project's only S3 addon and bucket `default` if omitted; prints `{key, etag, size, url}`. `lizard s3 list|ls [--bucket <name>] [--prefix <p>]` lists objects in a bucket.
 
@@ -303,7 +303,7 @@ Multi-step requests follow natural chains. Return one unified response, don't fa
 
 - First deploy from git — pick action via [Setup decision flow](#setup-decision-flow) → `lizard add -r owner/repo` → stream build → surface URL.
 - First deploy from local code — Setup decision flow → `lizard up` → surface URL.
-- Add a managed database to an existing service — `lizard add postgres` → tell the user to reference `${{postgres.DATABASE_URL}}` in their service env → `redeploy` only if they need to consume it right away.
+- Add a managed database to an existing service — `lizard add postgres` → bind the consumer's `DATABASE_URL` to the private or public reference as described above → `redeploy` only if they need to consume it right away.
 - Add object storage to a service — `lizard add s3` → reference `${{s3.S3_ENDPOINT}}`, `${{s3.S3_DEFAULT_BUCKET}}`, `${{s3.S3_ACCESS_KEY_ID}}`, `${{s3.S3_SECRET_ACCESS_KEY}}`, `${{s3.S3_REGION}}` from the consumer service. Anything uploaded to the `default` bucket is publicly served at `<dashboard-host>/api/s3/<addonId>/public/default/<key>` with no extra setup. See [Managed addons](#managed-addons).
 - Wire a fresh git source on an existing service — `service set --set sourceType=github --set repoUrl=… --set branch=…` → `redeploy`.
 - Fix a failed build — `logs --build` → diagnose → fix project (user's repo) OR adjust `buildCommand` / `startCommand` via `service set` → `redeploy` → `logs` to verify.
