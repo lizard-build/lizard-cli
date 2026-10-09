@@ -44,6 +44,9 @@ function run(args: string[], extra: { cwd?: string; env?: Record<string, string>
       // Belt-and-suspenders: even if a leaked LIZARD_TOKEN sits in the
       // parent env, drop it so unauth tests can't pass by accident.
       LIZARD_TOKEN: "",
+      // Signed-out commands start a browser sign-in session for the links in
+      // their error. Point them at a closed port so the suite stays offline.
+      LIZARD_API_URL: "http://127.0.0.1:9",
       ...(extra.env ?? {}),
     },
   });

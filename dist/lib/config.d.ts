@@ -27,6 +27,8 @@ export interface PendingAuth {
     sessionSecret: string;
     authUrl: string;
     createdAt: number;
+    /** When the platform drops the session. Older CLIs did not save it. */
+    expiresAt?: number;
 }
 export interface Config {
     credentials?: Credentials;

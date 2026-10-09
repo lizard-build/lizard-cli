@@ -47,6 +47,11 @@ lizard init
 lizard up
 ```
 
+`lizard login` signs you in and offers Pro if the account has no plan. The
+install script runs it for you, and any command that needs an account signs
+you in on the spot. On a server or in CI, set `LIZARD_TOKEN`, or save a token
+with `printf '%s' "$TOKEN" | lizard login --token-stdin`.
+
 `lizard up` uploads the code, builds it and returns a live URL on onlizard.com.
 Add managed data services in one command:
 

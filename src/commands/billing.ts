@@ -119,7 +119,7 @@ function fmtDate(ms: number): string {
   return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function daysLeft(endMs: number, now = Date.now()): string {
+export function daysLeft(endMs: number, now = Date.now()): string {
   const days = Math.max(0, Math.ceil((endMs - now) / 86_400_000));
   return days === 1 ? "1 day left" : `${days} days left`;
 }

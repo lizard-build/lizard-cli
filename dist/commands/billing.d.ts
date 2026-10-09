@@ -61,6 +61,7 @@ export interface PromoResult {
 }
 /** $19, $4.10: whole dollars without cents. */
 export declare function usd(cents: number): string;
+export declare function daysLeft(endMs: number, now?: number): string;
 /** Lines that describe a plan, for people. Pure, so the tests can read it. */
 export declare function describeSubscription(sub: Subscription, now?: number): string[];
 /** One line for a redeemed promo code. Works with servers before and after Pro. */

@@ -1,30 +1,21 @@
 import { Command } from "commander";
-interface SessionResponse {
-    sessionId: string;
-    sessionSecret: string;
-    expiresIn: number;
-}
-export interface CheckResponse {
-    status: "pending" | "complete" | "expired";
-    accessToken?: string;
-    user?: {
-        id: string;
-        username: string;
-        email?: string;
-        avatarUrl?: string;
-    };
-}
-/** Create a CLI login session on the server */
-export declare function createSession(): Promise<SessionResponse>;
-/** Check once if the user has completed authentication (no polling loop) */
-export declare function checkSession(sessionId: string, sessionSecret: string): Promise<CheckResponse>;
+import { type Subscription } from "./billing.js";
+export type AccountState = "unknown" | "not_owner" | "enterprise" | "credits" | "past_due" | "trialing" | "active" | "trial_available" | "subscription_required" | "checkout_unavailable";
+/** What the account still needs, from `GET /api/billing/subscription` (null when it could not be read). */
+export declare function accountState(sub: Subscription | null): AccountState;
+/** What an agent should do about the plan. Spells out the don'ts, since an agent takes a link as a hint to open it. */
+export declare function accountInstruction(state: AccountState, sub: Subscription | null, now?: number): string;
+/** Commands an agent can run next. */
+export declare function nextSteps(linked: boolean): Array<{
+    command: string;
+    why: string;
+}>;
 /**
- * Start the login flow: creates a session, saves it to disk, surfaces the
- * auth URL, then exits. In human mode it opens the browser and prints the
- * URL; in JSON mode it emits the URL as JSON and never opens a browser. The
- * user authenticates and re-runs their original command — requireAuth will
- * pick up the pending session.
+ * The token piped into `--token-stdin`. A token in `--token` shows up in the
+ * process list and the shell history; one on stdin does not. A terminal on
+ * stdin would sit waiting for an end-of-file nobody knows to type, so refuse.
  */
-export declare function performLogin(): Promise<never>;
+export declare function readTokenFromStdin(stdin?: NodeJS.ReadableStream & {
+    isTTY?: boolean;
+}): Promise<string>;
 export declare function registerLogin(program: Command): void;
-export {};

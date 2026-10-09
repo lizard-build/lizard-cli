@@ -23,5 +23,17 @@ $VERSION = & $dest --version 2>$null | Select-Object -First 1
 Write-Host ""
 Write-Host "Lizard CLI v$VERSION installed" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Run: lizard login" -ForegroundColor Cyan
-Write-Host ""
+
+# Sign in right away, then set up what the account still needs: `lizard
+# login` offers Pro when there is no plan. A person at a terminal gets
+# questions and a browser. A coding agent, whose shell captures the output,
+# gets JSON with the sign-in links and what to do next, and the installer
+# returns at once. LIZARD_NO_LOGIN=1 skips this, as does CI.
+if ($env:LIZARD_NO_LOGIN -or $env:CI) {
+  Write-Host "  Run: lizard login" -ForegroundColor Cyan
+  Write-Host ""
+} elseif ([Console]::IsOutputRedirected -or [Console]::IsInputRedirected) {
+  & $dest login --json
+} else {
+  & $dest login
+}

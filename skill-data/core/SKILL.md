@@ -7,7 +7,7 @@ allowed-tools: Bash(lizard:*), Bash(~/.lizard/bin/lizard:*), Bash(which:*), Bash
 
 # Lizard platform
 
-Lizard is a unified cloud for apps, services, agents, and managed databases. All capabilities are exposed through the `lizard` CLI (npm package `@lizard-build/cli`). This skill teaches you to drive it. If `lizard` isn't on PATH, install it: `curl -fsSL https://lizard.build/install.sh | bash` on macOS and Linux (no Node.js or sudo needed; if `lizard` is still not found, call `~/.lizard/bin/lizard`), or `npm install -g @lizard-build/cli` on Windows.
+Lizard is a unified cloud for apps, services, agents, and managed databases. All capabilities are exposed through the `lizard` CLI (npm package `@lizard-build/cli`). This skill teaches you to drive it. If `lizard` isn't on PATH, install it: `curl -fsSL https://lizard.build/install.sh | bash` on macOS and Linux (no Node.js or sudo needed; if `lizard` is still not found, call `~/.lizard/bin/lizard`), or `npm install -g @lizard-build/cli` on Windows. The install script ends by running `lizard login`, so its output may already hold the sign-in links: see [Sign-in](#sign-in).
 
 If `$ARGUMENTS` is non-empty, treat it as the user's request and act on it. If empty, ask what they want to do on Lizard.
 
@@ -53,11 +53,20 @@ lizard <cmd> <sub> --help --json            # nested (e.g. `lizard service set -
 
 Returns `{ cli, version, command: { arguments, options, subcommands }, globalOptions, exitCodes }`.
 
+## Sign-in
+
+Every command that needs an account checks the sign-in first. Without one, in JSON mode it fails with exit code `2` and `error.code: "NOT_AUTHENTICATED"`, and `error.body.login` holds what you need to get the user signed in. `lizard login --json` prints the same object at the top level. It never waits and never opens a browser:
+
+- `status: "pending"`: `authUrls` holds one link per sign-in method (`github`, `google`), and `authUrl` the one to use when only one applies. Ask the user how they sign in to Lizard and give them that link as a clickable URL. Someone with an account must use the same method as before: another method opens a second, empty account unless both share a verified email. Once they say the browser shows "CLI authorized", run the same command again (`nextCommand` when present); it picks the sign-in up. A link lasts 5 minutes; the next run prints a new one. Follow `instruction`.
+- `status: "complete"` (from `lizard login` only): `username`, `email`, `source` (`browser`, `saved`, or `env` for `LIZARD_TOKEN` / `LIZARD_API_KEY`), `account` with the plan's `state` (`trial_available`, `subscription_required`, `trialing`, `active`, `past_due`, `credits`, `enterprise`, `not_owner`, `checkout_unavailable`, `unknown`), `billingUrl`, `payUrl` when a payment failed, and an `instruction` that says what to offer and what not to touch, plus `next` commands.
+
+Never start a plan (`lizard billing start`) unless the user agrees. `lizard login` is safe to re-run: a signed-in machine skips straight to the plan. In CI nothing can be opened, so set `LIZARD_TOKEN` or `LIZARD_API_KEY`, or save a token on the machine with `printf '%s' "$TOKEN" | lizard login --token-stdin`. `lizard login --token <token>` works too, but the token lands in the process list and the shell history.
+
 ## Exit codes
 
 - `0` success — continue
 - `1` generic error — inspect message, surface to user
-- `2` auth (401/403) — run `lizard login` yourself (safe from a tool call now: it creates a session, prints an authentication URL to stderr, and exits immediately — no browser poll, no blocking). Hand that URL to the user as a clickable link and ask them to authenticate in the browser; once they confirm, re-run the original command — the pending session is picked up automatically (if it still reports pending, they haven't finished — wait and retry). `! lizard login` in the user's own terminal still works too.
+- `2` auth (401/403) — not signed in: give the user the link from `error.body.login` and run the command again once they have signed in (see [Sign-in](#sign-in)). No links in the body (CI, or the platform could not be reached)? Run `lizard login --json`, or ask for `LIZARD_TOKEN`.
 - `3` not found (404) — wrong name / resource gone; verify with `lizard project list` / `lizard ps`
 - `4` timeout — retry or report
 - `5` cancelled by user — stop
