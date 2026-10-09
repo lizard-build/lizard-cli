@@ -209,11 +209,11 @@ Rules:
 
 | Size | vCPU | RAM | Price |
 |---|---|---|---|
-| `small` | 2 | 4 GB | $0.009/h |
-| `medium` (default) | 4 | 8 GB | $0.018/h |
-| `large` | 8 | 16 GB | $0.036/h |
+| `small` | 2 | 4 GB | $0.018/h |
+| `medium` (default) | 4 | 8 GB | $0.036/h |
+| `large` | 8 | 16 GB | $0.072/h |
 
-Prices are per hour, billed per second while the sandbox is alive, flat by size: measured CPU/RAM is not charged and sandbox egress is free. Attached volumes bill separately. `--size` cannot be combined with `--snapshot`: a private snapshot runs on the machine it was captured on and bills by measured usage.
+Prices are per hour from 2026-11-01 (half that until then), billed per second while the sandbox is alive, flat by size: measured CPU/RAM is not charged and sandbox egress is free. Attached volumes bill separately. `--size` cannot be combined with `--snapshot`: a private snapshot runs on the machine it was captured on and bills by measured usage.
 
 ## Sandboxes: volumes
 

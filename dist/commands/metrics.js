@@ -312,7 +312,9 @@ async function fetchPeriodUsage(projectId, workspaceId) {
     const egressGb = (mine.egressBytes ?? 0) / 1e9;
     const egressCost = egressGb * prices.egressPerGb;
     const objCost = ((mine.objectStorageGbSeconds ?? 0) / OBJECT_MONTH_SECONDS) * (prices.objectStoragePerGbMonth ?? 0);
-    const sandboxCost = (mine.sandboxUnitSeconds ?? 0) * (prices.sandboxUnitPerSec ?? 0);
+    // The server prices each unit by when it ran (sandbox prices doubled on 2026-11-01), so
+    // prefer its number; units x today's price is only the fallback for older servers.
+    const sandboxCost = mine.sandboxCostUsd ?? (mine.sandboxUnitSeconds ?? 0) * (prices.sandboxUnitPerSec ?? 0);
     const allRows = [
         {
             key: "sandboxes",

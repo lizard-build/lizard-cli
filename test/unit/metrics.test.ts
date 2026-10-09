@@ -306,6 +306,24 @@ describe("metrics --cost", () => {
     expect(result.currentPeriod.totalCostUsd).toBeCloseTo(0.0432);
   });
 
+  it("uses the server's sandbox cost, priced by when each unit ran", async () => {
+    vi.mocked(isJSONMode).mockReturnValue(true);
+    mockCost({ plan: "payg", status: "none" });
+    const original = vi.mocked(api.get).getMockImplementation()!;
+    vi.mocked(api.get).mockImplementation(async (path) => {
+      // 7200 unit-seconds across 2026-11-01: half at $0.0000025, half at $0.000005.
+      if (String(path).startsWith("/api/billing/summary")) return {
+        ...summary,
+        prices: { ...prices, sandboxUnitPerSec: 0.000005 },
+        projects: [{ ...summary.projects[0], sandboxUnitSeconds: 7200, sandboxCostUsd: 0.027 }],
+      };
+      return original(path);
+    });
+    await run(["--cost"]);
+    const result = vi.mocked(printJSON).mock.calls[0][0] as { currentPeriod: { rows: { key: string; costUsd: number }[] } };
+    expect(result.currentPeriod.rows.find((r) => r.key === "sandboxes")?.costUsd).toBeCloseTo(0.027);
+  });
+
   it("shows Pro credits used of $19 and the overage", async () => {
     vi.mocked(isJSONMode).mockReturnValue(false);
     const lines: string[] = [];
