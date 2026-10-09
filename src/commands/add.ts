@@ -118,7 +118,7 @@ async function resolveProject(
   if (link?.projectId) return link.projectId;
 
   throw new Error(
-    "No project linked to this directory. Pass -p <project-name> or run `lizard init`.",
+    "No project linked to this directory. Run `lizard link --project <name>` to use an existing project, or `lizard init --name <name>` to create one.",
   );
 }
 
@@ -173,7 +173,7 @@ export function registerAdd(program: Command) {
       (val: string, prev: string[]) => [...prev, val],
       [] as string[],
     )
-    .option("-n, --name <name>", "Name used in ${{<name>.KEY}} templates and shown in the dashboard. Renamable; refs stay stable.")
+    .option("-n, --name <name>", "Name used in ${{<name>.KEY}} templates and shown in the dashboard. Renaming it later breaks those refs.")
     .option("--instance-name <name>", "(deprecated) alias for --name")
     .option("-w, --workspace <ws>", "Disambiguate project lookup by workspace")
     .option("--region <code>", "Region to provision the addon/service in")

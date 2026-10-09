@@ -9,7 +9,7 @@ import * as http from "node:http";
 export function registerSSH(program) {
     program
         .command("ssh")
-        .description("Execute a command inside a running service container")
+        .description("Execute a command inside a running service container (disabled: the API answers 403 \"Shell access to services is disabled\"; for sandboxes use `lizard sandbox ssh`)")
         .argument("[cmd...]", "Command and args to run inside the container (required; pass after `--` to stop flag parsing, e.g. `-- ls -la /app`)")
         .option("-s, --service <id>", "Service name or ID")
         .option("-p, --project <id>", "Project name, slug, or ID")

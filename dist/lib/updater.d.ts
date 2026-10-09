@@ -1,4 +1,12 @@
-export declare const CURRENT_VERSION = "4.0.35";
+export declare const CURRENT_VERSION = "4.0.36";
+/**
+ * True when selfUpdate() has a release asset to swap in for this platform.
+ * False on Windows: a running .exe can't be replaced in place, so the
+ * PowerShell installer does the update there.
+ */
+export declare function canSelfUpdate(): boolean;
+/** The installer that puts the latest standalone binary over this one. */
+export declare function installerCommand(): string;
 /**
  * True only when running as the Bun-compiled standalone binary. Under
  * npm/node, `process.execPath` is the *node* executable — self-update would

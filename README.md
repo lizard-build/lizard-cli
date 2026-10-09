@@ -68,14 +68,14 @@ lizard ps         # list services
 lizard status     # show the linked workspace, project and service
 lizard logs       # stream runtime logs
 lizard metrics    # resource metrics (CPU, memory, network, disk); --cost for spend
-lizard billing    # plan, trial, credits used this month; start, cancel or resume Pro
+lizard billing    # plan, trial, usage this month; start, cancel or resume Pro
 lizard metrics --all # all services in the project, even with a linked service
 lizard scale      # scale replicas / CPU / memory / storage
 lizard secrets    # manage secrets
 lizard domain     # manage domains
 lizard redeploy   # rebuild and redeploy from the current source
 lizard run        # run a command locally with project and service secrets injected
-lizard ssh        # run one command inside a service container
+lizard ssh        # disabled for services (403); use `lizard sandbox ssh` for sandboxes
 lizard sandbox    # create and manage Sandboxes
 lizard sandbox create --size large # 8 vCPU / 16 GB; small, medium (default), large
 lizard sandbox desktop <id> --open # graphical desktop in the browser (sandbox create -t desktop)
@@ -88,13 +88,14 @@ lizard volume     # Persistent Volumes for Sandboxes (create / list / resize / r
 lizard skills     # agent guides, version-matched to the CLI
 ```
 
-`run` and `ssh` are a pair: `run` executes on your machine with the service's
-env injected, `ssh` executes inside the running container. Both take the command
-after `--`:
+`run` executes on your machine with the service's stored secrets injected; pass
+an addon (`-s postgres`) to get its real connection values. Shell access into
+services is off, so `lizard ssh` answers 403. To check a service's variables, read
+`lizard logs --build -s my-app` (it warns about every empty reference) and
+`lizard secrets list -s my-app --show`.
 
 ```bash
-lizard run -- npm run migrate
-lizard ssh -s my-app -- printenv
+lizard run -s postgres -- npm run migrate
 ```
 
 Run `lizard --help` for the full list.
@@ -102,15 +103,16 @@ Run `lizard --help` for the full list.
 ## Billing
 
 ```bash
-lizard billing          # plan, trial, credits used this month, next charge
+lizard billing          # plan, trial, usage this month, next charge
 lizard billing start    # start the Pro trial in Stripe Checkout
 lizard billing promo X  # redeem a promo code for a longer trial
 ```
 
-Pro costs $19/month, taxes included, with $19 in credits each month. Usage
-above that is pay as you go. A new account starts with a 7-day trial with $5 in
-credits. When the account has no plan, commands that create something fail
-with the reason and the link to open next.
+Pro costs $19/month, taxes included, with $19 of usage each month. Usage
+above that is pay as you go. A new account starts with no plan; the 7-day trial
+needs a card, includes $5 of usage and charges nothing until it ends. When the
+account has no plan, commands that create something fail with the reason and
+the link to open next.
 
 ## For agents and scripts
 

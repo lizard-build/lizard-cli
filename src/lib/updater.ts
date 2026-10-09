@@ -23,6 +23,22 @@ function getBinaryName(): string | null {
 }
 
 /**
+ * True when selfUpdate() has a release asset to swap in for this platform.
+ * False on Windows: a running .exe can't be replaced in place, so the
+ * PowerShell installer does the update there.
+ */
+export function canSelfUpdate(): boolean {
+  return getBinaryName() !== null;
+}
+
+/** The installer that puts the latest standalone binary over this one. */
+export function installerCommand(): string {
+  return process.platform === "win32"
+    ? "irm https://lizard.build/api/cli/install.ps1 | iex"
+    : "curl -fsSL https://lizard.build/install.sh | bash";
+}
+
+/**
  * True only when running as the Bun-compiled standalone binary. Under
  * npm/node, `process.execPath` is the *node* executable — self-update would
  * overwrite the user's Node.js install with the lizard binary.

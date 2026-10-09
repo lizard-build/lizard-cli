@@ -1,7 +1,14 @@
 import chalk from "chalk";
 import { Command } from "commander";
 import { info, success, isJSONMode, printJSON } from "../lib/format.js";
-import { CURRENT_VERSION, getLatestVersion, selfUpdate, isStandaloneBinary } from "../lib/updater.js";
+import {
+  CURRENT_VERSION,
+  canSelfUpdate,
+  getLatestVersion,
+  installerCommand,
+  isStandaloneBinary,
+  selfUpdate,
+} from "../lib/updater.js";
 
 export function registerUpgrade(program: Command) {
   program
@@ -87,21 +94,40 @@ export function registerUpgrade(program: Command) {
         return;
       }
 
+      // No binary to swap in (the Windows build): say so and fail, instead of
+      // reporting an upgrade that never happened.
+      if (!canSelfUpdate()) {
+        throw notInstalled(`v${latest} is available, but this copy of Lizard CLI can't update itself.`);
+      }
+
       info(`Upgrading v${CURRENT_VERSION} → ${chalk.green("v" + latest)}...`);
 
+      let upgraded: boolean;
       try {
-        await selfUpdate((msg) => info(chalk.dim(msg)));
-        if (isJSONMode()) {
-          printJSON({
-            previousVersion: CURRENT_VERSION,
-            latestVersion: latest,
-            upgraded: true,
-          });
-        } else {
-          success(`Upgraded to v${latest}`);
-        }
+        upgraded = await selfUpdate((msg) => info(chalk.dim(msg)));
       } catch (e: any) {
         throw new Error(`Upgrade failed: ${e.message}`);
       }
+      if (!upgraded) {
+        throw notInstalled(`Nothing was replaced: v${CURRENT_VERSION} is still installed.`);
+      }
+      if (isJSONMode()) {
+        printJSON({
+          previousVersion: CURRENT_VERSION,
+          latestVersion: latest,
+          upgraded: true,
+        });
+      } else {
+        success(`Upgraded to v${latest}`);
+      }
     });
+}
+
+/** Exit 1 with the installer command that does the upgrade instead. */
+function notInstalled(reason: string): Error {
+  const shell = process.platform === "win32" ? " in PowerShell" : "";
+  return Object.assign(
+    new Error(`${reason} Re-run the installer${shell}:\n  ${installerCommand()}`),
+    { code: "UPGRADE_NOT_INSTALLED" },
+  );
 }

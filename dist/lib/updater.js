@@ -4,7 +4,7 @@ import { Readable } from "node:stream";
 import { join, dirname } from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
-export const CURRENT_VERSION = "4.0.35";
+export const CURRENT_VERSION = "4.0.36";
 const RELEASES_API = "https://api.github.com/repos/lizard-build/lizard-cli/releases/latest";
 const RELEASE_BASE = "https://github.com/lizard-build/lizard-cli/releases/latest/download";
 /** Minimum gap between background update checks. */
@@ -21,6 +21,20 @@ function getBinaryName() {
     if (os === "linux" && arch === "arm64")
         return "lizard-linux-arm64";
     return null;
+}
+/**
+ * True when selfUpdate() has a release asset to swap in for this platform.
+ * False on Windows: a running .exe can't be replaced in place, so the
+ * PowerShell installer does the update there.
+ */
+export function canSelfUpdate() {
+    return getBinaryName() !== null;
+}
+/** The installer that puts the latest standalone binary over this one. */
+export function installerCommand() {
+    return process.platform === "win32"
+        ? "irm https://lizard.build/api/cli/install.ps1 | iex"
+        : "curl -fsSL https://lizard.build/install.sh | bash";
 }
 /**
  * True only when running as the Bun-compiled standalone binary. Under

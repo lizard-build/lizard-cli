@@ -55,7 +55,7 @@ export function registerGit(program) {
         spinner.stop();
         if (newStatus.installed) {
             success("GitHub connected! You can now deploy private repositories.");
-            info(chalk.dim("  Run `lizard deploy` to deploy your project."));
+            info(chalk.dim("  Run `lizard add -r owner/repo` to deploy a repository, or `lizard redeploy` if a service already tracks it."));
         }
         else {
             fail("GitHub App not detected. Please try again or connect via the dashboard.");

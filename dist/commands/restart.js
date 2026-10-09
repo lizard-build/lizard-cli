@@ -54,6 +54,8 @@ export function registerRestart(program) {
                 throw new Error("Multiple apps — provide an app name or ID, or run interactively");
             }
         }
+        // `ps` takes no service argument: it lists every service in the project.
+        const psHint = `lizard ps${opts.project ? ` --project ${opts.project}` : ""}`;
         const timeoutSeconds = parseInt(opts.timeout, 10);
         if (!(timeoutSeconds > 0)) {
             fail(`--timeout must be a positive number of seconds, got ${JSON.stringify(opts.timeout)}`, 1, "INVALID_ARGUMENT");
@@ -99,7 +101,7 @@ export function registerRestart(program) {
             }
             else {
                 success("Restart started");
-                info(chalk.dim(`  Check status: lizard ps ${id}`));
+                info(chalk.dim(`  Check status: ${psHint}`));
             }
             return;
         }
@@ -130,7 +132,7 @@ export function registerRestart(program) {
             error("Restart failed");
         }
         else {
-            info(chalk.dim("Still restarting — check status with: lizard ps " + id));
+            info(chalk.dim(`Still restarting — check status with: ${psHint}`));
         }
     });
 }
