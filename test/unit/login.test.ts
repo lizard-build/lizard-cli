@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Command } from "commander";
 import { Readable } from "node:stream";
-import { registerLogin, accountState, accountInstruction, nextSteps, readTokenFromStdin } from "../../src/commands/login.js";
+import { registerLogin, accountState, accountInstruction, nextSteps, nextStepsNote, readTokenFromStdin } from "../../src/commands/login.js";
 import { authUrlFor, providerFlag, pendingPayload } from "../../src/lib/signin.js";
 import type { Subscription } from "../../src/commands/billing.js";
 import { requireAuth } from "../../src/lib/auth.js";
@@ -184,9 +184,22 @@ describe("account state", () => {
     );
   });
 
+  test("the closing note leads with sandboxes, aligned in two columns", () => {
+    const plain = (t: string) => t.replace(/\x1b\[[0-9;]*m/g, "");
+    expect(plain(nextStepsNote(false)).split("\n")).toEqual([
+      "lizard init             Create a project and link this folder",
+      "lizard sandbox create   Start a sandbox in it",
+      "lizard up               Or deploy this folder",
+    ]);
+    expect(plain(nextStepsNote(true)).split("\n")).toEqual([
+      "lizard sandbox create   Start a sandbox in this project",
+      "lizard up               Or deploy this folder",
+    ]);
+  });
+
   test("an unlinked folder gets lizard init before lizard up", () => {
-    expect(nextSteps(false).map((s) => s.command)).toEqual(["lizard skills get core", "lizard init", "lizard up"]);
-    expect(nextSteps(true).map((s) => s.command)).toEqual(["lizard skills get core", "lizard up"]);
+    expect(nextSteps(false).map((s) => s.command)).toEqual(["lizard skills get core", "lizard init", "lizard sandbox create", "lizard up"]);
+    expect(nextSteps(true).map((s) => s.command)).toEqual(["lizard skills get core", "lizard sandbox create", "lizard up"]);
   });
 });
 

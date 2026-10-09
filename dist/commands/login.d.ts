@@ -5,11 +5,13 @@ export type AccountState = "unknown" | "not_owner" | "enterprise" | "credits" | 
 export declare function accountState(sub: Subscription | null): AccountState;
 /** What an agent should do about the plan. Spells out the don'ts, since an agent takes a link as a hint to open it. */
 export declare function accountInstruction(state: AccountState, sub: Subscription | null, now?: number): string;
-/** Commands an agent can run next. */
+/** Commands an agent can run next. Sandboxes first; both they and deploys live in a project. */
 export declare function nextSteps(linked: boolean): Array<{
     command: string;
     why: string;
 }>;
+/** The same steps for a person, as aligned lines for the closing note. */
+export declare function nextStepsNote(linked: boolean): string;
 /**
  * The token piped into `--token-stdin`. A token in `--token` shows up in the
  * process list and the shell history; one on stdin does not. A terminal on

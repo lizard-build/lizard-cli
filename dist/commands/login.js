@@ -34,7 +34,7 @@ export function accountInstruction(state, sub, now = Date.now()) {
             return "Could not read this account's plan, so nothing about it is known. Do NOT start billing. The user is signed in: carry on with their task.";
         case "not_owner":
             return ("This account deploys on its workspace owner's plan. Do NOT start or change a subscription: only the owner can." +
-                (sub?.plan === "none" ? " Deploys stay blocked until the owner starts Pro." : ""));
+                (sub?.plan === "none" ? " Sandboxes and deploys stay blocked until the owner starts Pro." : ""));
         case "enterprise":
             return "Enterprise plan, invoiced monthly. Nothing to set up.";
         case "credits":
@@ -50,25 +50,41 @@ export function accountInstruction(state, sub, now = Date.now()) {
         case "active":
             return "Pro is active. Do NOT open billing or start a subscription.";
         case "trial_available":
-            return (`No plan yet, and deploys need one. Offer the user the ${sub?.trial.days}-day Pro trial with ${usd(sub?.trial.creditCents ?? 0)} in credits: ` +
+            return (`No plan yet, and sandboxes and deploys need one. Offer the user the ${sub?.trial.days}-day Pro trial with ${usd(sub?.trial.creditCents ?? 0)} in credits: ` +
                 `no charge today, then ${price}/month, taxes included. ${start}`);
         case "subscription_required":
-            return ("No plan yet, and deploys need one. This account has had its trial, so do NOT promise one. " +
+            return ("No plan yet, and sandboxes and deploys need one. This account has had its trial, so do NOT promise one. " +
                 `Pro is ${price}/month, taxes included, with ${usd(sub?.includedCents ?? 1900)} in credits each month. ${start}`);
         case "checkout_unavailable":
             return "No plan, and Pro is not open for this account yet. Do NOT try to start billing.";
     }
 }
-/** Commands an agent can run next. */
+/** Commands an agent can run next. Sandboxes first; both they and deploys live in a project. */
 export function nextSteps(linked) {
     return [
         {
             command: "lizard skills get core",
             why: "The guide to every command, matched to this CLI version. Read it before running others.",
         },
-        ...(linked ? [] : [{ command: "lizard init", why: "Create a project and link the current folder to it." }]),
-        { command: "lizard up", why: linked ? "Deploy the linked folder." : "Deploy the folder once it is linked." },
+        ...(linked
+            ? []
+            : [{ command: "lizard init", why: "Create a project and link the current folder to it. Sandboxes and deploys both need one." }]),
+        {
+            command: "lizard sandbox create",
+            why: "Start a sandbox in the project, then run commands in it with `lizard sandbox exec <id> -- <cmd>`.",
+        },
+        { command: "lizard up", why: "Or deploy the linked folder." },
     ];
+}
+/** The same steps for a person, as aligned lines for the closing note. */
+export function nextStepsNote(linked) {
+    const rows = [
+        ...(linked ? [] : [["lizard init", "Create a project and link this folder"]]),
+        ["lizard sandbox create", linked ? "Start a sandbox in this project" : "Start a sandbox in it"],
+        ["lizard up", "Or deploy this folder"],
+    ];
+    const width = Math.max(...rows.map(([cmd]) => cmd.length)) + 3;
+    return rows.map(([cmd, why]) => chalk.cyan(cmd) + " ".repeat(width - cmd.length) + why).join("\n");
 }
 async function fetchSubscription() {
     return api.get("/api/billing/subscription").catch(() => null);
@@ -124,7 +140,7 @@ async function offerPlan(canAsk) {
     const offer = trial
         ? `Pro trial: ${sub.trial.days} days with ${usd(sub.trial.creditCents ?? 0)} in credits. No charge today, then ${usd(sub.priceCents)}/month, taxes included.`
         : `Pro: ${usd(sub.priceCents)}/month, taxes included, with ${usd(sub.includedCents)} in credits each month.`;
-    p.log.info(`No plan yet. Deploys need one.\n${offer}`);
+    p.log.info(`No plan yet. Sandboxes and deploys need one.\n${offer}`);
     const go = canAsk ? await p.confirm({ message: trial ? "Start the trial now?" : "Start Pro now?" }) : false;
     if (p.isCancel(go) || !go) {
         p.log.message(`Start it later: ${chalk.cyan("lizard billing start")}`);
@@ -157,10 +173,7 @@ async function loginInteractive(flag) {
         await signInInteractive(flag);
     }
     await offerPlan(canAsk);
-    const linked = Boolean(getProjectLink());
-    p.note((linked
-        ? [`${chalk.cyan("lizard up")}     Deploy this folder`]
-        : [`${chalk.cyan("lizard init")}   Create a project and link this folder`, `${chalk.cyan("lizard up")}     Deploy it`]).join("\n"), "Next");
+    p.note(nextStepsNote(Boolean(getProjectLink())), "Next");
     p.outro("You're all set");
 }
 /** Validate a token, save it as this machine's login, and say who it belongs to. */
