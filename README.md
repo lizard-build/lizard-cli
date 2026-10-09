@@ -79,7 +79,7 @@ lizard sandbox ssh <id>            # interactive shell in any running sandbox (n
 lizard agents                      # coding agents: connected credentials and which agents can run
 lizard agents login chatgpt        # ChatGPT subscription (device code); `agents add anthropic|openai|openrouter|claude …` for keys/tokens
 lizard sandbox prompt <id> "…"     # run Codex / Claude Code / pi / OpenCode / Prime in the sandbox, streaming (--agent)
-lizard volume     # Persistent Volumes for Sandboxes (create / list / rm)
+lizard volume     # Persistent Volumes for Sandboxes (create / list / resize / rm)
 lizard skills     # agent guides, version-matched to the CLI
 ```
 
