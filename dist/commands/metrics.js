@@ -312,7 +312,16 @@ async function fetchPeriodUsage(projectId, workspaceId) {
     const egressGb = (mine.egressBytes ?? 0) / 1e9;
     const egressCost = egressGb * prices.egressPerGb;
     const objCost = ((mine.objectStorageGbSeconds ?? 0) / OBJECT_MONTH_SECONDS) * (prices.objectStoragePerGbMonth ?? 0);
+    const sandboxCost = (mine.sandboxUnitSeconds ?? 0) * (prices.sandboxUnitPerSec ?? 0);
     const allRows = [
+        {
+            key: "sandboxes",
+            label: "Sandboxes",
+            usage: (mine.sandboxUnitSeconds ?? 0) / 3600,
+            usageUnit: "unit·hr",
+            costUsd: sandboxCost,
+            estimatedUsd: sandboxCost * linearFactor,
+        },
         {
             key: "cpu",
             label: "CPU",

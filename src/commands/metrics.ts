@@ -380,6 +380,7 @@ interface UsagePrices {
   storagePerGbPerSec: number;
   objectStoragePerGbMonth?: number;
   egressPerGb: number;
+  sandboxUnitPerSec?: number;
 }
 
 interface ProjectUsageSummary {
@@ -388,6 +389,7 @@ interface ProjectUsageSummary {
   memoryGbSeconds: number;
   storageGbSeconds: number;
   objectStorageGbSeconds?: number;
+  sandboxUnitSeconds?: number;
   egressBytes: number;
   costUsd: number;
 }
@@ -401,7 +403,7 @@ interface BillingSummary {
 }
 
 interface UsageRow {
-  key: "cpu" | "memory" | "volumes" | "egress" | "object";
+  key: "cpu" | "memory" | "volumes" | "egress" | "object" | "sandboxes";
   label: string;
   usage: number;
   usageUnit: string;
@@ -467,7 +469,17 @@ async function fetchPeriodUsage(projectId: string, workspaceId: string): Promise
   const objCost =
     ((mine.objectStorageGbSeconds ?? 0) / OBJECT_MONTH_SECONDS) * (prices.objectStoragePerGbMonth ?? 0);
 
+  const sandboxCost = (mine.sandboxUnitSeconds ?? 0) * (prices.sandboxUnitPerSec ?? 0);
+
   const allRows: UsageRow[] = [
+    {
+      key: "sandboxes",
+      label: "Sandboxes",
+      usage: (mine.sandboxUnitSeconds ?? 0) / 3600,
+      usageUnit: "unit·hr",
+      costUsd: sandboxCost,
+      estimatedUsd: sandboxCost * linearFactor,
+    },
     {
       key: "cpu",
       label: "CPU",
