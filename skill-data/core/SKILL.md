@@ -78,7 +78,15 @@ When the user wants to deploy or set up something new, work out the right action
 1. `lizard status --json` in cwd.
 2. Linked to a project? → add a service in that project: `lizard add -r owner/repo` (git source) or `lizard add -s <name>` (empty). Do not create a new project unless the user explicitly says so.
 3. Not linked but parent dir is linked? → likely a monorepo sub-app. Add a service in the parent's project and set `rootDirectory` to the cwd subpath via `service set`.
-4. Neither linked? → check `lizard project list --json` for one matching the directory or repo name. Match → `lizard link --project <name> [--workspace <ws>]` (pass `--workspace` to disambiguate same-named projects across workspaces). No match → `lizard init --name <name>`.
+4. Neither linked? → check `lizard project list --json` for one matching the directory or repo name. Match → `lizard link --project <name> [--workspace <ws>]` (pass `--workspace` to disambiguate same-named projects across workspaces). No match → `lizard up` deploys into the [default project](#default-project); run `lizard init --name <name>` first only when the user wants a separate project.
+
+## Default project
+
+A command that works on a project takes it from `--project`, then from the folder's link, then falls back to the account's **default project**: the oldest live project in the personal workspace, which every account gets at sign-up (`<username>'s Project`). So `lizard sandbox create`, `lizard up`, `lizard logs` and the rest work in a folder that was never linked. They say so on stderr: `Project: <name> (your default)`.
+
+- `lizard sandbox create` with no project lets the platform pick the default; its JSON carries `projectId`, `projectName` and `projectDefaulted: true`.
+- `lizard up` links the unlinked folder to the default project first, then creates a service named after the folder, so the next `up` from that folder updates the same service. `lizard init --force` relinks it elsewhere.
+- No default project (every project deleted): the old `No project linked. Run lizard init or pass --project <id>.` error.
 
 Naming heuristic: app-style names (`my-api`, `worker`, `flappy-bird`) are service names. Use the repo or directory name for the project.
 
@@ -155,7 +163,7 @@ lizard up --json
 - Uploads cwd as a tarball (respects `.gitignore`), forces `sourceType=upload`.
 - Streams build logs over SSE; emits a final `{ event: "deployed", url }` on success (`{ event: "failed" }` on failure; `url` may be `null`).
 - Flags: `--project`, `--service`, `--region`, `--build-command`, `--start-command`, `--pre-deploy-command`, `--port`, `--detach`, `--ci`.
-- If cwd isn't linked, auto-runs `init` — interactive on a TTY. Headless (non-TTY) it does **not** auto-create a project: it errors out asking you to run `lizard init --name <project>` first (or pass `--project <project>` to `up`). This guards against a cwd typo silently spawning an empty project in CI. So for headless flows, link explicitly first.
+- If cwd isn't linked and no `--project` is given, it links the folder to the [default project](#default-project) and deploys there as a new service. `--project <name>` uses that project, or creates it if none matches. It never creates a project from the folder name on its own.
 - `lizard up` always switches the service to `sourceType=upload`. Do not use it to update a git-backed service — use `lizard redeploy` or push to the remote.
 
 ## Worker mode

@@ -186,20 +186,17 @@ describe("account state", () => {
 
   test("the closing note leads with sandboxes, aligned in two columns", () => {
     const plain = (t: string) => t.replace(/\x1b\[[0-9;]*m/g, "");
-    expect(plain(nextStepsNote(false)).split("\n")).toEqual([
-      "lizard init             Create a project and link this folder",
-      "lizard sandbox create   Start a sandbox in it",
-      "lizard up               Or deploy this folder",
-    ]);
-    expect(plain(nextStepsNote(true)).split("\n")).toEqual([
-      "lizard sandbox create   Start a sandbox in this project",
+    expect(plain(nextStepsNote()).split("\n")).toEqual([
+      "lizard sandbox create   Start a sandbox",
       "lizard up               Or deploy this folder",
     ]);
   });
 
-  test("an unlinked folder gets lizard init before lizard up", () => {
-    expect(nextSteps(false).map((s) => s.command)).toEqual(["lizard skills get core", "lizard init", "lizard sandbox create", "lizard up"]);
+  test("no lizard init needed: an unlinked folder uses the default project", () => {
+    expect(nextSteps(false).map((s) => s.command)).toEqual(["lizard skills get core", "lizard sandbox create", "lizard up"]);
+    expect(nextSteps(false)[1].why).toContain("default project");
     expect(nextSteps(true).map((s) => s.command)).toEqual(["lizard skills get core", "lizard sandbox create", "lizard up"]);
+    expect(nextSteps(true)[1].why).toContain("linked project");
   });
 });
 
@@ -239,7 +236,7 @@ describe("lizard login --json", () => {
     expect(out).toMatchObject({ status: "complete", username: "ada", email: "ada@example.com", source: "browser" });
     expect(out.account.state).toBe("trial_available");
     expect(out.account.billingUrl).toBe("https://lizard.build/profile/account-billing");
-    expect(out.next.map((s: { command: string }) => s.command)).toContain("lizard init");
+    expect(out.next.map((s: { command: string }) => s.command)).toContain("lizard sandbox create");
     expect(loadConfig().pendingAuth).toBeUndefined();
     expect(loadConfig().credentials?.username).toBe("ada");
   });

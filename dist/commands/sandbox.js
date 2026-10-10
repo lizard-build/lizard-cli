@@ -9,7 +9,7 @@ import open from "open";
 import { api, APIError, getBaseURL, getRawBytes, apiErrorFrom, clientHeaders, getRequestToken, withQuery, withScope } from "../lib/api.js";
 import { getToken } from "../lib/auth.js";
 import { resolveProjectScope } from "../lib/resolve.js";
-import { resolveProjectId } from "../lib/config.js";
+import { getProjectLink, resolveProjectId } from "../lib/config.js";
 import { resolveVolume } from "../lib/volume.js";
 import { sandboxShell } from "./sandbox-ssh.js";
 import { startVncTunnel, vncTarget } from "./sandbox-vnc.js";
@@ -87,7 +87,13 @@ export function registerSandbox(program) {
         // its workspaceId, which the create endpoint looks up itself anyway, overlapped
         // with auth so it costs the server nothing. Sending it bought nothing and cost the
         // client a round trip — 113ms of a 1083ms create measured from EU.
-        const projectId = await resolveProjectId(opts.project);
+        //
+        // Unlinked and no --project: send no project, and the platform puts the sandbox in
+        // the account's default project. Asking for that project first would cost every
+        // such create a round trip. A volume name is only unique within a project, so
+        // --volume still resolves one here.
+        const named = Boolean(opts.project || getProjectLink()?.projectId || opts.volume);
+        const projectId = named ? await resolveProjectId(opts.project) : undefined;
         const scope = { workspaceId: null };
         // Hand the volume to the create call instead of resolving it first.
         //
@@ -144,6 +150,10 @@ export function registerSandbox(program) {
             catch (e) {
                 // Only an id-shaped guess can be wrong this way, and only by 404. Anything
                 // else (409 already-attached, 400 wrong scope) is a real answer — rethrow it.
+                // An older platform, or a workspace without any project.
+                if (e instanceof APIError && e.code === "PROJECT_REQUIRED") {
+                    throw new Error("No project linked. Run `lizard init` or pass --project <id>.");
+                }
                 if (!volumeId || e?.status !== 404)
                     throw e;
                 const resolved = await resolveVolume(projectId, scope, opts.volume);
@@ -162,6 +172,9 @@ export function registerSandbox(program) {
             return;
         }
         success(`Sandbox ${chalk.bold(sandbox.id)} created`);
+        if (sandbox.projectDefaulted && sandbox.projectName) {
+            info(chalk.dim(`  Project: ${sandbox.projectName} (your default; pass --project for another)`));
+        }
         info(chalk.dim(`  Template: ${sandbox.template}  Region: ${sandbox.region}`));
         const machine = `${sandbox.cpus} vCPU / ${sandbox.memoryMb} MB`;
         info(chalk.dim(sandbox.size

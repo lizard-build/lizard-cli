@@ -44,6 +44,8 @@ export async function ensureLinked(opts: {
   workspaceFlag?: string;
   force?: boolean;
   relinkPrompt?: boolean;
+  /** Link an unlinked folder to the account's default project instead of asking (`lizard up`). */
+  useDefault?: boolean;
 } = {}): Promise<ProjectLink> {
   const existing = getProjectLink();
 
@@ -60,6 +62,25 @@ export async function ensureLinked(opts: {
       initialValue: false,
     });
     if (p.isCancel(proceed) || !proceed) return existing;
+  }
+
+  // `lizard up` in a folder that was never linked: link it to the default
+  // project rather than ask, so a first deploy needs no `lizard init`. The link
+  // is what keeps the next `up` from this folder on the same service.
+  if (!existing && opts.useDefault && !opts.projectName && !opts.workspaceFlag) {
+    const { defaultProject } = await import("../lib/default-project.js");
+    const fallback = await defaultProject();
+    if (fallback) {
+      const link: ProjectLink = {
+        projectId: fallback.id,
+        projectName: fallback.name,
+        workspaceId: fallback.workspaceId,
+        workspaceName: fallback.workspaceName,
+      };
+      setProjectLink(link);
+      info(chalk.dim(`Linked this folder to ${fallback.name}, your default project. Run \`lizard init --force\` to pick another.`));
+      return link;
+    }
   }
 
   // 1. Workspace

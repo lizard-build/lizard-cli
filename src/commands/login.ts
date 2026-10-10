@@ -97,29 +97,37 @@ export function accountInstruction(state: AccountState, sub: Subscription | null
   }
 }
 
-/** Commands an agent can run next. Sandboxes first; both they and deploys live in a project. */
+/**
+ * Commands an agent can run next. Sandboxes first. Neither needs `lizard init`:
+ * an unlinked folder uses the account's default project.
+ */
 export function nextSteps(linked: boolean): Array<{ command: string; why: string }> {
   return [
     {
       command: "lizard skills get core",
       why: "The guide to every command, matched to this CLI version. Read it before running others.",
     },
-    ...(linked
-      ? []
-      : [{ command: "lizard init", why: "Create a project and link the current folder to it. Sandboxes and deploys both need one." }]),
     {
       command: "lizard sandbox create",
-      why: "Start a sandbox in the project, then run commands in it with `lizard sandbox exec <id> -- <cmd>`.",
+      why:
+        (linked
+          ? "Start a sandbox in the linked project"
+          : "Start a sandbox in the account's default project (--project picks another)") +
+        ", then run commands in it with `lizard sandbox exec <id> -- <cmd>`.",
     },
-    { command: "lizard up", why: "Or deploy the linked folder." },
+    {
+      command: "lizard up",
+      why: linked
+        ? "Or deploy the linked folder."
+        : "Or deploy this folder. It is linked to the default project first; `lizard init` picks another.",
+    },
   ];
 }
 
 /** The same steps for a person, as aligned lines for the closing note. */
-export function nextStepsNote(linked: boolean): string {
+export function nextStepsNote(): string {
   const rows: Array<[string, string]> = [
-    ...(linked ? [] : ([["lizard init", "Create a project and link this folder"]] as Array<[string, string]>)),
-    ["lizard sandbox create", linked ? "Start a sandbox in this project" : "Start a sandbox in it"],
+    ["lizard sandbox create", "Start a sandbox"],
     ["lizard up", "Or deploy this folder"],
   ];
   const width = Math.max(...rows.map(([cmd]) => cmd.length)) + 3;
@@ -221,7 +229,7 @@ async function loginInteractive(flag?: AuthProvider): Promise<void> {
 
   await offerPlan(canAsk);
 
-  p.note(nextStepsNote(Boolean(getProjectLink())), "Next");
+  p.note(nextStepsNote(), "Next");
   p.outro("You're all set");
 }
 

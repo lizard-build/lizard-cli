@@ -37,8 +37,8 @@ export function registerUp(program) {
         const serviceFlag = merged.service ?? opts.service;
         const projectFlag = merged.project;
         const region = opts.region;
-        // Run init flow if cwd isn't linked yet
-        await ensureLinked({ projectName: projectFlag });
+        // An unlinked folder goes to the default project (or --project, or init's questions)
+        await ensureLinked({ projectName: projectFlag, useDefault: true });
         // Resolve target service: --service flag → linked → first-in-project → prompt-or-fail
         const ctx = await resolveContext({
             projectFlag,
