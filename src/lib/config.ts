@@ -132,6 +132,13 @@ export async function resolveProjectId(flagValue?: string): Promise<string> {
   if (!flagValue) {
     const link = getProjectLink();
     if (link?.projectId) return link.projectId;
+    // Not linked: the account's default project, the one it got at sign-up.
+    const { defaultProject, noteDefaultProject } = await import("./default-project.js");
+    const fallback = await defaultProject();
+    if (fallback) {
+      noteDefaultProject(fallback.name);
+      return fallback.id;
+    }
     throw new Error("No project linked. Run `lizard init` or pass --project <id>.");
   }
   // A value that already looks like a project id needs no lookup. Project ids are

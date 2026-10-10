@@ -3,6 +3,7 @@ import { Command } from "commander";
 import { registerSandbox } from "../../src/commands/sandbox.js";
 import { api, APIError } from "../../src/lib/api.js";
 import { printJSON } from "../../src/lib/format.js";
+import { getProjectLink, resolveProjectId } from "../../src/lib/config.js";
 
 vi.mock("../../src/lib/api.js", () => {
   class APIError extends Error {
@@ -13,8 +14,8 @@ vi.mock("../../src/lib/api.js", () => {
 vi.mock("open", () => ({ default: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("../../src/lib/config.js", () => ({
   resolveProjectId: vi.fn().mockResolvedValue("project-test"),
+  getProjectLink: vi.fn(() => ({ projectId: "project-test" })),
 }));
-vi.mock("../../src/lib/config.js", () => ({ resolveProjectId: vi.fn().mockResolvedValue("project-test") }));
 vi.mock("../../src/lib/format.js", () => ({ isJSONMode: () => true, printJSON: vi.fn() }));
 
 function create(args: string[]) {
@@ -45,6 +46,41 @@ describe("sandbox create timeout", () => {
   });
 });
 
+
+describe("sandbox create without a project", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.post).mockResolvedValue({ id: "sandbox-test" });
+  });
+
+  it("an unlinked folder sends no project and leaves the choice to the platform", async () => {
+    vi.mocked(getProjectLink).mockReturnValueOnce(null);
+    await create([]);
+    expect(resolveProjectId).not.toHaveBeenCalled();
+    expect(api.post).toHaveBeenCalledWith("/api/sandboxes", expect.objectContaining({ projectId: undefined }));
+  });
+
+  it("a linked folder or --project still sends its project", async () => {
+    await create([]);
+    expect(api.post).toHaveBeenCalledWith("/api/sandboxes", expect.objectContaining({ projectId: "project-test" }));
+    vi.mocked(getProjectLink).mockReturnValueOnce(null);
+    await create(["--project", "web"]);
+    expect(resolveProjectId).toHaveBeenLastCalledWith("web");
+  });
+
+  it("an unlinked --volume still resolves a project, since a volume name lives in one", async () => {
+    vi.mocked(getProjectLink).mockReturnValueOnce(null);
+    await create(["--volume", "data"]);
+    expect(resolveProjectId).toHaveBeenCalledWith(undefined);
+    expect(api.post).toHaveBeenCalledWith("/api/sandboxes", expect.objectContaining({ projectId: "project-test", volumeName: "data" }));
+  });
+
+  it("a platform that still wants a project gets the old message", async () => {
+    vi.mocked(getProjectLink).mockReturnValueOnce(null);
+    vi.mocked(api.post).mockRejectedValueOnce(new APIError(400, "A project is required", "PROJECT_REQUIRED"));
+    await expect(create([])).rejects.toThrow("No project linked. Run `lizard init` or pass --project <id>.");
+  });
+});
 
 describe("unsupported sandbox commands", () => {
   it.each(["fork", "snapshot-fork", "logs"])(

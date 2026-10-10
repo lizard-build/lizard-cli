@@ -21,6 +21,8 @@ export declare function ensureLinked(opts?: {
     workspaceFlag?: string;
     force?: boolean;
     relinkPrompt?: boolean;
+    /** Link an unlinked folder to the account's default project instead of asking (`lizard up`). */
+    useDefault?: boolean;
 }): Promise<ProjectLink>;
 export declare function registerInit(program: Command): void;
 export type { Workspace };
