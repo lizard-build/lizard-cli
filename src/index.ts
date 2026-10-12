@@ -6,7 +6,6 @@ import { setJSONMode, isJSONMode, error } from "./lib/format.js";
 import { requireAuth, isLoggedIn } from "./lib/auth.js";
 import { setBaseURL, setAccessToken, APIError, isProjectDeletedError, isAccountScopeError } from "./lib/api.js";
 import { checkForUpdateInBackground, runBackgroundUpdate, CURRENT_VERSION } from "./lib/updater.js";
-import { skillFor } from "./lib/skill-route.js";
 
 const BANNER = chalk.rgb(16, 185, 129)(
   [
@@ -28,34 +27,34 @@ const BANNER = chalk.rgb(16, 185, 129)(
 // of guessing commands from flag docs alone.
 const AGENTS_HELP = [
   chalk.bold("Start here (for AI agents):"),
-  "  " + chalk.cyan("lizard skills get sandbox") + chalk.dim("   sandboxes: run code, files, ports, snapshots, desktop, agents"),
-  "  " + chalk.cyan("lizard skills get core") + chalk.dim("      deploys: services, databases, builds, secrets, domains"),
+  "  " + chalk.cyan("lizard skills get core"),
   "",
   chalk.dim(
-    "  Skills ship with the CLI (always version-matched) and come with copy-paste",
+    "  Skills ship with the CLI (always version-matched) and cover sandboxes and the full app",
   ),
   chalk.dim(
-    "  examples. Prefer them over guessing commands from flag docs alone.",
+    "  lifecycle — deploy, link, addons, logs, scaling, secrets, domains — with",
+  ),
+  chalk.dim(
+    "  copy-paste examples. Prefer this over guessing commands from flag docs alone.",
   ),
 ].join("\n");
-
 
 // Compact form of the same pointer, shown on every subcommand's `--help` so the
 // per-command flag docs never read as the whole story. Mirrors the `agents`
 // block that `--help --json` already emits for every command; one tight line so
 // it sits above a subcommand's Usage without crowding it.
-const agentsHelpCompact = (skill: string) =>
+const AGENTS_HELP_COMPACT =
   chalk.bold("For AI agents:") +
   " run " +
-  chalk.cyan(`lizard skills get ${skill}`) +
+  chalk.cyan("lizard skills get core") +
   chalk.dim(" for version-matched usage and examples.");
 
-/** Attach the compact agents pointer to every (nested) subcommand's help, naming the skill for its subtree. */
-function addAgentsPointerToSubcommands(cmd: Command, skill?: string) {
+/** Attach the compact agents pointer to every (nested) subcommand's help. */
+function addAgentsPointerToSubcommands(cmd: Command) {
   for (const sub of cmd.commands) {
-    const own = skill ?? skillFor(sub.name());
-    sub.addHelpText("before", agentsHelpCompact(own) + "\n");
-    addAgentsPointerToSubcommands(sub, own);
+    sub.addHelpText("before", AGENTS_HELP_COMPACT + "\n");
+    addAgentsPointerToSubcommands(sub);
   }
 }
 
@@ -275,13 +274,6 @@ function findTargetCommand(
   return { target: cur, unknown: null };
 }
 
-/** The command directly under the root that `cmd` belongs to. */
-function topLevelOf(cmd: Command): Command {
-  let top = cmd;
-  while (top.parent && top.parent !== program) top = top.parent;
-  return top;
-}
-
 function dumpOption(o: any) {
   return {
     flags: o.flags,
@@ -394,9 +386,8 @@ async function main() {
       cli: "lizard",
       version: CURRENT_VERSION,
       agents: {
-        start: `lizard skills get ${isRoot ? "core" : skillFor(topLevelOf(target).name())}`,
-        skills: { sandbox: "lizard skills get sandbox", core: "lizard skills get core" },
-        note: "Skills ship with this CLI version, with copy-paste examples: `sandbox` for sandboxes (run code, files, ports, snapshots, desktop, coding agents), `core` for deploys (services, databases, builds, secrets, domains). Prefer them over guessing commands from flag docs alone.",
+        start: "lizard skills get core",
+        note: "Skills ship with this CLI version and cover sandboxes and the full app lifecycle (deploy, link, addons, logs, scaling, secrets, domains) with copy-paste examples. Prefer this over guessing commands from flag docs alone.",
       },
       command: dumpCommand(target),
       globalOptions: isRoot

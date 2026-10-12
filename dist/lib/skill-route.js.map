@@ -1,1 +1,0 @@
-{"version":3,"file":"skill-route.js","sourceRoot":"","sources":["../../src/lib/skill-route.ts"],"names":[],"mappings":"AAAA,wGAAwG;AACxG,MAAM,gBAAgB,GAAG,IAAI,GAAG,CAAC,CAAC,SAAS,EAAE,QAAQ,EAAE,QAAQ,CAAC,CAAC,CAAC;AAElE,yEAAyE;AACzE,MAAM,UAAU,QAAQ,CAAC,QAAgB;IACvC,OAAO,gBAAgB,CAAC,GAAG,CAAC,QAAQ,CAAC,CAAC,CAAC,CAAC,SAAS,CAAC,CAAC,CAAC,MAAM,CAAC;AAC7D,CAAC"}
