@@ -476,12 +476,14 @@ Examples:
 
   sb.command("snapshot")
     .argument("<id>", "Running sandbox ID")
-    .requiredOption("--name <name>", "Name for this private project snapshot")
+    .requiredOption("--name <name>", "Name for this private snapshot")
     .option("--warm <count>", "Copies to keep ready (1–10)", parseWarmCount, 5)
+    .addOption(new Option("--scope <scope>", "Where it may be restored: user = any of your projects and workspaces, workspace = only this workspace, project = only this project")
+      .choices(SNAPSHOT_SCOPES).default("user"))
     .option("--no-wait", "Return once capture is queued")
     .description("Save a running sandbox and keep five copies warm by default")
     .action(async (id: string, opts) => {
-      let snapshot = await api.post<SnapshotRecord>(`/api/sandboxes/${id}/snapshot`, { name: opts.name, poolSize: opts.warm });
+      let snapshot = await api.post<SnapshotRecord>(`/api/sandboxes/${id}/snapshot`, { name: opts.name, poolSize: opts.warm, scope: opts.scope });
       if (opts.wait) snapshot = await waitForSnapshot(snapshot.id);
       if (isJSONMode()) printJSON(snapshot);
       else { success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}`); info(`Warm copies: ${snapshot.readyCount}/${snapshot.poolSize}`); }
@@ -504,10 +506,14 @@ Examples:
   sb.command("restore")
     .argument("<snapshot-id>", "Saved snapshot ID")
     .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
+    .option("-p, --project <id>", "Project to start it in, in any of your workspaces (name, slug, or ID); defaults to the snapshot's own project")
     .description("Start a new sandbox from a private warm snapshot")
     .action(async (snapshotId: string, opts) => {
-      const snapshot = await api.get<SnapshotRecord>(`/api/sandbox-snapshots/${snapshotId}`);
-      const sandbox = await api.post<SandboxRecord>("/api/sandboxes", { snapshotId, projectId: snapshot.projectId, region: snapshot.region, timeoutMs: opts.timeout });
+      const [snapshot, projectId] = await Promise.all([
+        api.get<SnapshotRecord>(`/api/sandbox-snapshots/${snapshotId}`),
+        opts.project ? resolveProjectId(opts.project) : Promise.resolve(undefined),
+      ]);
+      const sandbox = await api.post<SandboxRecord>("/api/sandboxes", { snapshotId, projectId: projectId ?? snapshot.projectId, region: snapshot.region, timeoutMs: opts.timeout });
       if (isJSONMode()) printJSON(sandbox);
       else success(`Sandbox ${chalk.bold(sandbox.id)} created from ${snapshot.name}`);
     });
@@ -533,19 +539,32 @@ Examples:
       else success(`Snapshot ${chalk.bold(id)} will keep ${count} copies warm`);
     });
 
+  sb.command("snapshot-scope")
+    .argument("<snapshot-id>", "Saved snapshot ID")
+    .argument("<scope>", `Where it may be restored: ${SNAPSHOT_SCOPES.join(" | ")}`, parseSnapshotScope)
+    .description("Change where a snapshot you took may be restored: user = any of your projects and workspaces, workspace = only its workspace, project = only its project")
+    .action(async (id: string, scope: string) => {
+      const snapshot = await api.patch<SnapshotRecord>(`/api/sandbox-snapshots/${id}`, { scope });
+      if (isJSONMode()) printJSON(snapshot);
+      else success(`Snapshot ${chalk.bold(id)} can now be restored ${SCOPE_TEXT[scope]}`);
+    });
+
   sb.command("snapshots")
-    .description("List persistent sandbox snapshots in the linked (or given) project")
+    .description("List persistent sandbox snapshots in the linked (or given) project, or --mine for every snapshot you took")
     .option("-p, --project <id>", "List snapshots for this project instead of the linked one")
+    .option("--mine", "Every snapshot you took, across all your workspaces and projects")
     .action(async (opts) => {
-      const { projectId, scope } = await resolveProjectScope(opts.project);
-      const snaps = await api.get<Array<{ id: string; template: string; name?: string; region: string; sourceSandboxId?: string; cpus: number; memoryMb: number; createdAt: number }>>(
-        withScope(`/api/projects/${projectId}/snapshots`, scope),
-      );
+      let path = "/api/sandbox-snapshots";
+      if (!opts.mine) {
+        const { projectId, scope } = await resolveProjectScope(opts.project);
+        path = withScope(`/api/projects/${projectId}/snapshots`, scope);
+      }
+      const snaps = await api.get<Array<{ id: string; template: string; name?: string; region: string; projectId: string; scope?: string; sourceSandboxId?: string; cpus: number; memoryMb: number; createdAt: number }>>(path);
       if (isJSONMode()) { printJSON(snaps); return; }
       if (!snaps.length) { console.log("No snapshots."); return; }
       table(
-        ["Snapshot ID", "Name", "Template", "From", "CPU/Mem", "Created"],
-        snaps.map((s) => [s.id, s.name ?? "", s.template, s.sourceSandboxId ?? "", `${s.cpus} vCPU / ${s.memoryMb} MB`, timeAgo(s.createdAt as any)]),
+        ["Snapshot ID", "Name", "Scope", "Project", "Region", "CPU/Mem", "Created"],
+        snaps.map((s) => [s.id, s.name ?? "", s.scope ?? "project", s.projectId, s.region, `${s.cpus} vCPU / ${s.memoryMb} MB`, timeAgo(s.createdAt as any)]),
       );
     });
 
@@ -777,7 +796,13 @@ export function parseResolution(value: string): { width: number; height: number 
 
 interface SnapshotRecord {
   id: string; name: string; projectId: string; region: string; status: string;
-  poolSize: number; readyCount: number; error?: string;
+  poolSize: number; readyCount: number; error?: string; scope?: string;
+}
+const SNAPSHOT_SCOPES = ["user", "workspace", "project"];
+const SCOPE_TEXT: Record<string, string> = { user: "in any of your projects and workspaces", workspace: "only in its own workspace", project: "only in its own project" };
+function parseSnapshotScope(value: string): string {
+  if (!SNAPSHOT_SCOPES.includes(value)) throw new Error(`Scope must be one of: ${SNAPSHOT_SCOPES.join(", ")}`);
+  return value;
 }
 function parseWarmCount(value: string): number {
   if (!/^[0-9]+$/.test(value) || Number(value) < 1 || Number(value) > 10) throw new Error("Warm copies must be an integer between 1 and 10");
