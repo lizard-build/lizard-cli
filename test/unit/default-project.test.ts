@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { resolveProjectId, getProjectLink, setProjectLink } from "../../src/lib/config.js";
 import { resetDefaultProject } from "../../src/lib/default-project.js";
 import { ensureLinked } from "../../src/commands/init.js";
+import { resolveProject as resolveAddProject } from "../../src/commands/add.js";
 import { setBaseURL, setAccessToken } from "../../src/lib/api.js";
 import { setJSONMode } from "../../src/lib/format.js";
 
@@ -100,5 +101,17 @@ describe("lizard up in an unlinked folder", () => {
     setProjectLink({ projectId: "p-linked" });
     expect((await ensureLinked({ useDefault: true })).projectId).toBe("p-linked");
     expect(requested()).toEqual([]);
+  });
+});
+
+describe("lizard add in an unlinked folder", () => {
+  test("uses the default project too", async () => {
+    routes({ "GET /api/projects/default": () => reply(200, project) });
+    expect(await resolveAddProject(undefined)).toBe("p-default");
+  });
+
+  test("no default project: the old message", async () => {
+    routes({ "GET /api/projects/default": () => reply(404, { code: "NO_DEFAULT_PROJECT" }) });
+    await expect(resolveAddProject(undefined)).rejects.toThrow(/No project linked to this directory/);
   });
 });

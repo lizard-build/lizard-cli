@@ -61,7 +61,7 @@ function normalizeDbName(name) {
  * When `workspaceFlag` is provided, the lookup is constrained to that
  * workspace — useful for disambiguating identically-named projects.
  */
-async function resolveProject(flagValue, workspaceFlag) {
+export async function resolveProject(flagValue, workspaceFlag) {
     if (flagValue) {
         let workspaceId;
         if (workspaceFlag) {
@@ -85,6 +85,13 @@ async function resolveProject(flagValue, workspaceFlag) {
     const link = getProjectLink();
     if (link?.projectId)
         return link.projectId;
+    // Not linked: the account's default project, as every other command does.
+    const { defaultProject, noteDefaultProject } = await import("../lib/default-project.js");
+    const fallback = await defaultProject();
+    if (fallback) {
+        noteDefaultProject(fallback.name);
+        return fallback.id;
+    }
     throw new Error("No project linked to this directory. Run `lizard link --project <name>` to use an existing project, or `lizard init --name <name>` to create one.");
 }
 function parseVariables(pairs) {

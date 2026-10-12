@@ -80,7 +80,7 @@ interface Project {
  * When `workspaceFlag` is provided, the lookup is constrained to that
  * workspace — useful for disambiguating identically-named projects.
  */
-async function resolveProject(
+export async function resolveProject(
   flagValue: string | undefined,
   workspaceFlag?: string,
 ): Promise<string> {
@@ -116,6 +116,14 @@ async function resolveProject(
 
   const link = getProjectLink();
   if (link?.projectId) return link.projectId;
+
+  // Not linked: the account's default project, as every other command does.
+  const { defaultProject, noteDefaultProject } = await import("../lib/default-project.js");
+  const fallback = await defaultProject();
+  if (fallback) {
+    noteDefaultProject(fallback.name);
+    return fallback.id;
+  }
 
   throw new Error(
     "No project linked to this directory. Run `lizard link --project <name>` to use an existing project, or `lizard init --name <name>` to create one.",

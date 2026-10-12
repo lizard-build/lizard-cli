@@ -192,15 +192,16 @@ describe("account state", () => {
       "lizard sandbox ssh <id>             Open a shell in it",
       "lizard sandbox exec <id> -- <cmd>   Run a command in it",
       "lizard sandbox list                 See your sandboxes",
-      "lizard up                           Or deploy this folder",
+      "lizard add postgres redis s3        Add Postgres, Redis and object storage",
+      "lizard up                           Deploy this folder",
     ]);
-    for (const line of plain(nextStepsNote()).split("\n")) expect(line.length).toBeLessThanOrEqual(72);
+    for (const line of plain(nextStepsNote()).split("\n")) expect(line.length).toBeLessThanOrEqual(76);
   });
 
   test("no lizard init needed: an unlinked folder uses the default project", () => {
-    expect(nextSteps(false).map((s) => s.command)).toEqual(["lizard skills get core", "lizard sandbox create", "lizard up"]);
+    expect(nextSteps(false).map((s) => s.command)).toEqual(["lizard skills get core", "lizard sandbox create", "lizard add postgres redis s3", "lizard up"]);
     expect(nextSteps(false)[1].why).toContain("default project");
-    expect(nextSteps(true).map((s) => s.command)).toEqual(["lizard skills get core", "lizard sandbox create", "lizard up"]);
+    expect(nextSteps(true).map((s) => s.command)).toEqual(["lizard skills get core", "lizard sandbox create", "lizard add postgres redis s3", "lizard up"]);
     expect(nextSteps(true)[1].why).toContain("linked project");
   });
 });

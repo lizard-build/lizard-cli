@@ -78,6 +78,12 @@ export function nextSteps(linked) {
                 "Then `lizard sandbox ssh <id>` for a shell, or `lizard sandbox exec <id> -- <cmd>` to run a command.",
         },
         {
+            command: "lizard add postgres redis s3",
+            why: "Managed Postgres, Managed Redis and S3-compatible Managed Object Storage in one command, in the same project " +
+                "(the default project when the folder is not linked). Every service there gets DATABASE_URL and REDIS_URL; " +
+                "other keys by reference, e.g. `${{postgres.DATABASE_PRIVATE_URL}}`.",
+        },
+        {
             command: "lizard up",
             why: linked
                 ? "Or deploy the linked folder."
@@ -93,7 +99,8 @@ export function nextStepsNote() {
         ["lizard sandbox ssh <id>", "Open a shell in it"],
         ["lizard sandbox exec <id> -- <cmd>", "Run a command in it"],
         ["lizard sandbox list", "See your sandboxes"],
-        ["lizard up", "Or deploy this folder"],
+        ["lizard add postgres redis s3", "Add Postgres, Redis and object storage"],
+        ["lizard up", "Deploy this folder"],
     ];
     const width = Math.max(...rows.map(([cmd]) => cmd.length)) + 3;
     return rows.map(([cmd, why]) => chalk.cyan(cmd) + " ".repeat(width - cmd.length) + why).join("\n");
