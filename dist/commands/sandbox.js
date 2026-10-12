@@ -39,6 +39,33 @@ function parseTimeoutOption(value) {
     }
     return timeout;
 }
+/**
+ * When the sandbox goes away. The platform deletes it, files and all, once its
+ * lifetime runs out, and the default is five minutes, so say it up front.
+ */
+export function lifetimeLine(expiresAt, now = Date.now()) {
+    if (expiresAt == null)
+        return "Lifetime: no limit. It runs until you delete it.";
+    const at = new Date(expiresAt);
+    if (Number.isNaN(at.getTime()))
+        return "Lifetime: no limit. It runs until you delete it.";
+    const minutes = Math.max(0, Math.round((at.getTime() - now) / 60_000));
+    const left = minutes < 60 ? `${minutes} min` : `${Math.round(minutes / 6) / 10} h`;
+    const clock = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return `Lifetime: ${left}, then it is deleted with its files (at ${clock})`;
+}
+/** What to do with a sandbox you just made, as aligned lines with its id filled in. */
+export function sandboxNextSteps(id) {
+    const rows = [
+        [`lizard sandbox ssh ${id}`, "Open a shell in it"],
+        [`lizard sandbox exec ${id} -- uname -a`, "Run a command"],
+        [`lizard sandbox expose ${id} 3000`, "HTTPS URL for port 3000"],
+        [`lizard sandbox timeout ${id} 3600000`, "Keep it for an hour"],
+        [`lizard sandbox rm ${id}`, "Delete it now"],
+    ];
+    const width = Math.max(...rows.map(([cmd]) => cmd.length)) + 3;
+    return [chalk.bold("Next"), ...rows.map(([cmd, why]) => `  ${chalk.cyan(cmd)}${" ".repeat(width - cmd.length)}${chalk.dim(why)}`)].join("\n");
+}
 function printSandboxList(sandboxes) {
     if (isJSONMode()) {
         printJSON(sandboxes);
@@ -180,7 +207,9 @@ export function registerSandbox(program) {
         info(chalk.dim(sandbox.size
             ? `  Size: ${sandbox.size} (${machine})${sandbox.pricePerHour != null ? `, $${sandbox.pricePerHour}/h` : ""}`
             : `  Machine: ${machine}`));
-        info(chalk.dim(`  Exec: lizard sandbox exec ${sandbox.id} -- <cmd>`));
+        info(chalk.dim(`  ${lifetimeLine(sandbox.expiresAt ?? sandbox.endAt)}`));
+        info("");
+        info(sandboxNextSteps(sandbox.id));
     });
     sb.command("list")
         .alias("ls")
@@ -431,12 +460,14 @@ Examples:
     });
     sb.command("snapshot")
         .argument("<id>", "Running sandbox ID")
-        .requiredOption("--name <name>", "Name for this private project snapshot")
+        .requiredOption("--name <name>", "Name for this private snapshot")
         .option("--warm <count>", "Copies to keep ready (1–10)", parseWarmCount, 5)
+        .addOption(new Option("--scope <scope>", "Where it may be restored: user = any of your projects and workspaces, workspace = only this workspace, project = only this project")
+        .choices(SNAPSHOT_SCOPES).default("user"))
         .option("--no-wait", "Return once capture is queued")
         .description("Save a running sandbox and keep five copies warm by default")
         .action(async (id, opts) => {
-        let snapshot = await api.post(`/api/sandboxes/${id}/snapshot`, { name: opts.name, poolSize: opts.warm });
+        let snapshot = await api.post(`/api/sandboxes/${id}/snapshot`, { name: opts.name, poolSize: opts.warm, scope: opts.scope });
         if (opts.wait)
             snapshot = await waitForSnapshot(snapshot.id);
         if (isJSONMode())
@@ -465,10 +496,18 @@ Examples:
     sb.command("restore")
         .argument("<snapshot-id>", "Saved snapshot ID")
         .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
+        .option("-p, --project <id>", "Project to start it in, in any of your workspaces (name, slug, or ID); defaults to the volume's project, else the snapshot's own")
+        .option("--volume <name-or-id>", "Mount this volume at /workspace (Firecracker snapshot of a sandbox that had no volume; same region)")
         .description("Start a new sandbox from a private warm snapshot")
         .action(async (snapshotId, opts) => {
-        const snapshot = await api.get(`/api/sandbox-snapshots/${snapshotId}`);
-        const sandbox = await api.post("/api/sandboxes", { snapshotId, projectId: snapshot.projectId, region: snapshot.region, timeoutMs: opts.timeout });
+        const [snapshot, projectId] = await Promise.all([
+            api.get(`/api/sandbox-snapshots/${snapshotId}`),
+            opts.project ? resolveProjectId(opts.project) : Promise.resolve(undefined),
+        ]);
+        const volume = opts.volume ? (/^fcv-|^[A-Za-z0-9_-]{21}$/.test(opts.volume) ? { volumeId: opts.volume } : { volumeName: opts.volume }) : {};
+        // A volume picks its own project when none is named; a name needs one to be found in.
+        const project = projectId ?? (volume.volumeId ? undefined : snapshot.projectId);
+        const sandbox = await api.post("/api/sandboxes", { snapshotId, projectId: project, region: snapshot.region, timeoutMs: opts.timeout, ...volume });
         if (isJSONMode())
             printJSON(sandbox);
         else
@@ -497,12 +536,28 @@ Examples:
         else
             success(`Snapshot ${chalk.bold(id)} will keep ${count} copies warm`);
     });
+    sb.command("snapshot-scope")
+        .argument("<snapshot-id>", "Saved snapshot ID")
+        .argument("<scope>", `Where it may be restored: ${SNAPSHOT_SCOPES.join(" | ")}`, parseSnapshotScope)
+        .description("Change where a snapshot you took may be restored: user = any of your projects and workspaces, workspace = only its workspace, project = only its project")
+        .action(async (id, scope) => {
+        const snapshot = await api.patch(`/api/sandbox-snapshots/${id}`, { scope });
+        if (isJSONMode())
+            printJSON(snapshot);
+        else
+            success(`Snapshot ${chalk.bold(id)} can now be restored ${SCOPE_TEXT[scope]}`);
+    });
     sb.command("snapshots")
-        .description("List persistent sandbox snapshots in the linked (or given) project")
+        .description("List persistent sandbox snapshots in the linked (or given) project, or --mine for every snapshot you took")
         .option("-p, --project <id>", "List snapshots for this project instead of the linked one")
+        .option("--mine", "Every snapshot you took, across all your workspaces and projects")
         .action(async (opts) => {
-        const { projectId, scope } = await resolveProjectScope(opts.project);
-        const snaps = await api.get(withScope(`/api/projects/${projectId}/snapshots`, scope));
+        let path = "/api/sandbox-snapshots";
+        if (!opts.mine) {
+            const { projectId, scope } = await resolveProjectScope(opts.project);
+            path = withScope(`/api/projects/${projectId}/snapshots`, scope);
+        }
+        const snaps = await api.get(path);
         if (isJSONMode()) {
             printJSON(snaps);
             return;
@@ -511,7 +566,7 @@ Examples:
             console.log("No snapshots.");
             return;
         }
-        table(["Snapshot ID", "Name", "Template", "From", "CPU/Mem", "Created"], snaps.map((s) => [s.id, s.name ?? "", s.template, s.sourceSandboxId ?? "", `${s.cpus} vCPU / ${s.memoryMb} MB`, timeAgo(s.createdAt)]));
+        table(["Snapshot ID", "Name", "Scope", "Project", "Region", "CPU/Mem", "Created"], snaps.map((s) => [s.id, s.name ?? "", s.scope ?? "project", s.projectId, s.region, `${s.cpus} vCPU / ${s.memoryMb} MB`, timeAgo(s.createdAt)]));
     });
     sb.command("snapshot-rm")
         .alias("snapshot-delete")
@@ -740,6 +795,13 @@ export function parseResolution(value) {
     if (height < 480 || height > 2160)
         throw new Error(`Resolution height must be 480-2160 (got ${height})`);
     return { width, height };
+}
+const SNAPSHOT_SCOPES = ["user", "workspace", "project"];
+const SCOPE_TEXT = { user: "in any of your projects and workspaces", workspace: "only in its own workspace", project: "only in its own project" };
+function parseSnapshotScope(value) {
+    if (!SNAPSHOT_SCOPES.includes(value))
+        throw new Error(`Scope must be one of: ${SNAPSHOT_SCOPES.join(", ")}`);
+    return value;
 }
 function parseWarmCount(value) {
     if (!/^[0-9]+$/.test(value) || Number(value) < 1 || Number(value) > 10)

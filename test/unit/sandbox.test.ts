@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Command } from "commander";
-import { registerSandbox } from "../../src/commands/sandbox.js";
+import { registerSandbox, lifetimeLine, sandboxNextSteps } from "../../src/commands/sandbox.js";
 import { api, APIError } from "../../src/lib/api.js";
 import { printJSON } from "../../src/lib/format.js";
 import { getProjectLink, resolveProjectId } from "../../src/lib/config.js";
@@ -185,5 +185,31 @@ describe("sandbox desktop", () => {
   it("points at `sandbox create -t desktop` when the template has no desktop", async () => {
     vi.mocked(api.post).mockRejectedValue(new APIError(400, "The 'base' template has no desktop.", "DESKTOP_NOT_SUPPORTED"));
     await expect(run([])).rejects.toMatchObject({ code: "DESKTOP_NOT_SUPPORTED", message: expect.stringContaining("lizard sandbox create -t desktop") });
+  });
+});
+
+describe("after sandbox create", () => {
+  const plain = (t: string) => t.replace(/\x1b\[[0-9;]*m/g, "");
+
+  it("says when the sandbox is deleted, and how to keep it", () => {
+    const now = Date.parse("2026-10-12T12:00:00Z");
+    const line = lifetimeLine("2026-10-12T12:05:00Z", now);
+    expect(line).toMatch(/^Lifetime: 5 min, then it is deleted with its files \(at .+\)$/);
+    expect(line.length + 2).toBeLessThanOrEqual(80);
+    expect(lifetimeLine("2026-10-12T14:00:00Z", now)).toMatch(/^Lifetime: 2 h, then/);
+    expect(lifetimeLine(null, now)).toBe("Lifetime: no limit. It runs until you delete it.");
+  });
+
+  it("lists what to do next with the id filled in, within 80 columns", () => {
+    const lines = plain(sandboxNextSteps("defense-wise-7ibp")).split("\n");
+    expect(lines[0]).toBe("Next");
+    expect(lines.slice(1).map((l) => l.trim().split(/\s{2,}/)[0])).toEqual([
+      "lizard sandbox ssh defense-wise-7ibp",
+      "lizard sandbox exec defense-wise-7ibp -- uname -a",
+      "lizard sandbox expose defense-wise-7ibp 3000",
+      "lizard sandbox timeout defense-wise-7ibp 3600000",
+      "lizard sandbox rm defense-wise-7ibp",
+    ]);
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(80);
   });
 });

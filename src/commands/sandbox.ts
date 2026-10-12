@@ -66,6 +66,33 @@ function parseTimeoutOption(value: string): number {
   return timeout;
 }
 
+/**
+ * When the sandbox goes away. The platform deletes it, files and all, once its
+ * lifetime runs out, and the default is five minutes, so say it up front.
+ */
+export function lifetimeLine(expiresAt: number | string | null | undefined, now = Date.now()): string {
+  if (expiresAt == null) return "Lifetime: no limit. It runs until you delete it.";
+  const at = new Date(expiresAt);
+  if (Number.isNaN(at.getTime())) return "Lifetime: no limit. It runs until you delete it.";
+  const minutes = Math.max(0, Math.round((at.getTime() - now) / 60_000));
+  const left = minutes < 60 ? `${minutes} min` : `${Math.round(minutes / 6) / 10} h`;
+  const clock = at.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `Lifetime: ${left}, then it is deleted with its files (at ${clock})`;
+}
+
+/** What to do with a sandbox you just made, as aligned lines with its id filled in. */
+export function sandboxNextSteps(id: string): string {
+  const rows: Array<[string, string]> = [
+    [`lizard sandbox ssh ${id}`, "Open a shell in it"],
+    [`lizard sandbox exec ${id} -- uname -a`, "Run a command"],
+    [`lizard sandbox expose ${id} 3000`, "HTTPS URL for port 3000"],
+    [`lizard sandbox timeout ${id} 3600000`, "Keep it for an hour"],
+    [`lizard sandbox rm ${id}`, "Delete it now"],
+  ];
+  const width = Math.max(...rows.map(([cmd]) => cmd.length)) + 3;
+  return [chalk.bold("Next"), ...rows.map(([cmd, why]) => `  ${chalk.cyan(cmd)}${" ".repeat(width - cmd.length)}${chalk.dim(why)}`)].join("\n");
+}
+
 function printSandboxList(sandboxes: SandboxRecord[]) {
   if (isJSONMode()) {
     printJSON(sandboxes);
@@ -211,7 +238,9 @@ export function registerSandbox(program: Command) {
       info(chalk.dim(sandbox.size
         ? `  Size: ${sandbox.size} (${machine})${sandbox.pricePerHour != null ? `, $${sandbox.pricePerHour}/h` : ""}`
         : `  Machine: ${machine}`));
-      info(chalk.dim(`  Exec: lizard sandbox exec ${sandbox.id} -- <cmd>`));
+      info(chalk.dim(`  ${lifetimeLine(sandbox.expiresAt ?? sandbox.endAt)}`));
+      info("");
+      info(sandboxNextSteps(sandbox.id));
     });
 
   sb.command("list")

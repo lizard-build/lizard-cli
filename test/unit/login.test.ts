@@ -187,9 +187,14 @@ describe("account state", () => {
   test("the closing note leads with sandboxes, aligned in two columns", () => {
     const plain = (t: string) => t.replace(/\x1b\[[0-9;]*m/g, "");
     expect(plain(nextStepsNote()).split("\n")).toEqual([
-      "lizard sandbox create   Start a sandbox",
-      "lizard up               Or deploy this folder",
+      "lizard sandbox create               Start a sandbox (it lives 5 minutes)",
+      "lizard sandbox create --timeout 0   Start one with no time limit",
+      "lizard sandbox ssh <id>             Open a shell in it",
+      "lizard sandbox exec <id> -- <cmd>   Run a command in it",
+      "lizard sandbox list                 See your sandboxes",
+      "lizard up                           Or deploy this folder",
     ]);
+    for (const line of plain(nextStepsNote()).split("\n")) expect(line.length).toBeLessThanOrEqual(72);
   });
 
   test("no lizard init needed: an unlinked folder uses the default project", () => {

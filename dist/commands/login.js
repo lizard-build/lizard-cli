@@ -74,7 +74,8 @@ export function nextSteps(linked) {
             why: (linked
                 ? "Start a sandbox in the linked project"
                 : "Start a sandbox in the account's default project (--project picks another)") +
-                ", then run commands in it with `lizard sandbox exec <id> -- <cmd>`.",
+                ". It is deleted with its files after 5 minutes unless `--timeout` says otherwise (`--timeout 0`: no limit). " +
+                "Then `lizard sandbox ssh <id>` for a shell, or `lizard sandbox exec <id> -- <cmd>` to run a command.",
         },
         {
             command: "lizard up",
@@ -87,7 +88,11 @@ export function nextSteps(linked) {
 /** The same steps for a person, as aligned lines for the closing note. */
 export function nextStepsNote() {
     const rows = [
-        ["lizard sandbox create", "Start a sandbox"],
+        ["lizard sandbox create", "Start a sandbox (it lives 5 minutes)"],
+        ["lizard sandbox create --timeout 0", "Start one with no time limit"],
+        ["lizard sandbox ssh <id>", "Open a shell in it"],
+        ["lizard sandbox exec <id> -- <cmd>", "Run a command in it"],
+        ["lizard sandbox list", "See your sandboxes"],
         ["lizard up", "Or deploy this folder"],
     ];
     const width = Math.max(...rows.map(([cmd]) => cmd.length)) + 3;
