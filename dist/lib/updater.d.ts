@@ -1,4 +1,4 @@
-export declare const CURRENT_VERSION = "4.0.41";
+export declare const CURRENT_VERSION = "4.0.42";
 /**
  * True when selfUpdate() has a release asset to swap in for this platform.
  * False on Windows: a running .exe can't be replaced in place, so the

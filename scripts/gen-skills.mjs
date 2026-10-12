@@ -14,10 +14,24 @@ const root = path.resolve(here, "..");
 const srcDir = path.join(root, "skill-data");
 const outFile = path.join(root, "src", "lib", "skills-data.generated.ts");
 
+// A line `<!-- include: _shared/basics.md -->` pulls in a file from skill-data/,
+// so the basics every skill needs (sign-in, exit codes, billing) live in one place.
+// Directories starting with "_" hold such parts and are not skills themselves.
+// src/commands/skill.ts expands includes the same way for LIZARD_SKILLS_DIR.
+const INCLUDE = /^<!-- include: ([\w./-]+) -->$/gm;
+function expandIncludes(md) {
+  return md.replace(INCLUDE, (_, rel) => {
+    const file = path.resolve(srcDir, rel);
+    if (!file.startsWith(srcDir + path.sep)) throw new Error(`gen:skills: include outside skill-data: ${rel}`);
+    return readFileSync(file, "utf8").trimEnd();
+  });
+}
+
 let names = [];
 try {
   names = readdirSync(srcDir)
     .filter((n) => {
+      if (n.startsWith("_")) return false;
       try {
         return statSync(path.join(srcDir, n)).isDirectory();
       } catch {
@@ -32,7 +46,7 @@ try {
 
 const entries = names.map((name) => {
   const file = path.join(srcDir, name, "SKILL.md");
-  const content = readFileSync(file, "utf8");
+  const content = expandIncludes(readFileSync(file, "utf8"));
   return { name, content };
 });
 

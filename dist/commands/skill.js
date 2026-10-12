@@ -2,12 +2,28 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fail, info, isJSONMode, printJSON, table } from "../lib/format.js";
 import { EMBEDDED_SKILLS } from "../lib/skills-data.generated.js";
+/** Inline `<!-- include: _shared/x.md -->` lines, as scripts/gen-skills.mjs does for the embedded copy. */
+export function expandIncludes(md, root) {
+    return md.replace(/^<!-- include: ([\w./-]+) -->$/gm, (line, rel) => {
+        const file = path.resolve(root, rel);
+        if (!file.startsWith(path.resolve(root) + path.sep))
+            return line;
+        try {
+            return readFileSync(file, "utf8").trimEnd();
+        }
+        catch {
+            return line;
+        }
+    });
+}
 function fsSource(dir) {
     return {
         list: () => {
             try {
                 return readdirSync(dir)
                     .filter((name) => {
+                    if (name.startsWith("_"))
+                        return false;
                     try {
                         return statSync(path.join(dir, name)).isDirectory();
                     }
@@ -23,7 +39,7 @@ function fsSource(dir) {
         },
         read: (name) => {
             try {
-                return readFileSync(path.join(dir, name, "SKILL.md"), "utf8");
+                return expandIncludes(readFileSync(path.join(dir, name, "SKILL.md"), "utf8"), dir);
             }
             catch {
                 return null;

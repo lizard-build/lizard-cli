@@ -18,12 +18,26 @@ interface Source {
   pathOf(name?: string): string;
 }
 
+/** Inline `<!-- include: _shared/x.md -->` lines, as scripts/gen-skills.mjs does for the embedded copy. */
+export function expandIncludes(md: string, root: string): string {
+  return md.replace(/^<!-- include: ([\w./-]+) -->$/gm, (line, rel: string) => {
+    const file = path.resolve(root, rel);
+    if (!file.startsWith(path.resolve(root) + path.sep)) return line;
+    try {
+      return readFileSync(file, "utf8").trimEnd();
+    } catch {
+      return line;
+    }
+  });
+}
+
 function fsSource(dir: string): Source {
   return {
     list: () => {
       try {
         return readdirSync(dir)
           .filter((name) => {
+            if (name.startsWith("_")) return false;
             try {
               return statSync(path.join(dir, name)).isDirectory();
             } catch {
@@ -37,7 +51,7 @@ function fsSource(dir: string): Source {
     },
     read: (name) => {
       try {
-        return readFileSync(path.join(dir, name, "SKILL.md"), "utf8");
+        return expandIncludes(readFileSync(path.join(dir, name, "SKILL.md"), "utf8"), dir);
       } catch {
         return null;
       }
