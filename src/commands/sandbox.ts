@@ -506,14 +506,18 @@ Examples:
   sb.command("restore")
     .argument("<snapshot-id>", "Saved snapshot ID")
     .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
-    .option("-p, --project <id>", "Project to start it in, in any of your workspaces (name, slug, or ID); defaults to the snapshot's own project")
+    .option("-p, --project <id>", "Project to start it in, in any of your workspaces (name, slug, or ID); defaults to the volume's project, else the snapshot's own")
+    .option("--volume <name-or-id>", "Mount this volume at /workspace (Firecracker snapshot of a sandbox that had no volume; same region)")
     .description("Start a new sandbox from a private warm snapshot")
     .action(async (snapshotId: string, opts) => {
       const [snapshot, projectId] = await Promise.all([
         api.get<SnapshotRecord>(`/api/sandbox-snapshots/${snapshotId}`),
         opts.project ? resolveProjectId(opts.project) : Promise.resolve(undefined),
       ]);
-      const sandbox = await api.post<SandboxRecord>("/api/sandboxes", { snapshotId, projectId: projectId ?? snapshot.projectId, region: snapshot.region, timeoutMs: opts.timeout });
+      const volume = opts.volume ? (/^fcv-|^[A-Za-z0-9_-]{21}$/.test(opts.volume) ? { volumeId: opts.volume } : { volumeName: opts.volume }) : {};
+      // A volume picks its own project when none is named; a name needs one to be found in.
+      const project = projectId ?? (volume.volumeId ? undefined : snapshot.projectId);
+      const sandbox = await api.post<SandboxRecord>("/api/sandboxes", { snapshotId, projectId: project, region: snapshot.region, timeoutMs: opts.timeout, ...volume });
       if (isJSONMode()) printJSON(sandbox);
       else success(`Sandbox ${chalk.bold(sandbox.id)} created from ${snapshot.name}`);
     });
