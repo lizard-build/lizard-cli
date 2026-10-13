@@ -29,6 +29,7 @@ src/
     resolve.ts      # resolve workspace/project/service from flags or linked dir
     updater.ts      # self-update (precompiled binary only — see note below)
 skill-data/<name>/SKILL.md   # agent skills served by `lizard skill get <name>`
+skill-data/<name>/references/<ref>.md  # deeper guides served by `lizard skill get <name> --ref <ref>`
 dist/               # tsc output, committed; this is what npm ships
 test/cli.test.ts    # integration tests (spawn the CLI)
 test/unit/*.test.ts # unit tests
@@ -72,6 +73,8 @@ For streaming commands (`up`, `logs`), JSON mode emits **one event per line**:
 This directory holds the canonical agent skill markdown. Lizard Skill, the public discovery stub, lives in [`lizard-build/skill`](https://github.com/lizard-build/skill) and is intentionally thin — it just tells agents to run `lizard skill get <name>` to fetch the version-matched content from the installed CLI.
 
 When you change platform behavior (build pipeline, env precedence, addon env vars, deploy flow), update `skill-data/core/SKILL.md`. Do **not** put that content in the Lizard Skill stub — it would go stale.
+
+`core` is one skill: `SKILL.md` covers the whole platform, and `references/` holds three deeper guides that agents load only when a task needs them — `sandboxes.md` (templates, files, ports, volumes, snapshots, desktop), `deploys.md` (builder, worker mode, secrets, addons, composition) and `sdk.md` (building on Lizard from code). Keep `SKILL.md` under 500 lines; put detail in a reference and link it from the matching `SKILL.md` section. References link to their own headings only, never across files.
 
 Frontmatter format (YAML):
 ```yaml

@@ -27,6 +27,7 @@ const AGENTS_HELP = [
     chalk.dim("  Skills ship with the CLI (always version-matched) and cover sandboxes and the full app"),
     chalk.dim("  lifecycle — deploy, link, addons, logs, scaling, secrets, domains — with"),
     chalk.dim("  copy-paste examples. Prefer this over guessing commands from flag docs alone."),
+    chalk.dim("  For more depth: lizard skills get core --ref sandboxes | deploys | sdk"),
 ].join("\n");
 // Compact form of the same pointer, shown on every subcommand's `--help` so the
 // per-command flag docs never read as the whole story. Mirrors the `agents`
@@ -340,7 +341,7 @@ async function main() {
             version: CURRENT_VERSION,
             agents: {
                 start: "lizard skills get core",
-                note: "Skills ship with this CLI version and cover sandboxes and the full app lifecycle (deploy, link, addons, logs, scaling, secrets, domains) with copy-paste examples. Prefer this over guessing commands from flag docs alone.",
+                note: "Skills ship with this CLI version and cover sandboxes and the full app lifecycle (deploy, link, addons, logs, scaling, secrets, domains) with copy-paste examples. Prefer this over guessing commands from flag docs alone. For more depth: `lizard skills get core --ref sandboxes|deploys|sdk`.",
             },
             command: dumpCommand(target),
             globalOptions: isRoot

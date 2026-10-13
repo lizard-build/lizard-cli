@@ -9,19 +9,13 @@ allowed-tools: Bash(lizard:*), Bash(~/.lizard/bin/lizard:*), Bash(which:*), Bash
 
 Lizard runs sandboxes and hosts apps, services, agents and managed databases. All capabilities are exposed through the `lizard` CLI (npm package `@lizard-build/cli`). This skill teaches you to drive it. If `lizard` isn't on PATH, install it: `curl -fsSL https://lizard.build/install.sh | bash` on macOS and Linux (no Node.js or sudo needed; if `lizard` is still not found, call `~/.lizard/bin/lizard`), `irm https://lizard.build/api/cli/install.ps1 | iex` in Windows PowerShell, or `npm install -g @lizard-build/cli` anywhere. The install script ends by running `lizard login`, so its output may already hold the sign-in links: see [Sign-in](#sign-in).
 
-This guide covers both: [Sandboxes](#sandboxes) for running code and agents, and deploys for services that keep running.
+This guide covers the whole platform. Three references go deeper; read one only when the task needs that depth:
+
+- `lizard skills get core --ref sandboxes --json`: templates, commands, files and ports in depth, lifetime, sizes, shell, coding agents in a sandbox, desktop (computer use), volumes, snapshots and pause/resume.
+- `lizard skills get core --ref deploys --json`: how builds are chosen, git and upload deploys, service fields, worker mode, secret precedence and scoping, addon variables, multi-step recipes.
+- `lizard skills get core --ref sdk --json`: building with Lizard from code through Lizard SDK (TypeScript, Python): sandboxes inside your own product, per-user workspaces and scoped keys, platform APIs.
 
 If `$ARGUMENTS` is non-empty, treat it as the user's request and act on it. If empty, ask what they want to do on Lizard.
-
-## Read this first
-
-This skill documents platform behavior (build pipeline, env precedence, what knobs the API exposes). It does not describe the user's repo.
-
-Before writing commands for a specific project:
-
-1. Read the user's `package.json`, `Dockerfile`, `requirements.txt`, framework config — confirm what already exists before adding flags.
-2. Don't assume scripts/conventions that aren't visible. On the lizardpack auto-detect path, `Procfile` (`web:` line, Python/Ruby) and `package.json scripts.start` (Node) ARE picked up as the start command; on the synthesized-Dockerfile path (`buildCommand`/`startCommand` set) neither is read. Ports are inferred only from `EXPOSE`, framework defaults, or an explicit `PORT` env.
-3. When in doubt, ask the user or run `lizard <cmd> --help --json`.
 
 ## Execution rules
 
@@ -38,13 +32,15 @@ For streaming commands (`lizard up` without `--detach`), `--json` produces one J
 ## Mental model
 
 ```
-workspace → project → service (+ managed addons)
+workspace → project → services, sandboxes, managed addons, volumes
 ```
 
 - Workspace — account/org level. User belongs to one or more.
 - Project — group of related services and sandboxes in one workspace. The cwd gets linked to a project (config at `~/.lizard/config.json`).
 - Service — a deployable unit. Source is either a git repo (`sourceType=github`) or an uploaded tarball (`sourceType=upload`).
-- Managed addons — `postgres`, `redis`, `s3`. Provisioned with `lizard add <type>`; `s3` ships with a private bucket named `default`. See [Managed addons](#managed-addons) for the env vars each type exposes.
+- Sandbox — a short-lived Linux machine (Firecracker microVM) for running code and agents. See [Sandboxes](#sandboxes).
+- Volume — persistent disk for sandboxes, mounted at `/workspace`.
+- Managed addons — `postgres`, `redis`, `s3`. Provisioned with `lizard add <type>`; `s3` ships with a private bucket named `default`. See [Databases and storage](#databases-and-storage) for the env vars each type exposes.
 - Cross-resource refs — `${{<name>.<KEY>}}` resolves at deploy time against the target's merged env. A ref to a missing target or key resolves to an empty string and does NOT fail the deploy (only circular refs throw). After wiring refs, deploy and check `lizard logs --build --service <svc>`: the build log warns about every reference that came back empty. `lizard secrets list --service <svc> --show` shows what is stored. Refs match the target's current name, so renaming the target breaks them: update them after a rename.
 
 ## Discovery
@@ -89,12 +85,8 @@ A command that works on a project takes it from `--project`, then from the folde
 
 A sandbox is a Linux machine for running code and agents: a Firecracker microVM with its own kernel. It lives 5 minutes by default and is then deleted with its files.
 
-### Sandbox or deploy?
-
 - **Sandbox:** run code, tests, a build or an agent on demand, for minutes or hours, then delete it or snapshot it. The place for untrusted or AI-generated code.
-- **Deploy** (`lizard up`): a service that keeps running and serves traffic at a stable URL, with managed databases next to it. See [Deploying](#deploying).
-
-### Quickstart
+- **Deploy** (`lizard up`): a service that keeps running and serves traffic at a stable URL, with managed databases next to it. See [Deploys](#deploys).
 
 ```
 lizard sandbox create --json                              # base template, medium size, 5-minute lifetime; the JSON has the id
@@ -108,174 +100,16 @@ lizard sandbox rm <id> -y                                 # delete it now
 
 `lizard sandbox list --json` shows the project's sandboxes; `--all` shows every one you have.
 
-### Templates
+- **Templates:** `base` (default, Python 3.11 on Alpine Linux), `interpreter` (Python code interpreter), `codex` (coding agents), `desktop` (graphical desktop with Chromium).
+- **Sizes:** `-s small|medium|large`, $0.0162 / $0.0324 (default) / $0.0648 per hour, billed per second while it runs. A paused sandbox costs nothing.
+- **Lifetime:** 5 minutes by default, then the sandbox is deleted with its files. `--timeout 0` at create means no limit; `lizard sandbox timeout <id> <ms>` sets a new lifetime from now. Commands do not reset it.
+- **Commands:** `exec` runs through `sh -c` as a new process each time and exits with the command's exit code; chain steps in one call (`sh -c 'cd /workspace && npm test'`). `ssh` needs a real terminal: from an agent, use `exec`.
+- **Ports:** `lizard sandbox expose <id> <port>` prints an HTTPS URL that carries the sandbox's access token: treat it like a password.
+- **Keeping work:** files outlive a sandbox only on a volume (`--volume <name>`); `pause` keeps memory and processes and stops billing; a snapshot saves a sandbox to start new ones from.
 
-| `-t` | What is inside |
-|---|---|
-| `base` (default) | Python 3.11 on Alpine Linux, nothing else |
-| `interpreter` | A Python code-interpreter environment |
-| `codex` | Coding agents: see [Coding agents](#coding-agents) |
-| `desktop` | A graphical desktop with Chromium: see [Desktop](#desktop-computer-use) |
+Everything else (files, coding agents, desktop, volumes, snapshots): `lizard skills get core --ref sandboxes --json`. From your own code: `--ref sdk`.
 
-The platform validates the name; `lizard sandbox create --help --json` lists the templates this CLI knows.
-
-### Running commands
-
-`lizard sandbox exec <id> -- <cmd> [args...]` runs the command through `sh -c` in the sandbox, streams stdout and stderr, and exits with the command's exit code. In JSON mode it prints the raw output without the `$ <cmd>` header. Each call is a new process, so `cd` and exported variables don't carry over: chain steps in one call, e.g. `lizard sandbox exec <id> -- sh -c 'cd /workspace && npm test'`, and keep results in files.
-
-### Files
-
-```
-lizard sandbox files ls <id> [path]              # default /
-lizard sandbox files cat <id> <path>
-lizard sandbox files put <id> <local> <remote>
-lizard sandbox files get <id> <remote> <local>
-lizard sandbox files rm <id> <path>
-```
-
-`/workspace` is the working directory: `ssh` starts there and volumes mount there. `files put` and `files get` keep binary files intact.
-
-### Ports
-
-`lizard sandbox expose <id> <port>` publishes a port inside the sandbox on an HTTPS URL; `lizard sandbox unexpose <id> <port>` removes it. The URL carries the sandbox's access token, so treat it like a password. The platform keeps one port for itself and refuses to expose it.
-
-### Lifetime
-
-`lizard sandbox create` sends a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without expiration, or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. Pausing a sandbox freezes its remaining lifetime; resuming continues from it (see [private snapshots and pause/resume](#snapshots-and-pauseresume)). The CLI has no sandbox fork command. Use volumes for persistent files.
-
-### Size and pricing
-
-`lizard sandbox create -s/--size small|medium|large` picks the machine; the default is `medium`. There are exactly three sizes:
-
-| Size | vCPU | RAM | Disk | Price |
-|---|---|---|---|---|
-| `small` | 2 | 4 GiB | 5 GB | $0.0162/h |
-| `medium` (default) | 4 | 8 GiB | 20 GB | $0.0324/h |
-| `large` | 8 | 16 GiB | 50 GB | $0.0648/h |
-
-Prices are per hour, billed per second while the sandbox runs, flat by size: measured CPU/RAM is not charged, disk is included, and egress is included up to 2 TB per account over a rolling 30 days (past that, the account's sandboxes lose outbound network until the total drops). A paused sandbox costs nothing. Attached volumes bill separately. `--size` cannot be combined with `--snapshot`: a snapshot restores at the size it was captured at (see [private snapshots](#snapshots-and-pauseresume)).
-
-Sandboxes run as Firecracker microVMs, each with its own kernel. A sandbox that attaches an existing pod-backed volume, or restores an older pod snapshot, runs as a Kubernetes pod instead.
-
-### Interactive shell
-
-`lizard sandbox ssh <id>` (alias `shell`) opens an interactive shell in any running sandbox,
-in `/workspace` as root. It uses your Lizard login, so there are no SSH keys to set up; a
-scoped API key only reaches sandboxes in its scope. It needs a real terminal — from a script
-or an agent, use `lizard sandbox exec <id> -- <cmd>` instead, which returns output and an
-exit code.
-
-### Coding agents
-
-Run a coding agent inside a sandbox (use `-t codex`) on the user's own credentials:
-
-- `lizard agents` — your account's credentials and which agents can run. Connect once (here or in the
-  dashboard: Account settings › Agents); every sandbox and every agent that accepts it uses it.
-- `lizard agents login chatgpt` — ChatGPT subscription via device code.
-  `lizard agents add claude` (token from `claude setup-token`), `add anthropic|openai|openrouter|llmgateway|deepseek` for API keys.
-- `lizard agents use <agent> --credential … --model … --effort …` — per-agent defaults.
-- `lizard sandbox prompt <id> --agent codex|claude|pi|opencode|prime "task"` — streams tool calls and
-  the answer; `-c <conversation>` continues one; `--no-wait` returns at once.
-- `lizard sandbox conversations <id>`, `lizard sandbox interrupt <id> [-c <conversation>]`.
-
-Codex and Claude Code use one credential at a time; pi, OpenCode and Prime use every connected one
-they accept. Sandboxes never receive a subscription's refresh token, only a short-lived access token.
-
-Use `sandbox exec` to read a log file written by your process.
-
-### Desktop (computer use)
-
-The `desktop` template is a sandbox with a graphical desktop (Openbox + Chromium) streamed to a browser over WebRTC (H.264), falling back to noVNC where WebRTC cannot connect. The viewer's side panel has fullscreen with keyboard lock, send-keys, type-clipboard and a switch to VNC.
-
-```
-lizard sandbox create -t desktop                          # only this template has a desktop
-lizard sandbox desktop <id> --open                        # start it (idempotent) and open it in the browser
-lizard sandbox desktop <id> --resolution 1920x1080        # 640-3840 x 480-2160
-lizard sandbox desktop <id> --view-only                   # watch-only link
-lizard sandbox desktop <id> --status                      # URLs/state without starting
-lizard sandbox desktop <id> --stop                        # stop and unpublish
-lizard sandbox vnc <id>                                   # native VNC app: tunnels localhost:5900 to the desktop
-lizard sandbox vnc <id> --open                            # macOS: opens Screen Sharing; --view-only, --port N
-```
-
-The printed URLs embed secrets (the desktop's token and its password): the main URL grants control of the sandbox, so treat it like a password and don't paste it into logs, issues or chat; share `--view-only` for watching. On any other template the command fails with `DESKTOP_NOT_SUPPORTED`.
-
-Agents drive the desktop from inside the sandbox once it is started (`DISPLAY=:1` is preset in the image):
-
-```
-lizard sandbox exec <id> -- xdotool mousemove 400 300 click 1
-lizard sandbox exec <id> -- xdotool type 'hello'
-lizard sandbox exec <id> -- lizard-desktop screenshot | grep -E '^[A-Za-z0-9+/=]+$' | base64 -d > screen.png
-lizard sandbox exec <id> -- lizard-desktop screenshot --path   # writes the PNG to a file in the sandbox, prints its path
-```
-
-`lizard-desktop screenshot` prints the PNG as base64 wrapped at 76 columns; the `grep` keeps only those lines (it drops the `$ <cmd>` header `sandbox exec` prints). Use `--path` to save the PNG, then download that path with `lizard sandbox files get <id> <remote-path> screen.png`. `files put` and `files get` preserve binary files.
-
-### Volumes
-
-Use `lizard volume create <name> --size <gb> --project <project>` for persistent sandbox storage. Names are unique within a project; use lowercase letters, digits and dashes (up to 64 characters). Pass the name to `lizard sandbox create --volume <name>`. New volumes default to 5 GB and allow 1–50 GB. The CLI reads the server's current size limits before creating a volume; a server config override may change the maximum. Existing larger volumes keep their size. Storage charges cover used bytes, not the whole allocation.
-
-Persistent volumes for sandboxes. A volume's name is its key within the project; every command takes a name or ID.
-
-```
-lizard volume create <name> [--size <gb>] [--region <code>]   # default 5 GB; region must match the sandbox's
-lizard volume list --json                                     # name, sizeGb, status, attachedTo
-lizard volume resize <name> --size <gb>                       # grow in place
-lizard volume rm <name> [-y]                                  # refused while attached; delete the sandbox first
-lizard sandbox create --volume <name>                         # attach at create time
-```
-
-`volume resize` is online: an attached sandbox keeps running, and its `/workspace` shows the new size right away. A volume grown while detached gets the new size when a sandbox next mounts it. Firecracker volumes (the default) only grow; asking for less fails with `volume_shrink_unsupported`. A Kubernetes volume can also shrink if at least 10% of the new size stays free (`volume_too_full_to_shrink` otherwise). The size limit (`volume_too_large`) and the workspace's volume quota apply as at create. `The volume is not ready` (HTTP 409) right after create means retry in a few seconds.
-
-### Snapshots and pause/resume
-
-- `lizard sandbox snapshot <sandbox-id> --name my-app` saves files and running memory privately. The snapshot is yours: by default it restores into any of your projects and workspaces; `--scope workspace` keeps it to the sandbox's workspace and `--scope project` to its project, and `sandbox snapshot-scope <id> <user|workspace|project>` changes that later. A Firecracker snapshot is ready as soon as the capture ends. A snapshot of a pod sandbox keeps **five** independent copies warm; `--warm 1..10` changes that count. It waits until ready; `--no-wait` returns the queued capture.
-- `lizard sandbox restore <snapshot-id> [--project <project>]` starts a new sandbox from a warm copy, in the snapshot's project unless `--project` names another. `--volume <volume>` mounts a volume at `/workspace` in the restored sandbox (Firecracker snapshots of a sandbox that had no volume attached; the volume must be in the snapshot's region). `sandbox create --snapshot <id> --project <project> [--volume <volume>]` also works. Restores stay in the snapshot's region. A Firecracker snapshot restores at its source's size and bills flat at that size; a pod snapshot runs on the machine it was captured on and bills by measured usage. `--size` with `--snapshot` is an error.
-- `lizard sandbox snapshots --project <project>` lists a project's snapshots; `--mine` lists every snapshot you took. `sandbox snapshot-warm <id> <count>` changes capacity. `sandbox snapshot-rm <id>` deletes the snapshot and free copies, preserving already running sandboxes.
-- `lizard sandbox pause <id>` snapshots and stops a Firecracker VM (a pod sandbox is checkpointed with CRIU), stops billing, and freezes its remaining lifetime. `sandbox resume <id>` restores the same sandbox ID, files, processes, memory, published ports, and remaining lifetime. Paused sandboxes keep no warm copies; resume includes a cold restore. Both support `--no-wait`.
-- Disconnect clients and terminals and stop workspace writes before capturing or pausing. On a pod sandbox, active TCP connections and unsupported CRIU process state cause a clear failure. To reuse one snapshot across sandboxes that each keep their own data, snapshot a sandbox with no volume attached and pass `--volume` on each restore; a snapshot taken with a volume attached cannot take a different one.
-
-### From code: Lizard SDK
-
-For an app or script that creates sandboxes itself, use Lizard SDK instead of calling the CLI:
-
-| SDK | Install | Requires |
-|---|---|---|
-| TypeScript | `npm install @lizard-build/sdk` | Node.js 18+ |
-| Python | `pip install lizard-sdk` | Python 3.10+ |
-
-The SDK reads `LIZARD_API_KEY`. Create one with `lizard keys create <name> --project <project> --json`: a key limited to one project is safest when the code runs somewhere else.
-
-```ts
-import { Lizard } from '@lizard-build/sdk'
-
-const lizard = new Lizard({ project: 'my-project' })
-const sandbox = await lizard.create('base', { timeoutMs: 300_000 })
-try {
-  await sandbox.fs.write('/tmp/hello.txt', 'Hello from Lizard!')
-  const result = await sandbox.process.exec('cat /tmp/hello.txt')
-  if (result.exitCode !== 0) throw new Error(result.stderr)
-  console.log(result.stdout)
-} finally {
-  await sandbox.kill()
-}
-```
-
-```python
-from lizard import Lizard
-
-lizard = Lizard(project="my-project")
-with lizard.create("base", timeout_ms=300_000) as sandbox:
-    sandbox.fs.write("/tmp/hello.txt", "Hello from Lizard!")
-    result = sandbox.process.exec_("cat /tmp/hello.txt")
-    if result.exit_code != 0:
-        raise RuntimeError(result.stderr)
-    print(result.stdout)
-```
-
-Guides: [TypeScript](https://github.com/lizard-build/lizard-sdk/blob/main/packages/js/README.md), [Python](https://github.com/lizard-build/lizard-sdk/blob/main/packages/python/README.md), [sandbox reference](https://github.com/lizard-build/lizard-sdk/blob/main/docs/sandboxes.md).
-
-## Setup decision flow
+## Deploys
 
 When the user wants to deploy or set up something new, work out the right action from cwd context before running anything:
 
@@ -286,157 +120,59 @@ When the user wants to deploy or set up something new, work out the right action
 
 Naming heuristic: app-style names (`my-api`, `worker`, `flappy-bird`) are service names. Use the repo or directory name for the project.
 
-## Platform builder
+**Git or upload.** Check `git remote get-url origin` first. A GitHub remote → `lizard add -r owner/repo --json`: pushes to the branch redeploy through a webhook. No remote, not GitHub, or not a git repo → `lizard up --json`. For a private repo Lizard cannot reach yet, run `lizard git connect` to install the GitHub App instead of falling back to an upload. `lizard up` always switches a service to `sourceType=upload`: don't use it on a git-backed service.
 
-Builds run on the platform's build nodes (no local Docker needed). When a build fails, read logs with `lizard logs --build`.
+**Builds** run on the platform's build nodes; no local Docker needed. lizardpack detects Go, Node, Python, Rust, Ruby, PHP, Java and static sites; a repo Dockerfile with a real build step is used as is. Read a failed build with `lizard logs --build --json`.
 
-### Build decision order
+**Rebuilds.** `service set` on a build field (`repoUrl`, `branch`, `buildCommand`, `dockerfilePath`, `rootDirectory`) and setting a `VITE_*` or `NEXT_PUBLIC_*` variable rebuild on their own: don't chain `lizard redeploy`. Runtime-only fields (`startCommand`, `preDeployCommand`, `containerPort`) need `lizard redeploy`.
 
-1. Repo Dockerfile (verbatim) — if `dockerfilePath` is set on the service, the platform builds that Dockerfile from the repo unchanged and ignores `buildCommand`/`startCommand` for the image. A set `startCommand` still replaces the image's CMD at run time.
-2. Synthesized Dockerfile — if `buildCommand` and/or `startCommand` are set on the service (or passed via `lizard up`), the platform generates a Dockerfile from those commands. No lizardpack invocation.
-3. lizardpack auto-detect — clone, run `lizardpack`. If a repo `Dockerfile` exists AND has a real build step (a `RUN <pkg-manager>` line, not just `COPY dist/`), it's used verbatim; otherwise lizardpack generates a multi-stage one. Supported: Go, Node, Python, Rust, Ruby, PHP, Java, static — first match in that order.
+**Workers** without an HTTP listener: `containerPort=0` (`lizard up --port 0`, or `lizard port 0` on an existing service).
 
-### What triggers a rebuild
+Details (build order, service fields, worker mode, recipes): `lizard skills get core --ref deploys --json`.
 
-- `git push` to the tracked branch → auto-rebuild via GitHub webhook.
-- `lizard redeploy` / `lizard up` → explicit rebuild.
-- Setting a `VITE_*` or `NEXT_PUBLIC_*` variable → the platform redeploys the running services that receive it, so the build bakes it in. Do NOT chain a `lizard redeploy`. See [Applying an env change](#applying-an-env-change) for which builds receive them.
-- `service set` for build-affecting fields (`repoUrl`, `branch`, `sourceType`, `buildCommand`, `dockerfilePath`, `rootDirectory`) → auto-rebuilds running services. Do NOT chain a `lizard redeploy` after it — that queues a second, redundant build.
-- `service set` for runtime-only fields (`startCommand`, `preDeployCommand`, `containerPort`, `watchPatterns`) → no auto-rebuild. Follow with `lizard redeploy` to apply.
-- All other env vars / secrets → applied without a rebuild; the service restarts to pick them up.
-
-## Deploying
-
-First question for a new service: upload vs git repo. **Always check for a git remote before reaching for `up`** — the CLI never auto-detects one, so you must do it yourself:
+## Databases and storage
 
 ```
-git remote get-url origin
+lizard add postgres redis s3        # all three in one command
+lizard add postgres                  # or one at a time
 ```
 
-- **Exit 0 with a GitHub URL → use the git-source path below**, not `up`. Parse `owner/repo` from the URL and run `lizard add -r owner/repo`. This is strongly preferred: pushes auto-redeploy via webhook, and there's no re-upload on every change.
-- **No remote / non-GitHub / not a git repo → use tarball upload (`lizard up`).** This is the fallback for quick local iteration or no-remote situations, not the default.
+- The first addon of each type is named after it (`postgres`, `redis`, `s3`); later ones get names like `postgres-autumn-bear`. References use the real name: `${{postgres.DATABASE_PRIVATE_URL}}`.
+- Every running Postgres and Redis reaches every service in the project as `DATABASE_URL` / `REDIS_URL`. Inside the project, prefer the private URL: `lizard secrets set DATABASE_URL='${{postgres.DATABASE_PRIVATE_URL}}' --service <svc>`.
+- A reference to a missing addon or key becomes an empty string and does not fail the deploy; renaming an addon breaks its references.
+- S3 comes with a private bucket named `default`, up to 16 GiB per account. `lizard s3 upload <file>` and `lizard s3 list` work without an AWS SDK; AWS SDKs need `forcePathStyle: true`. Making a bucket public is done in the dashboard.
+- Redis has no persistence settings: keep data you cannot lose in Postgres.
 
-`lizard up` always works regardless of git state, which makes it the path of least resistance — resist it when a GitHub remote exists. Only fall back to upload when the remote check actually fails. (For a private repo whose remote exists but isn't yet accessible to Lizard, run `lizard git connect` to install the GitHub App, then use the git-source path — don't silently downgrade to a tarball.)
+Every variable each addon exposes: `lizard skills get core --ref deploys --json`.
 
-### Git-source deploy (preferred when there's a remote)
-
-```
-# One-shot for a new service from GitHub:
-lizard add -r owner/repo --json
-
-# Existing service: switch source to git or update branch:
-lizard service set <svc> \
-  --set sourceType=github \
-  --set repoUrl=https://github.com/owner/repo \
-  --set branch=main \
-  --json
-lizard redeploy --service <svc>
-```
-
-When `repoUrl` is set, pushes to the matching branch auto-redeploy via the GitHub webhook. If the service has a `rootDirectory` (monorepo subpath) or watch patterns, only matching changes trigger redeploys.
-
-Useful `service set` fields (discover full list with `lizard service set --help --json`):
-
-- `sourceType` = `github | upload`
-- `repoUrl`, `branch`, `rootDirectory`
-- `dockerfilePath` — use a specific repo Dockerfile, bypasses lizardpack auto-detect
-- `buildCommand`
-- `startCommand`, `preDeployCommand` — `preDeployCommand` runs before `startCommand` at the start of every container (each replica, each restart), and only when `startCommand` is also set. Make it safe to run many times and at the same time.
-- `watchPatterns` — string array, comma-separated or JSON
-- `containerPort` — TCP port the app listens on (defaults to 3000). Set to `0` for [worker mode](#worker-mode).
-- `name` — rename a service (lowercase a-z, digits, hyphens; 1–40 chars). Goes through `config:apply`; the legacy `PATCH /api/apps/:id` returns 410. Refs to the old name (`${{old.KEY}}`) stop resolving: update them.
-
-Field names are flat and match the wire schema 1:1 (and `service show` output). No `build.*` / `deploy.*` / `source.*` grouping exists in the API, DB, or node-agent.
-
-`service set` uses optimistic concurrency via `configRevision`. On 409, re-read with `lizard service show`, reconcile, retry; `--force` overrides.
-
-### Tarball upload (no git remote, or quick local iteration)
+## Secrets and config
 
 ```
-lizard up --json
+lizard secrets list [--service <svc>] [--global]
+lizard secrets set KEY=v [K2=v2 …] [--service <svc>]   # service scope, the default
+lizard secrets set KEY=v --global                       # every service in the project
+lizard secrets import [--service <svc>] < .env
 ```
 
-- Uploads cwd as a tarball (respects `.gitignore`), forces `sourceType=upload`.
-- Streams build logs over SSE; emits a final `{ event: "deployed", url }` on success (`{ event: "failed" }` on failure; `url` may be `null`).
-- Flags: `--project`, `--service`, `--region`, `--build-command`, `--start-command`, `--pre-deploy-command`, `--port`, `--detach`, `--ci`.
-- If cwd isn't linked and no `--project` is given, it links the folder to the [default project](#default-project) and deploys there as a new service. `--project <name>` uses that project, or creates it if none matches. It never creates a project from the folder name on its own.
-- `lizard up` always switches the service to `sourceType=upload`. Do not use it to update a git-backed service — use `lizard redeploy` or push to the remote.
+- List before you set, so you don't duplicate or shadow a key.
+- Keep secrets in service scope. `--global` is for values that are not secret (`LOG_LEVEL`, `NODE_ENV`, feature flags).
+- Precedence, last wins: addon env < project secrets < project env < app env < app secrets < platform vars (`PORT`, `LIZARD_*`, which cannot be overridden).
+- A runtime value applies with a restart, no rebuild. Never print a service's full environment.
 
-## Worker mode
+Scoping rules and build-time variables in detail: `lizard skills get core --ref deploys --json`.
 
-For services that don't expose an HTTP listener (background workers, reconcilers, queue consumers, cron-style polling loops), set `containerPort=0`. The platform then:
-
-- Skips `PORT` env injection (the worker doesn't bind anywhere).
-- Skips the port reachability check (no `app port X unreachable` log spam, no false-positive "unhealthy" status).
-- Skips `EXPOSE` in the synthesized Dockerfile.
-- Skips the LB route registration on the node — nothing is served. (A generated `.onlizard.com` domain may still appear on the service; it won't respond.)
-
-Set it one of three ways:
+## Domains
 
 ```
-lizard up --port 0                              # new upload-source worker
-lizard port 0 [--service <svc>]                 # flip existing service to worker mode
-lizard service set <svc> --set containerPort=0  # same, via the config:apply path
+lizard domain --json                                 # show or generate the service's onlizard.com domain
+lizard domain example.com --service <svc>            # attach; the hostname is positional, there is no `add`
+lizard domain verify example.com                     # once the DNS records have propagated
+lizard domain example.com --service <svc> --force    # move it here from another of your services
 ```
 
-`lizard port` with no argument prints the current port (or `worker mode` when 0). Worker mode is a hard switch — re-deploys are needed for the port change to take effect.
+Give the user the TXT and CNAME records the attach prints, then verify once they propagate.
 
-Don't use worker mode for a regular HTTP service that just happens to be slow to start — worker mode hides "the listener never came up" bugs because there's nothing to check.
-
-## Secrets
-
-Two scopes exist. No workspace-level globals.
-
-- Project ("global"): `lizard secrets set KEY=v [K2=v2 …] --global` → project scope (wire: `secrets.shared`)
-- Service (default): `lizard secrets set KEY=v [K2=v2 …] [--service <svc>]` → service scope (wire: `secrets.services[<svc>]`)
-
-`set` is variadic. Companion subcommands: `lizard secrets list|delete K1 K2|import` (import reads dotenv from stdin). When the linked service in cwd is set, plain `lizard secrets set KEY=v` writes to that service. Pass `--global` to escape to project scope.
-
-### Precedence (last writer wins)
-
-```
-addon-issued env  <  project secrets  <  project env  <  app env  <  app secrets  <  platform vars
-```
-
-App secrets override project secrets. Platform vars (`LIZARD_SERVICE_NAME`, `LIZARD_PROJECT_ID`, `PORT`, `LIZARD_PUBLIC_DOMAIN`, `LIZARD_PRIVATE_DOMAIN`) are last and cannot be shadowed. Addon-issued env is every running Postgres and Redis addon's `DATABASE_URL` / `REDIS_URL`, injected into every service in the project.
-
-### Secret scoping
-
-Default to service-scope. `--global` puts the value into `process.env` of every service in the project — including ones that don't need it.
-
-Rules:
-
-- Check first: `lizard secrets list` (+ `--global`) before set/update — avoid creating a duplicate or shadowing an existing key (service scope wins over global; see [Precedence](#precedence-last-writer-wins)).
-- Default — service-scope: `lizard secrets set KEY=v --service <svc>` per consumer. For addon DSNs, prefer a private reference when the consumer can reach it: `lizard secrets set DATABASE_URL='${{postgres.DATABASE_PRIVATE_URL}}' --service <svc>` (no separate `env` command — refs are interpolated at deploy time wherever they appear). A ref reads the addon's current value on each deploy of the consumer; there is no automatic credential rotation.
-- `--global` only for non-secrets and provably-public values: `LOG_LEVEL`, `NODE_ENV`, feature flags, frontend `SENTRY_DSN`. If unsure whether a value is a secret, treat it as one. A compromised service reads its own env; broader scope = more credentials exposed for no reason.
-
-### Applying an env change
-
-- Runtime vars/secrets apply without rebuilding the image. The application process restarts to read its new environment; do not promise uninterrupted requests.
-- `VITE_*` / `NEXT_PUBLIC_*` (build-time baked) → setting one redeploys the running services that receive it; a plain restart won't pick them up. Only a Dockerfile the platform generates bakes them in: lizardpack on a GitHub service, or a service with `buildCommand`/`startCommand`. A `dockerfilePath` build, or a `lizard up` upload without those overrides, gets no Lizard variables at build time, and no build gets build args except `COMMIT_SHA`. For public values there, commit them in `.env.production`, set a build command, or write them into the Dockerfile.
-- Verify a non-secret value or the application's behavior. Do not print the full environment: it can expose credentials.
-
-## Managed addons
-
-Provision with `lizard add <type>`. Each addon exposes a fixed env-var set; reference by name from a consumer service via `${{<addon-name>.KEY}}`. The first addon of a given type gets the bare type as its name (so use `postgres` in the reference for the first Managed Postgres instance); subsequent ones get `{type}-{adjective}-{noun}` like `postgres-autumn-bear`. There's no type-alias fallback — a ref must use the addon's actual name. Refs match the addon's current name, so renaming it breaks existing refs: update them after a rename. Every running Postgres and Redis addon's `DATABASE_URL` / `REDIS_URL` also reaches every service in the project at the lowest precedence; a value set on the consumer overrides it.
-
-- `postgres` — two connection URLs: prefer `DATABASE_PRIVATE_URL` when available and reachable within the same project and region (no ingress/egress charges); use `DATABASE_URL` for public access, such as local clients or external CI (network charges may apply). Also exposes `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, `PGDATABASE`, `POSTGRES_USER`, `POSTGRES_DB`, `POSTGRES_PASSWORD`.
-- `redis` — `REDIS_URL`; services in the same project should use `REDIS_PRIVATE_URL`. No eviction policy and no append-only file are configured: if it runs out of memory, the instance restarts and recent writes can be lost. Keep data you cannot lose in Postgres.
-- `s3` — `S3_ENDPOINT`, `S3_DEFAULT_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_REGION`. Auto-creates a private bucket named `default`, and each account can store up to 16 GiB across its addons. Make a bucket public from the dashboard's S3 browser; objects in a public bucket are served without auth two ways: the gateway URL the dashboard shows, `https://s3-<region>.onlizard.com/<addonId>/<bucket>/<key>`, or the platform proxy `<dashboard-host>/api/s3/<addonId>/public/<bucket>/<key>` (the host `lizard open` launches; long-lived immutable cache headers). For AWS SDK use, set `forcePathStyle: true`. ACL flips aren't on the CLI yet, so point users at the dashboard. To push a local file into a bucket directly (no AWS SDK needed), use `lizard s3 upload <file> [--addon <name>] [--bucket <name>] [--key <key>] [--content-type <type>]` — auto-resolves the project's only S3 addon and bucket `default` if omitted; prints `{key, etag, size, url}` (`url` is `null` unless the bucket is public). `lizard s3 list|ls [--bucket <name>] [--prefix <p>]` lists objects in a bucket.
-
-## Composition patterns
-
-Multi-step requests follow natural chains. Return one unified response, don't farm out steps:
-
-- First deploy from git — pick action via [Setup decision flow](#setup-decision-flow) → `lizard add -r owner/repo` → stream build → surface URL.
-- First deploy from local code — Setup decision flow → `lizard up` → surface URL.
-- Add a managed database to an existing service — `lizard add postgres` → bind the consumer's `DATABASE_URL` to the private reference as described above (the service restarts with it; no redeploy needed).
-- Add object storage to a service — `lizard add s3` → reference `${{s3.S3_ENDPOINT}}`, `${{s3.S3_DEFAULT_BUCKET}}`, `${{s3.S3_ACCESS_KEY_ID}}`, `${{s3.S3_SECRET_ACCESS_KEY}}`, `${{s3.S3_REGION}}` from the consumer service. The `default` bucket is private; to serve files without auth, have the user make it public in the dashboard's S3 browser, then objects are served at `<dashboard-host>/api/s3/<addonId>/public/default/<key>`. See [Managed addons](#managed-addons).
-- Wire a fresh git source on an existing service — `service set --set sourceType=github --set repoUrl=… --set branch=…` → `redeploy`.
-- Fix a failed build — `logs --build` → diagnose → fix project (user's repo) OR adjust `buildCommand` / `startCommand` via `service set` → `redeploy` → `logs` to verify.
-- Add a custom domain — `domain <host> --service <svc>` (the hostname is a positional, there is no `add` subcommand) → surface the TXT/CNAME records to the user → `domain verify <host>` once DNS propagates. Bare `domain` shows (or auto-generates) the service's current domain. If the host is already attached to another of the user's services, the attach 409s with a reclaim hint — re-run with `--force` to move it here.
-
-## Common ops
+## Logs and operations
 
 ```
 lizard logs --json [--service <name>]      # last 200 runtime log lines, then exit (--tail N to override)
@@ -466,19 +202,7 @@ lizard s3 upload <file> [--bucket <b>]      # upload a local file to an S3 addon
 lizard s3 list --json [--bucket <b>]        # list objects in an S3 addon bucket
 ```
 
-`lizard metrics --all` ignores the directory's linked service for this command.
-It uses the linked project unless `--project <name>` selects another project.
-Without `--all`, metrics defaults to the linked service, or the project overview
-when no service is linked. Do not combine `--all` with `--service`.
-The project overview includes `Egress` (outbound bytes per second) and `Volumes`
-(used / total bytes). These columns use the latest sample from the past hour;
-`Sampled` refers to CPU and memory. Missing measurements show `—`.
-Watch mode refreshes CPU and memory every 3 seconds and I/O history every 30 seconds.
-JSON output includes the history in each service's `series` and `timestamps` fields.
-
-`lizard run --service <app>` injects stored values only: `${{…}}` refs arrive as literal text, and platform vars (`PORT`, `LIZARD_*`) are not set. `--service <addon>` injects the addon's real connection values, so use it to run a local command against a database. To check a service's wiring, use `lizard logs --build --service <svc>` and `lizard secrets list --service <svc> --show`; shell access into services is off.
-
-For exact flags, `lizard <cmd> --help --json`. Other commands not shown above: `lizard git` (GitHub integration), `lizard config` (project configuration), `lizard workspace` (workspace info) — discover each with `lizard <cmd> --help --json`.
+Metrics options and `lizard run` in detail: `lizard skills get core --ref deploys --json`.
 
 ## Response format
 
@@ -497,7 +221,7 @@ Skip command-by-command transcripts unless they explain a failure.
 3. Don't use `lizard up` to switch a service to a git source. It always forces `sourceType=upload`. Use `service set` + `redeploy` instead.
 4. A Dockerfile that copies pre-built artifacts (`COPY dist/`, `build/`, `out/`, `.next/`, `public/`) without a `RUN` build step gets silently regenerated by lizardpack. Add a build step or set `dockerfilePath` to force verbatim use.
 5. Don't generate Dockerfiles unsolicited — lizardpack auto-detects most stacks. Try a deploy first; write one only if it fails. Ask before either.
-6. Don't put runtime secrets (DB credentials, API keys, RPC creds, S3 keys) in `--global` "just in case another service needs it later". Scope to the services that consume them — see [Secret scoping](#secret-scoping).
+6. Don't put runtime secrets (DB credentials, API keys, RPC creds, S3 keys) in `--global` "just in case another service needs it later". Scope to the services that consume them — see [Secrets and config](#secrets-and-config).
 
 ## Billing
 

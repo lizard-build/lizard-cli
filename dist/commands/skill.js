@@ -29,14 +29,47 @@ function fsSource(dir) {
                 return null;
             }
         },
-        pathOf: (name) => (name ? path.join(dir, name, "SKILL.md") : dir),
+        refs: (name) => {
+            try {
+                return readdirSync(path.join(dir, name, "references"))
+                    .filter((f) => f.endsWith(".md"))
+                    .map((f) => f.slice(0, -3))
+                    .sort();
+            }
+            catch {
+                return [];
+            }
+        },
+        readRef: (name, ref) => {
+            try {
+                return readFileSync(path.join(dir, name, "references", `${ref}.md`), "utf8");
+            }
+            catch {
+                return null;
+            }
+        },
+        pathOf: (name, ref) => {
+            if (!name)
+                return dir;
+            return ref
+                ? path.join(dir, name, "references", `${ref}.md`)
+                : path.join(dir, name, "SKILL.md");
+        },
     };
 }
 function embeddedSource() {
     return {
         list: () => Object.keys(EMBEDDED_SKILLS).sort(),
         read: (name) => EMBEDDED_SKILLS[name]?.content ?? null,
-        pathOf: (name) => name ? `embedded://skills/${name}/SKILL.md` : "embedded://skills",
+        refs: (name) => Object.keys(EMBEDDED_SKILLS[name]?.references ?? {}).sort(),
+        readRef: (name, ref) => EMBEDDED_SKILLS[name]?.references[ref] ?? null,
+        pathOf: (name, ref) => {
+            if (!name)
+                return "embedded://skills";
+            return ref
+                ? `embedded://skills/${name}/references/${ref}.md`
+                : `embedded://skills/${name}/SKILL.md`;
+        },
     };
 }
 function getSource() {
@@ -74,6 +107,25 @@ function readSkill(src, name) {
     }
     return { md, meta: parseFrontmatter(md) };
 }
+function readRef(src, name, ref) {
+    readSkill(src, name);
+    const md = src.readRef(name, ref);
+    if (md == null) {
+        const refs = src.refs(name);
+        throw new Error(`Reference '${ref}' not found in skill '${name}'. ` +
+            (refs.length
+                ? `Available: ${refs.join(", ")}.`
+                : `This skill has no references.`));
+    }
+    return md;
+}
+function refEntries(src, name) {
+    return src.refs(name).map((ref) => ({
+        name: ref,
+        path: src.pathOf(name, ref),
+        command: `lizard skills get ${name} --ref ${ref}`,
+    }));
+}
 function shortDesc(desc, max = 100) {
     const oneLine = desc.replace(/\s+/g, " ").trim();
     return oneLine.length > max ? oneLine.slice(0, max - 1) + "…" : oneLine;
@@ -93,13 +145,14 @@ export function registerSkill(program) {
             printJSON({
                 dir: src.pathOf(),
                 skills: names.map((n) => {
+                    let description = "";
                     try {
-                        const { meta } = readSkill(src, n);
-                        return { name: n, description: meta.description || "" };
+                        description = readSkill(src, n).meta.description || "";
                     }
                     catch {
-                        return { name: n, description: "" };
+                        // unreadable SKILL.md: list it without a description
                     }
+                    return { name: n, description, references: src.refs(n) };
                 }),
             });
             return;
@@ -109,35 +162,54 @@ export function registerSkill(program) {
             return;
         }
         const rows = names.map((n) => {
+            let description = "";
             try {
-                const { meta } = readSkill(src, n);
-                return [n, shortDesc(meta.description || "")];
+                description = shortDesc(readSkill(src, n).meta.description || "");
             }
             catch {
-                return [n, ""];
+                // unreadable SKILL.md: list it without a description
             }
+            return [n, description, src.refs(n).join(", ")];
         });
-        table(["name", "description"], rows);
+        table(["name", "description", "references"], rows);
     });
     skill
         .command("get")
-        .description("Print a skill's full content (markdown)")
+        .description("Print a skill's content (markdown), or one of its references")
         .argument("<name>", "skill name (e.g. core)")
-        .option("--full", "Include reference files (reserved; currently equivalent to default)")
-        .action((name, _opts) => {
+        .option("--ref <ref>", "print one reference instead (e.g. sandboxes, deploys, sdk)")
+        .option("--full", "append every reference after the skill")
+        .action((name, opts) => {
         const src = getSource();
         try {
+            if (opts.ref) {
+                const md = readRef(src, name, opts.ref);
+                if (isJSONMode()) {
+                    printJSON({ name, ref: opts.ref, path: src.pathOf(name, opts.ref), content: md });
+                    return;
+                }
+                process.stdout.write(md.endsWith("\n") ? md : md + "\n");
+                return;
+            }
             const { md, meta } = readSkill(src, name);
+            let content = md;
+            if (opts.full) {
+                for (const ref of src.refs(name)) {
+                    const body = src.readRef(name, ref) ?? "";
+                    content = `${content.trimEnd()}\n\n---\n<!-- references/${ref}.md -->\n\n${body}`;
+                }
+            }
             if (isJSONMode()) {
                 printJSON({
                     name,
                     path: src.pathOf(name),
                     frontmatter: meta,
-                    content: md,
+                    content,
+                    references: refEntries(src, name),
                 });
                 return;
             }
-            process.stdout.write(md.endsWith("\n") ? md : md + "\n");
+            process.stdout.write(content.endsWith("\n") ? content : content + "\n");
         }
         catch (e) {
             fail(e.message, 3);
@@ -147,9 +219,10 @@ export function registerSkill(program) {
         .command("path")
         .description("Print the filesystem path of a skill (or the skills root)")
         .argument("[name]", "skill name; omit to print the skills directory")
-        .action((name) => {
+        .option("--ref <ref>", "print the path of one reference instead")
+        .action((name, opts) => {
         const src = getSource();
-        const target = src.pathOf(name);
+        const target = src.pathOf(name, name ? opts.ref : undefined);
         if (isJSONMode()) {
             printJSON({ path: target });
             return;
