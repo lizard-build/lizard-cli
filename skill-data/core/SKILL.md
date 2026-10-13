@@ -132,7 +132,7 @@ When the user wants to deploy or set up something new, work out the right action
 
 **Git or upload.** Check `git remote get-url origin` first. A GitHub remote → `lizard add -r owner/repo -n <svc> --json`. It tracks `main`; for another branch add `--no-deploy`, then `lizard service set <svc> --set branch=<b>` and `lizard redeploy --service <svc>`. Pushes redeploy only when the Lizard GitHub App covers the repo (`lizard git status --json`). `Repository not found` (exit `3`) means Lizard cannot read the repo: `lizard git connect --json` returns an `installUrl` for the user to open. No remote, not GitHub, or not a git repo → `lizard up --json`. `lizard up` always switches a service to `sourceType=upload`: don't use it on a git-backed service.
 
-**Builds** run on the platform's build nodes; no local Docker needed. lizardpack detects Hugo, Go, Node, Python, Rust, Ruby, PHP, Java and static sites (first match wins). A root `Dockerfile` is used as is (on git builds, unless it only copies prebuilt output such as `COPY dist ...` with no install or build `RUN`). Read a failed build with `lizard logs --build --service <svc> --json`.
+**Builds** run on the platform's build nodes; no local Docker needed. lizardpack detects Hugo, Go, Node, Python, Rust, Ruby, PHP, Java and static sites (first match wins). A root `Dockerfile` is used as is (on git builds, unless it only copies prebuilt output such as `COPY dist ...` with no install or build `RUN`). Read a failed build with `lizard logs --build --service <svc> --json`. A build that fails on the platform's side (`no space left on device`, the build machine lost or restarted) is not the app's fault: retry once, then tell the user instead of retrying again.
 
 **Ports.** The app must listen on `$PORT`. `lizard up` fixes a new service's port from `--port`, else the folder's Dockerfile `EXPOSE`, else 3000; pass `--port` when the app listens elsewhere (Python servers often use 8000 or 8080). A wrong port shows as `the new version had not reported ready` and a crashed first deploy: make the app read `$PORT`, or run `lizard port <n> --service <svc>` and then `lizard redeploy --service <svc>`.
 
@@ -162,6 +162,7 @@ lizard add postgres                  # or one at a time
 - `lizard ps --json` and `lizard add <db> --json` print database passwords and S3 keys in plain text: don't repeat them to the user.
 - S3 comes with a private bucket named `default`, up to 16 GiB per S3 addon. `lizard s3 upload <file>`, `lizard s3 list` and `lizard s3 url <key> --expires <seconds>` (a temporary download link that needs no credentials) work without an AWS SDK; AWS SDKs need `forcePathStyle: true`. Making a bucket public is done in the dashboard.
 - Redis has no persistence settings: keep data you cannot lose in Postgres.
+- To look inside a database, run a client on the user's machine with the real connection values: `lizard run --service postgres -- psql -c '\dt+'` (or any script that reads `DATABASE_URL`). The public URL times out from inside a Lizard sandbox (its firewall lets only ports 80 and 443 through to Lizard's hosts): if that is where you run, say so and give the user that command to run, or query through a deployed service.
 
 Every variable each addon exposes: `lizard skills get core --ref deploys --json`.
 
