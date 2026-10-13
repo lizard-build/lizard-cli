@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resolveProjectId, getProjectLink, setProjectLink } from "../../src/lib/config.js";
+import { resolveProjectId, getProjectLink, setProjectLink, looksLikeId } from "../../src/lib/config.js";
 import { resetDefaultProject } from "../../src/lib/default-project.js";
 import { ensureLinked } from "../../src/commands/init.js";
 import { resolveProject as resolveAddProject } from "../../src/commands/add.js";
@@ -65,8 +65,14 @@ describe("resolveProjectId in an unlinked folder", () => {
   test("a linked folder or --project never asks for it", async () => {
     setProjectLink({ projectId: "p-linked" });
     expect(await resolveProjectId()).toBe("p-linked");
-    expect(await resolveProjectId("abcdefghijklmnopqrstu")).toBe("abcdefghijklmnopqrstu");
+    expect(await resolveProjectId("abcdefghijKlmnopqrstu")).toBe("abcdefghijKlmnopqrstu");
     expect(requested()).toEqual([]);
+  });
+
+  test("a 21-character lowercase name is looked up, not sent as an id", async () => {
+    expect(looksLikeId("ev-r1-deploy-monorepo")).toBe(false);
+    expect(looksLikeId("EmKpChcrzdgwf0EV1WZaD")).toBe(true);
+    expect(looksLikeId("short")).toBe(false);
   });
 
   test("no default project, or a platform without the route: the old error", async () => {

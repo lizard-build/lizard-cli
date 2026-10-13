@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import { api, APIError } from "./api.js";
-import { info } from "./format.js";
+import { info, isJSONMode } from "./format.js";
 
 // The project a command uses when the folder is not linked and no --project is
 // given: the platform's default for this account (GET /api/projects/default),
@@ -37,7 +37,10 @@ let noted = false;
 export function noteDefaultProject(name: string): void {
   if (noted) return;
   noted = true;
-  info(chalk.dim(`Project: ${name} (your default). Pass --project for another, or run \`lizard init\` to link this folder.`));
+  const note = `Project: ${name} (your default). Pass --project for another, or run \`lizard init\` to link this folder.`;
+  // stderr, so stdout stays pure JSON; agents read both and need to know where the command landed.
+  if (isJSONMode()) process.stderr.write(note + "\n");
+  else info(chalk.dim(note));
 }
 
 /** For tests: forget the cached answer. */

@@ -156,6 +156,24 @@ export function isProjectDeletedError(err) {
     const body = err.body;
     return body?.error === "Project is being deleted";
 }
+const DROPPED = new Set(["UND_ERR_SOCKET", "UND_ERR_CLOSED", "ECONNRESET", "EPIPE", "ECONNREFUSED"]);
+/**
+ * fetch for reads: a connection the network dropped before any response is retried
+ * twice. Reads change nothing, so a retry is safe; writes are never retried here.
+ */
+async function fetchWithRetry(url, init) {
+    for (let attempt = 1;; attempt++) {
+        try {
+            return await fetch(url, init);
+        }
+        catch (e) {
+            const code = e?.cause?.code ?? e?.code;
+            if (attempt >= 3 || !DROPPED.has(code))
+                throw e;
+            await new Promise((r) => setTimeout(r, 300 * attempt));
+        }
+    }
+}
 async function request(method, path, body, extraHeaders = {}) {
     const url = baseURL + path;
     const token = _accessToken || getToken();
@@ -169,11 +187,8 @@ async function request(method, path, body, extraHeaders = {}) {
     if (body !== undefined) {
         headers["Content-Type"] = "application/json";
     }
-    const res = await fetch(url, {
-        method,
-        headers,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    const init = { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined };
+    const res = method === "GET" ? await fetchWithRetry(url, init) : await fetch(url, init);
     if (!res.ok) {
         let body = null;
         try {
@@ -194,7 +209,7 @@ export async function getRawBytes(path) {
     const headers = clientHeaders();
     if (token)
         headers["Authorization"] = `Bearer ${token}`;
-    const res = await fetch(url, { method: "GET", headers });
+    const res = await fetchWithRetry(url, { method: "GET", headers });
     if (!res.ok) {
         let body = null;
         try {

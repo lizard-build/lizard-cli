@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { Command } from "commander";
+import { spawnSync } from "node:child_process";
 import { info, success, isJSONMode, printJSON } from "../lib/format.js";
 import {
   CURRENT_VERSION,
@@ -75,8 +76,17 @@ export function registerUpgrade(program: Command) {
       }
 
       // npm install — self-replacing process.execPath would overwrite the
-      // user's node binary. Point at npm instead.
+      // user's node binary, so let npm do it. Agents on an old copy (sandbox templates
+      // ship one) need the upgrade to happen, not a hint they may not follow.
       if (!isStandaloneBinary()) {
+        const spec = `@lizard-build/cli@${latest}`;
+        if (!isJSONMode()) info(`Upgrading v${CURRENT_VERSION} → ${chalk.green("v" + latest)} with npm...`);
+        const r = spawnSync("npm", ["install", "-g", spec], { encoding: "utf8", shell: process.platform === "win32" });
+        if (r.status === 0) {
+          if (isJSONMode()) printJSON({ previousVersion: CURRENT_VERSION, latestVersion: latest, upgraded: true, method: "npm" });
+          else success(`Upgraded to v${latest}`);
+          return;
+        }
         if (isJSONMode()) {
           printJSON({
             currentVersion: CURRENT_VERSION,
@@ -85,11 +95,12 @@ export function registerUpgrade(program: Command) {
             upgraded: false,
             method: "npm",
             hint: "npm install -g @lizard-build/cli@latest",
+            error: ((r.stderr || "") + (r.error?.message ?? "")).trim().split("\n").slice(-3).join(" ") || null,
           });
           return;
         }
-        info(`Update available: v${CURRENT_VERSION} → ${chalk.green("v" + latest)}`);
-        info(`This copy was installed via npm. Upgrade with:`);
+        info(`npm could not upgrade this copy (${(r.stderr || r.error?.message || "").trim().split("\n").pop()}).`);
+        info(`Upgrade it yourself, with the rights npm needs:`);
         info(`  ${chalk.cyan("npm install -g @lizard-build/cli@latest")}`);
         return;
       }

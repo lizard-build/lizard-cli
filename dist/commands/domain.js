@@ -3,7 +3,7 @@ import * as p from "@clack/prompts";
 import { api } from "../lib/api.js";
 import { resolveProjectId } from "../lib/config.js";
 import { getActiveService } from "../lib/resolve.js";
-import { success, isJSONMode, printJSON, isTTY } from "../lib/format.js";
+import { success, isJSONMode, printJSON, isTTY, info } from "../lib/format.js";
 /**
  * `lizard domain` — domain management.
  *   bare         → if no domain, auto-generate one; otherwise show current
@@ -58,7 +58,12 @@ export function registerDomain(program) {
             }
             return;
         }
-        // Attach custom hostname
+        // Attach custom hostname. Anything without a dot is a typo or a missing subcommand
+        // (`lizard domain list` once attached a domain literally named "list").
+        if (!/^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/i.test(hostname)) {
+            throw new Error(`"${hostname}" is not a domain name. Attach a full hostname such as app.example.com; ` +
+                "`lizard domain list` shows the service's domains.");
+        }
         const result = await api
             .post(`/api/apps/${service.id}/domains`, {
             hostname,
@@ -194,6 +199,31 @@ export function registerDomain(program) {
         else {
             success(`Domain generated: ${chalk.cyan(`https://${result.hostname}`)}`);
             console.log(chalk.dim(`  Reference from other services: ${chalk.cyan(`\${{${service.name}.LIZARD_PUBLIC_DOMAIN}}`)}`));
+        }
+    });
+    dom
+        .command("list")
+        .alias("ls")
+        .description("List the service's domains, and custom domains still waiting for DNS verification")
+        .action(async (_opts, sub) => {
+        const opts = sub.optsWithGlobals();
+        const projectId = await resolveProjectId(opts.project);
+        const service = await getActiveService(opts.service, projectId);
+        const r = await api.get(`/api/apps/${service.id}/domains`);
+        if (isJSONMode())
+            return printJSON({ service: service.name, ...r });
+        const active = r.domains ?? [];
+        if (!active.length && !(r.pending ?? []).length) {
+            info(`${service.name} has no domain yet. Generate one: lizard domain --service ${service.name}`);
+            return;
+        }
+        for (const d of active)
+            console.log(`${chalk.green("●")} https://${d}`);
+        for (const p of r.pending ?? []) {
+            console.log(`${chalk.yellow("○")} ${p.hostname} ${chalk.dim("(waiting for DNS)")}`);
+            console.log(chalk.dim(`    TXT   ${p.txtRecord}  ${p.txtValue}`));
+            console.log(chalk.dim(`    CNAME ${p.hostname}  ${p.cnameTarget}`));
+            console.log(chalk.dim(`    then: lizard domain verify ${p.hostname} --service ${service.name}`));
         }
     });
     dom

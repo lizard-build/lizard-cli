@@ -9,7 +9,7 @@ import open from "open";
 import { api, APIError, getBaseURL, getRawBytes, apiErrorFrom, clientHeaders, getRequestToken, withQuery, withScope } from "../lib/api.js";
 import { getToken } from "../lib/auth.js";
 import { resolveProjectScope } from "../lib/resolve.js";
-import { getProjectLink, resolveProjectId } from "../lib/config.js";
+import { getProjectLink, resolveProjectId, looksLikeId } from "../lib/config.js";
 import { resolveVolume } from "../lib/volume.js";
 import { sandboxShell } from "./sandbox-ssh.js";
 import { startVncTunnel, vncTarget } from "./sandbox-vnc.js";
@@ -20,7 +20,7 @@ import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAg
 // still rejected before a request was ever sent — codex and interpreter both were. The
 // server validates against the region's actual list and answers with what IS available,
 // so let it.
-const TEMPLATE_HINT = "base, codex, interpreter, desktop";
+const TEMPLATE_HINT = "base, interpreter, codex, claude, opencode, pi, prime, desktop";
 // The three machines a sandbox can be, each priced per hour, billed per second by the server. The
 // platform rejects anything else, so the CLI offers exactly these.
 const SANDBOX_SIZES = ["small", "medium", "large"];
@@ -98,7 +98,7 @@ export function registerSandbox(program) {
         .option("--region <code>", "Region to create the sandbox in")
         .option("--snapshot <id>", "Create from a private saved snapshot (runs on the machine it was captured on)")
         .option("--volume <name-or-id>", "Attach a persistent volume")
-        .option("--with-token [key]", "Install this liz_ key inside the sandbox so `lizard` works there (defaults to the key you are using)")
+        .option("--with-token [key]", "Sign in `lizard` inside the sandbox with a new key limited to the sandbox's project and deleted with it (this liz_ key, or the one you use, only authorizes the request)")
         .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
         .action(async (opts) => {
         // A snapshot restores onto the machine it was captured on, so the server ignores a
@@ -136,7 +136,7 @@ export function registerSandbox(program) {
         let volumeId;
         let volumeName;
         if (opts.volume) {
-            if (/^[A-Za-z0-9_-]{21}$/.test(opts.volume))
+            if (looksLikeId(opts.volume))
                 volumeId = opts.volume;
             else
                 volumeName = opts.volume;
@@ -504,7 +504,7 @@ Examples:
             api.get(`/api/sandbox-snapshots/${snapshotId}`),
             opts.project ? resolveProjectId(opts.project) : Promise.resolve(undefined),
         ]);
-        const volume = opts.volume ? (/^fcv-|^[A-Za-z0-9_-]{21}$/.test(opts.volume) ? { volumeId: opts.volume } : { volumeName: opts.volume }) : {};
+        const volume = opts.volume ? ((/^fcv-/.test(opts.volume) || looksLikeId(opts.volume)) ? { volumeId: opts.volume } : { volumeName: opts.volume }) : {};
         // A volume picks its own project when none is named; a name needs one to be found in.
         const project = projectId ?? (volume.volumeId ? undefined : snapshot.projectId);
         const sandbox = await api.post("/api/sandboxes", { snapshotId, projectId: project, region: snapshot.region, timeoutMs: opts.timeout, ...volume });
@@ -709,6 +709,14 @@ export function execStream(sandboxId, cmd, onLine) {
                 if (currentEvent === "exit") {
                     try {
                         const code = JSON.parse(data).exitCode;
+                        // -1: the platform stopped waiting (150 s). Say so; the bare "invalid event"
+                        // left agents guessing and retrying the same long command.
+                        if (code === -1) {
+                            reject(new APIError(408, "The command was still running after 150 seconds, so exec stopped waiting (it may still be running in the sandbox). " +
+                                `Start long jobs in the background and read a log: lizard sandbox exec ${sandboxId} -- sh -c 'nohup <cmd> > /tmp/job.log 2>&1 &', ` +
+                                `then lizard sandbox exec ${sandboxId} -- tail -n 50 /tmp/job.log`, "EXEC_TIMEOUT"));
+                            return;
+                        }
                         if (!Number.isInteger(code) || code < 0 || code > 255) {
                             throw new Error("Invalid exec exit code");
                         }

@@ -15,6 +15,7 @@ vi.mock("open", () => ({ default: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("../../src/lib/config.js", () => ({
   resolveProjectId: vi.fn().mockResolvedValue("project-test"),
   getProjectLink: vi.fn(() => ({ projectId: "project-test" })),
+  looksLikeId: (v: string) => /^[A-Za-z0-9_-]{21}$/.test(v) && /[A-Z]/.test(v),
 }));
 vi.mock("../../src/lib/format.js", () => ({ isJSONMode: () => true, printJSON: vi.fn() }));
 

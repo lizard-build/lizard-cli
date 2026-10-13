@@ -196,7 +196,6 @@ async function runAdd(input) {
             if (opts.variables?.length) {
                 info(chalk.yellow("Warning: --variables is ignored for managed addons"));
             }
-            const isSingle = databases.length === 1;
             for (const db of databases) {
                 const cat = CATALOG.find((c) => c.name === db);
                 info(`Adding ${chalk.cyan(cat.label)}...`);
@@ -219,12 +218,8 @@ async function runAdd(input) {
                         info(`    ${chalk.cyan(`\${{${ref}.${exampleVar}}}`)}`);
                     }
                 }
-                if (isSingle) {
-                    try {
-                        updateProjectLink({ serviceId: addon.id, serviceName: addon.name });
-                    }
-                    catch { }
-                }
+                // The folder keeps its service link: linking it to the addon sent the next
+                // `lizard up` / `secrets set` / `logs --build` to a database ("App not found").
             }
             return;
         }

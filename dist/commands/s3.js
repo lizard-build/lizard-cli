@@ -1,10 +1,40 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash, createHmac } from "node:crypto";
 import chalk from "chalk";
 import { api, getBaseURL, withScope, APIError } from "../lib/api.js";
 import { getToken } from "../lib/auth.js";
 import { resolveProjectScope } from "../lib/resolve.js";
 import { success, info, isJSONMode, printJSON, table, timeAgo } from "../lib/format.js";
+const rfc3986 = (v) => encodeURIComponent(v).replace(/[!'()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase());
+const sha256hex = (v) => createHash("sha256").update(v).digest("hex");
+const hmac = (key, v) => createHmac("sha256", key).update(v).digest();
+/**
+ * A SigV4 presigned GET for one object (path style, the way the S3 gateway expects it).
+ * The link works for `expiresIn` seconds without any credentials, so it is safe to hand
+ * to someone who must not get the addon's keys.
+ */
+export function presignGet(o) {
+    const base = new URL(o.endpoint);
+    const segments = [...base.pathname.split("/").filter(Boolean), o.bucket, ...o.key.split("/")];
+    const canonicalUri = "/" + segments.map(rfc3986).join("/");
+    const iso = (o.now ?? new Date()).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+    const date = iso.slice(0, 8);
+    const scope = `${date}/${o.region}/s3/aws4_request`;
+    const query = {
+        "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+        "X-Amz-Credential": `${o.accessKeyId}/${scope}`,
+        "X-Amz-Date": iso,
+        "X-Amz-Expires": String(o.expiresIn),
+        "X-Amz-SignedHeaders": "host",
+    };
+    const canonicalQuery = Object.keys(query).sort().map((k) => `${rfc3986(k)}=${rfc3986(query[k])}`).join("&");
+    const canonicalRequest = ["GET", canonicalUri, canonicalQuery, `host:${base.host}\n`, "host", "UNSIGNED-PAYLOAD"].join("\n");
+    const toSign = ["AWS4-HMAC-SHA256", iso, scope, sha256hex(canonicalRequest)].join("\n");
+    const key = hmac(hmac(hmac(hmac("AWS4" + o.secretKey, date), o.region), "s3"), "aws4_request");
+    const signature = createHmac("sha256", key).update(toSign).digest("hex");
+    return `${base.protocol}//${base.host}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`;
+}
 /** Resolve the S3 addon to operate on: explicit --addon (name or id), or the
  *  project's single s3-type addon when there's exactly one. */
 async function resolveS3AddonId(projectId, scope, addonFlag) {
@@ -127,6 +157,35 @@ export function registerS3(program) {
                 info(chalk.dim("  Bucket is not public-read — no direct URL. See the dashboard to flip ACL."));
             }
         }
+    });
+    s3.command("url")
+        .description("Print a temporary download link for an object (works without credentials until it expires)")
+        .argument("<key>", "Object key, e.g. report.txt")
+        .option("--addon <name>", "S3 addon name or ID (default: the project's only S3 addon)")
+        .option("--bucket <name>", "Bucket", "default")
+        .option("--expires <seconds>", "How long the link works, in seconds (max 604800 = 7 days)", "3600")
+        .option("-p, --project <id>", "Project name, slug, or ID")
+        .action(async (key, opts) => {
+        const expiresIn = Number(opts.expires);
+        if (!Number.isInteger(expiresIn) || expiresIn < 1 || expiresIn > 604800) {
+            throw new Error(`--expires must be a whole number of seconds from 1 to 604800 (got ${opts.expires}).`);
+        }
+        const { projectId, scope } = await resolveProjectScope(opts.project);
+        const addon = await resolveS3AddonId(projectId, scope, opts.addon);
+        const data = await api.get(withScope(`/api/projects/${projectId}/services`, scope));
+        const c = (data.addons ?? []).find((a) => a.id === addon.id)?.connection;
+        if (!c?.endpoint || !c.accessKeyId || !c.secretKey) {
+            throw new Error(`S3 addon ${addon.name} has no credentials yet; wait until it is running (lizard ps).`);
+        }
+        const url = presignGet({
+            endpoint: c.endpoint, accessKeyId: c.accessKeyId, secretKey: c.secretKey, region: c.region || "us-east-1",
+            bucket: opts.bucket, key, expiresIn,
+        });
+        const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+        if (isJSONMode())
+            return printJSON({ url, key, bucket: opts.bucket, expiresIn, expiresAt });
+        console.log(url);
+        info(chalk.dim(`Works until ${expiresAt}. Anyone with the link can download ${key}.`));
     });
     s3.command("list")
         .alias("ls")

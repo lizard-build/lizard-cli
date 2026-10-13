@@ -5,7 +5,7 @@ import { createTarball } from "../lib/archive.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
-import { api, streamSSE, getBaseURL, clientHeaders, APIError, apiErrorFrom, isPaymentRequired } from "../lib/api.js";
+import { api, streamSSE, getBaseURL, clientHeaders, APIError, apiErrorFrom, isPaymentRequired, withScope } from "../lib/api.js";
 import { updateProjectLink } from "../lib/config.js";
 import { resolveContext, getScope } from "../lib/resolve.js";
 import { ensureLinked } from "./init.js";
@@ -39,11 +39,28 @@ export function registerUp(program) {
         const region = opts.region;
         // An unlinked folder goes to the default project (or --project, or init's questions)
         await ensureLinked({ projectName: projectFlag, useDefault: true });
-        // Resolve target service: --service flag → linked → first-in-project → prompt-or-fail
-        const ctx = await resolveContext({
-            projectFlag,
-            serviceFlag,
-        });
+        // Resolve target service: --service flag → linked → first-in-project → prompt-or-fail.
+        // `--service <name>` that doesn't exist yet names the new service instead of failing:
+        // agents (and people) reach for it to choose the name of a first deploy.
+        let ctx;
+        try {
+            ctx = await resolveContext({ projectFlag, serviceFlag });
+        }
+        catch (e) {
+            if (!serviceFlag || !/not found in project/.test(String(e?.message)))
+                throw e;
+            ctx = { ...(await resolveContext({ projectFlag })), service: undefined };
+            info(chalk.dim(`Service ${serviceFlag} doesn't exist yet: creating it.`));
+        }
+        // A folder linked to an addon (`lizard add postgres` links it) must not send code there.
+        if (ctx.service) {
+            const services = await api.get(withScope(`/api/projects/${ctx.projectId}/services`, getScope(ctx)));
+            if (services.addons?.some((a) => a.id === ctx.service.id)) {
+                if (serviceFlag)
+                    throw new Error(`${ctx.service.name} is a managed addon, not a service you deploy code to. Pass the app's --service.`);
+                ctx = { ...ctx, service: undefined };
+            }
+        }
         const projectId = ctx.projectId;
         const scope = getScope(ctx);
         const targetPath = pathArg ? path.resolve(pathArg) : process.cwd();

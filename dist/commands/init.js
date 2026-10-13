@@ -53,6 +53,21 @@ export async function ensureLinked(opts = {}) {
             return link;
         }
     }
+    // A named project may live in any workspace. Look it up everywhere first: the flow
+    // below searches one workspace only and creates the project when that workspace has
+    // no match, which made a duplicate of a project in another workspace (and, for a key
+    // limited to that project, failed with 404 "Project not found").
+    if (opts.projectName && !opts.workspaceFlag) {
+        const lower = opts.projectName.toLowerCase();
+        const all = await api.get("/api/projects");
+        const matches = all.filter((pr) => pr.id.toLowerCase() === lower || pr.slug?.toLowerCase() === lower || pr.name.toLowerCase() === lower);
+        if (matches.length === 1) {
+            const m = matches[0];
+            const link = { projectId: m.id, projectName: m.name, workspaceId: m.workspaceId, workspaceName: m.workspaceName };
+            setProjectLink(link);
+            return link;
+        }
+    }
     // 1. Workspace
     const workspaces = await fetchWorkspaces();
     const workspace = await pickWorkspace({

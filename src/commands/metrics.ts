@@ -2,7 +2,7 @@ import chalk from "chalk";
 import { Command } from "commander";
 import { api, withScope, withQuery, APIError, type ResourceScope } from "../lib/api.js";
 import { getProjectLink } from "../lib/config.js";
-import { resolveProjectScope, getActiveServiceWithKind } from "../lib/resolve.js";
+import { resolveProjectScope, getActiveServiceWithKind, lookupProjectWorkspace } from "../lib/resolve.js";
 import { info, fail, isJSONMode, printJSON, table, timeAgo } from "../lib/format.js";
 
 // Shapes returned by /api/apps/:id/metrics and /api/projects/:id/metrics.
@@ -584,6 +584,11 @@ function fmtPeriodDate(ms: number): string {
 }
 
 async function showCost(projectId: string, scope: ResourceScope) {
+  // Scopes for other commands skip the workspace lookup (their routes ignore it), so an
+  // unlinked folder or --project arrives here without one: fetch it, cost needs it.
+  if (!scope.workspaceId) {
+    scope = { ...scope, workspaceId: (await lookupProjectWorkspace(projectId))?.workspaceId ?? null };
+  }
   if (!scope.workspaceId) {
     fail("Could not resolve the workspace for this project. Run `lizard link` first.");
   }
@@ -599,7 +604,11 @@ async function showCost(projectId: string, scope: ResourceScope) {
     ]);
   } catch (e) {
     if (e instanceof APIError && e.status === 403) {
-      fail("Billing is only visible to the workspace owner.", 2);
+      // A key limited to some projects can't read the workspace's billing at all; only
+      // a plain 403 means "not the owner".
+      fail(/API key/i.test(e.message)
+        ? `${e.message} Costs need a key that covers the whole workspace, or a full sign-in (lizard login).`
+        : "Billing is only visible to the workspace owner.", 2);
     }
     throw e;
   }

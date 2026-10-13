@@ -61,13 +61,10 @@ export function registerWorkspace(program) {
         if (workspace.role !== "owner") {
             throw new Error("Only the workspace owner can delete it.");
         }
-        // Empty workspaces only. Check here for a clear message; the backend
-        // enforces the same via ?requireEmpty=true and also refuses if any
-        // sandbox remains (which the CLI can't count on its own).
-        const projectCount = workspace.projectCount ?? 0;
-        if (projectCount > 0) {
-            throw new Error(`Workspace "${workspace.name}" has ${projectCount} project(s). Delete them first, or use the dashboard to remove everything.`);
-        }
+        // Empty workspaces only: the backend checks that with ?requireEmpty=true (live
+        // projects, sandboxes and volumes) and says what is left. The list's projectCount
+        // also counts projects in the 3-day trash, so a client-side check here refused a
+        // workspace whose projects had all just been deleted.
         if (!opts.yes && isTTY() && !isJSONMode()) {
             const ok = await p.confirm({ message: `Delete workspace ${chalk.bold(workspace.name)}?` });
             if (p.isCancel(ok) || !ok)

@@ -51,5 +51,12 @@ export declare function clearProjectLink(cwd?: string): void;
  * when a flag is provided so name/slug lookups work as advertised.
  */
 export declare function resolveProjectId(flagValue?: string): Promise<string>;
+/**
+ * A 21-character nanoid. Names and slugs use the same characters, and a 21-character
+ * name ("ev-r1-deploy-monorepo") was sent as an id and came back "Project not found".
+ * Ids almost always hold an uppercase letter (all-lowercase is about a 1-in-55,000 draw);
+ * names and slugs rarely do, so require one.
+ */
+export declare function looksLikeId(value: string): boolean;
 /** List projects and match on id, slug or name — for anything not shaped like an id. */
 export declare function resolveProjectIdSlow(flagValue: string): Promise<string>;

@@ -3,7 +3,7 @@ import * as p from "@clack/prompts";
 import { Command } from "commander";
 import { api, withScope, type ResourceScope } from "../lib/api.js";
 import { assertValidVolumeName, resolveVolume, type VolumeRecord } from "../lib/volume.js";
-import { resolveProjectScope } from "../lib/resolve.js";
+import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { success, info, warn, isJSONMode, printJSON, table, isTTY } from "../lib/format.js";
 
 function parseIntOption(v: string): number {
@@ -19,19 +19,37 @@ function parseSizeGbOption(v: string): number {
   return parseIntOption(v);
 }
 
+interface ServiceVolume { id: string; name: string; sizeGb: number; mountPath?: string | null; status: string }
+
+/** The app a --service flag names; volumes attach to apps, not addons. */
+async function serviceApp(projectId: string, nameOrId: string) {
+  const svc = await resolveService(projectId, nameOrId);
+  if (svc.kind !== "app") throw new Error(`${svc.name} is a managed addon; its storage is managed for you.`);
+  return svc;
+}
+
 export function registerVolume(program: Command) {
   const vol = program
     .command("volume")
     .alias("vol")
-    .description("Manage persistent volumes for sandboxes");
+    .description("Manage persistent volumes for sandboxes and services");
 
   vol
     .command("list")
     .alias("ls")
-    .description("List volumes in a project")
+    .description("List volumes in a project (sandbox volumes), or a service's volume with --service")
+    .option("-s, --service <name>", "List the volume attached to this service")
     .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (opts) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);
+      if (opts.service) {
+        const app = await serviceApp(projectId, opts.service);
+        const attached = await api.get<ServiceVolume[]>(`/api/apps/${app.id}/volumes`);
+        if (isJSONMode()) return printJSON(attached);
+        if (!attached.length) return console.log(`${app.name} has no volume. Add one: lizard volume create data --service ${app.name}`);
+        table(["Name", "Size", "Mounted at", "Status"], attached.map((v) => [v.name, `${v.sizeGb} GB`, v.mountPath ?? "—", v.status]));
+        return;
+      }
       const volumes = await api.get<VolumeRecord[]>(
         withScope(`/api/projects/${projectId}/volumes`, scope),
       );
@@ -62,13 +80,26 @@ export function registerVolume(program: Command) {
   vol
     .command("create")
     .argument("<name>", "Volume name")
-    .description("Create a persistent volume")
+    .description("Create a persistent volume for sandboxes, or create one and attach it to a service with --service")
     .option("--size <gb>", "Size in GB (server limits apply; default 5)", parseIntOption)
     .option("--region <code>", "Region to place the volume in (must match the sandbox that will attach it)")
+    .option("-s, --service <name>", "Attach it to this service instead (one volume per service; files there survive restarts and redeploys)")
+    .option("--mount-path <path>", "With --service: where the service sees it (default /data)")
     .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (name: string, opts) => {
       assertValidVolumeName(name);
       const { projectId, scope } = await resolveProjectScope(opts.project);
+      if (opts.service) {
+        const app = await serviceApp(projectId, opts.service);
+        const mountPath: string = opts.mountPath ?? "/data";
+        if (!mountPath.startsWith("/")) throw new Error(`--mount-path must be an absolute path (got ${mountPath}).`);
+        if (!isJSONMode()) info(`Creating volume ${chalk.cyan(name)} on ${chalk.cyan(app.name)} at ${mountPath}...`);
+        const created = await api.post<ServiceVolume>(`/api/apps/${app.id}/volumes`, { name, sizeGb: opts.size ?? 5, mountPath });
+        if (isJSONMode()) return printJSON(created);
+        success(`Volume ${chalk.bold(created.name)} (${created.sizeGb} GB) attached to ${app.name} at ${created.mountPath ?? mountPath}`);
+        info(chalk.dim("  The service restarts with it mounted. Keep files you must not lose under that path."));
+        return;
+      }
       const limits = await api.get<{ minSizeGb: number; maxSizeGb: number; defaultSizeGb: number }>(
         withScope(`/api/projects/${projectId}/volume-limits`, scope),
       );

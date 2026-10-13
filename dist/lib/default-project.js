@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import { api, APIError } from "./api.js";
-import { info } from "./format.js";
+import { info, isJSONMode } from "./format.js";
 let lookup;
 /**
  * The default project, asked once per run. Null when the account has none, or
@@ -21,7 +21,12 @@ export function noteDefaultProject(name) {
     if (noted)
         return;
     noted = true;
-    info(chalk.dim(`Project: ${name} (your default). Pass --project for another, or run \`lizard init\` to link this folder.`));
+    const note = `Project: ${name} (your default). Pass --project for another, or run \`lizard init\` to link this folder.`;
+    // stderr, so stdout stays pure JSON; agents read both and need to know where the command landed.
+    if (isJSONMode())
+        process.stderr.write(note + "\n");
+    else
+        info(chalk.dim(note));
 }
 /** For tests: forget the cached answer. */
 export function resetDefaultProject() {

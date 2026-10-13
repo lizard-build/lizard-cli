@@ -2,7 +2,7 @@ import chalk from "chalk";
 import ora from "ora";
 import open from "open";
 import * as p from "@clack/prompts";
-import { api } from "../lib/api.js";
+import { api, APIError } from "../lib/api.js";
 import { success, info, isJSONMode, printJSON, table, timeAgo } from "../lib/format.js";
 // Built-in coding agents (platform: server/src/routes/agents.ts), Boat-style.
 //
@@ -189,6 +189,25 @@ function render(e, verbose) {
             break;
     }
 }
+/**
+ * One page of a conversation's events. The agent keeps working in the sandbox while we
+ * watch, so a dropped connection or a 5xx must not end the watch: retry for about two
+ * minutes before giving up.
+ */
+async function pollEvents(id, conversationId, after) {
+    const path = `/api/sandboxes/${id}/events?after=${after}&conversationId=${conversationId}&limit=500`;
+    for (let attempt = 1;; attempt++) {
+        try {
+            return await api.get(path);
+        }
+        catch (e) {
+            const transient = !(e instanceof APIError) || e.status === 429 || e.status >= 500;
+            if (!transient || attempt >= 24)
+                throw e;
+            await sleep(Math.min(1000 * attempt, 5000));
+        }
+    }
+}
 export function registerSandboxAgentCommands(sb) {
     sb.command("prompt")
         .argument("<id>", "Sandbox ID")
@@ -233,7 +252,7 @@ Examples:
         });
         let after = 0;
         for (;;) {
-            const r = await api.get(`/api/sandboxes/${id}/events?after=${after}&conversationId=${started.conversationId}&limit=500`);
+            const r = await pollEvents(id, started.conversationId, after);
             after = r.next ?? after;
             for (const e of r.events) {
                 if (e.promptId !== started.promptId)

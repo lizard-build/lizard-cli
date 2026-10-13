@@ -48,9 +48,13 @@ describe("sandbox exec stream", () => {
     respond = (_req, res) => res.end(body);
     await expect(execStream("sb", "test", () => {})).rejects.toMatchObject({ code: "EXEC_STREAM_INCOMPLETE" });
   });
-  it.each([null, -1, 256, 1.5, "0"])("rejects invalid exit code %s", async exitCode => {
+  it.each([null, -2, 256, 1.5, "0"])("rejects invalid exit code %s", async exitCode => {
     respond = (_req, res) => res.end(`event: exit\ndata: ${JSON.stringify({ exitCode })}\n\n`);
     await expect(execStream("sb", "test", () => {})).rejects.toThrow("Invalid exec exit event");
+  });
+  it("reports exit code -1 as the platform's 150-second limit, with status 408", async () => {
+    respond = (_req, res) => res.end(`event: exit\ndata: {"exitCode":-1}\n\n`);
+    await expect(execStream("sb", "test", () => {})).rejects.toMatchObject({ status: 408, code: "EXEC_TIMEOUT" });
   });
   it.each([401, 403, 404, 408, 504])("preserves HTTP %i as an APIError", async status => {
     respond = (_req, res) => { res.writeHead(status); res.end(JSON.stringify({ error: "test failure", code: "TEST" })); };
