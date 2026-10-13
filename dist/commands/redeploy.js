@@ -118,7 +118,7 @@ export function registerRedeploy(program) {
                     process.stdout.write(data + "\n");
                 }
                 return true;
-            });
+            }, { reconnect: true }); // a dropped connection (ECONNRESET) must not end the wait
         }
         if (opts.wait) {
             if (buildFailed) {

@@ -130,7 +130,7 @@ export function registerRedeploy(program: Command) {
             process.stdout.write(data + "\n");
           }
           return true;
-        });
+        }, { reconnect: true }); // a dropped connection (ECONNRESET) must not end the wait
       }
 
       if (opts.wait) {

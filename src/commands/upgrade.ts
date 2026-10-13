@@ -7,6 +7,7 @@ import {
   canSelfUpdate,
   getLatestVersion,
   installerCommand,
+  isNewerVersion,
   isStandaloneBinary,
   selfUpdate,
 } from "../lib/updater.js";
@@ -48,7 +49,8 @@ export function registerUpgrade(program: Command) {
       }
 
       const latest = result.version;
-      const updateAvailable = latest !== CURRENT_VERSION;
+      // Newer only: a local build ahead of the release must not "upgrade" back to it.
+      const updateAvailable = isNewerVersion(latest, CURRENT_VERSION);
 
       if (isJSONMode() && opts.check) {
         printJSON({ currentVersion: CURRENT_VERSION, latestVersion: latest, updateAvailable });

@@ -38,7 +38,7 @@ lizard sandbox exec <id> -- sh -c 'cd /workspace && nohup npm run build > build.
 lizard sandbox exec <id> -- tail -n 50 /workspace/build.log
 ```
 
-Ports 25, 465, 587 and 2525 are blocked for outbound traffic: sandboxes cannot send mail directly.
+Ports 25, 465, 587 and 2525 are blocked for outbound traffic: sandboxes cannot send mail directly. Lizard's own hosts answer a sandbox only on ports 80 and 443, so the public URLs of managed Postgres and Redis (high ports on those hosts) time out from inside a sandbox; reach them from a deployed service or from the user's machine.
 
 ## Files
 

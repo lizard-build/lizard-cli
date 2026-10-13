@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import { spawnSync } from "node:child_process";
 import { info, success, isJSONMode, printJSON } from "../lib/format.js";
-import { CURRENT_VERSION, canSelfUpdate, getLatestVersion, installerCommand, isStandaloneBinary, selfUpdate, } from "../lib/updater.js";
+import { CURRENT_VERSION, canSelfUpdate, getLatestVersion, installerCommand, isNewerVersion, isStandaloneBinary, selfUpdate, } from "../lib/updater.js";
 export function registerUpgrade(program) {
     program
         .command("upgrade")
@@ -35,7 +35,8 @@ export function registerUpgrade(program) {
             return;
         }
         const latest = result.version;
-        const updateAvailable = latest !== CURRENT_VERSION;
+        // Newer only: a local build ahead of the release must not "upgrade" back to it.
+        const updateAvailable = isNewerVersion(latest, CURRENT_VERSION);
         if (isJSONMode() && opts.check) {
             printJSON({ currentVersion: CURRENT_VERSION, latestVersion: latest, updateAvailable });
             return;
