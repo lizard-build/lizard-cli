@@ -14,6 +14,7 @@ import {
   signInInteractive,
   startSession,
   type AuthProvider,
+  describeMe,
   type Me,
 } from "../lib/signin.js";
 import { CREDITS_END, billingUrl, daysLeft, describeSubscription, usd, type Subscription } from "./billing.js";
@@ -173,9 +174,9 @@ async function loginForAgent(flag?: AuthProvider): Promise<void> {
   const state = accountState(sub);
   printJSON({
     status: "complete",
-    username: me.username,
-    ...(me.email ? { email: me.email } : {}),
-    ...(me.scoped ? { scoped: true } : {}),
+    ...(me.scoped
+      ? { scoped: true, scopes: me.scopes ?? [] }
+      : { username: me.username, ...(me.email ? { email: me.email } : {}) }),
     source,
     account: {
       state,
@@ -231,11 +232,11 @@ async function loginInteractive(flag?: AuthProvider): Promise<void> {
 
   const me = await currentUser();
   if (me) {
-    p.log.success(`Signed in as ${chalk.bold(me.username)}`);
+    p.log.success(`Signed in as ${chalk.bold(describeMe(me))}`);
     p.log.message(chalk.dim("To use another account: lizard logout, then lizard login."));
   } else if ((await resumePending()).kind === "complete") {
     const resumed = await api.get<Me>("/api/auth/me");
-    p.log.success(`Signed in as ${chalk.bold(resumed.username)}`);
+    p.log.success(`Signed in as ${chalk.bold(describeMe(resumed))}`);
   } else {
     await signInInteractive(flag);
   }
@@ -252,20 +253,23 @@ async function loginWithToken(token: string): Promise<void> {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error("Invalid token");
-  const user = (await res.json()) as any;
+  const user = (await res.json()) as Me & { avatarUrl?: string };
   const expMs = jwtExpiryMs(token);
+  // A scoped key's credentials keep no owner identity, even if an older platform sent it.
   saveCredentials({
     accessToken: token,
     expiresAt: expMs ? new Date(expMs).toISOString() : undefined,
-    userId: user.id,
-    username: user.username,
-    email: user.email,
-    avatarUrl: user.avatarUrl,
+    userId: user.scoped ? "" : user.id ?? "",
+    username: user.scoped ? "" : user.username ?? "",
+    email: user.scoped ? undefined : user.email ?? undefined,
+    avatarUrl: user.scoped ? undefined : user.avatarUrl,
   });
   if (isJSONMode()) {
-    printJSON({ status: "complete", username: user.username });
+    printJSON(user.scoped
+      ? { status: "complete", scoped: true, scopes: user.scopes ?? [] }
+      : { status: "complete", username: user.username });
   } else {
-    success(`Logged in as ${chalk.bold(user.username)}`);
+    success(`Logged in as ${chalk.bold(describeMe(user))}`);
   }
 }
 

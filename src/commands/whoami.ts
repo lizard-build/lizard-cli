@@ -3,27 +3,19 @@ import { Command } from "commander";
 import { api } from "../lib/api.js";
 import { getProjectLink } from "../lib/config.js";
 import { isJSONMode, printJSON } from "../lib/format.js";
+import { describeScope, type Me } from "../lib/signin.js";
 
 export function registerWhoami(program: Command) {
   program
     .command("whoami")
     .description("Show current user, active workspace, and linked project")
     .action(async () => {
-      const user = await api.get<{
-        id: string;
-        username: string;
+      const user = await api.get<Me & {
         avatarUrl?: string;
         hasGithubApp?: boolean;
         activeWorkspaceId?: string | null;
         activeWorkspaceName?: string | null;
         defaultWorkspaceId?: string | null;
-        // Present only when the caller is a SCOPED API key. The account's email,
-        // balance and plan are withheld in that case — they belong to the account,
-        // not to the key holder, and a scoped key is made to be handed to someone
-        // else or injected into a sandbox. --json prints whatever the server sends,
-        // so this is also what stops `whoami --json` from leaking them.
-        scoped?: boolean;
-        scopes?: Array<{ type: "workspace" | "project"; id: string }>;
       }>("/api/auth/me");
 
       const link = getProjectLink();
@@ -36,23 +28,30 @@ export function registerWhoami(program: Command) {
           }
         : null;
 
+      // A scoped key is handed to people who are not the account's members: it shows the
+      // projects and workspaces it reaches, never whose account it is. The platform no
+      // longer sends the owner for one; dropping it here covers an older platform too.
+      if (user.scoped) {
+        const scopes = user.scopes ?? [];
+        if (isJSONMode()) {
+          printJSON({ scoped: true, scopes, project });
+          return;
+        }
+        console.log(chalk.bold("Scoped API key") + chalk.dim(" (account details are not visible)"));
+        for (const sc of scopes) console.log(chalk.dim("  ") + describeScope(sc));
+        if (project) {
+          const wsTag = project.workspaceName ? chalk.dim(` (${project.workspaceName})`) : "";
+          console.log(chalk.dim("Project: ") + (project.name || project.id) + wsTag + chalk.dim(" (linked here)"));
+        }
+        return;
+      }
+
       if (isJSONMode()) {
         printJSON({ ...user, project });
         return;
       }
 
       console.log(chalk.bold(user.username));
-      if (user.scoped) {
-        const n = user.scopes?.length ?? 0;
-        console.log(
-          chalk.dim("Key: ") +
-            `scoped to ${n} ${n === 1 ? "resource" : "resources"}` +
-            chalk.dim(" (account billing and settings are not visible)"),
-        );
-        for (const sc of user.scopes ?? []) {
-          console.log(chalk.dim(`  ${sc.type} ${sc.id}`));
-        }
-      }
       if (user.hasGithubApp) {
         console.log(chalk.dim("GitHub App: connected"));
       }

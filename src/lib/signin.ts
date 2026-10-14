@@ -48,11 +48,44 @@ export interface CheckResponse {
   };
 }
 
-export interface Me {
+/** One project or workspace a scoped API key reaches, by name. */
+export interface KeyScope {
+  type: "workspace" | "project";
   id: string;
-  username: string;
+  name?: string | null;
+  workspaceId?: string | null;
+  workspaceName?: string | null;
+}
+
+export interface Me {
+  // Absent for a scoped API key: the platform never tells a scoped key whose account it
+  // is (it is handed to people who are not the account's members).
+  id?: string;
+  username?: string;
   email?: string | null;
   scoped?: boolean;
+  scopes?: KeyScope[];
+}
+
+/** "Project X (workspace Y)" for one scope; the id when the name is unknown. */
+export function describeScope(sc: KeyScope): string {
+  if (sc.type === "project") {
+    const ws = sc.workspaceName ? ` (workspace ${sc.workspaceName})` : "";
+    return `project ${sc.name || sc.id}${ws}`;
+  }
+  return `workspace ${sc.name || sc.id}`;
+}
+
+/** Who a login is, for "Signed in as ...": the username for an account, and the
+ *  project/workspace for a scoped key -- never the account owner's name, even from an
+ *  older platform that still sends it. */
+export function describeMe(me: Me): string {
+  if (me.scoped) {
+    const scopes = me.scopes ?? [];
+    if (scopes.length === 0) return "a scoped API key";
+    return `a key for ${scopes.map(describeScope).join(", ")}`;
+  }
+  return me.username ?? "unknown";
 }
 
 export interface Pending {
@@ -315,6 +348,6 @@ export async function signInInteractive(flag?: AuthProvider): Promise<Me> {
   saveSessionLogin({ accessToken: result.accessToken, user: result.user });
   spin.stop("Authorized");
   const me = await api.get<Me>("/api/auth/me");
-  p.log.success(`Signed in as ${chalk.bold(me.username)}`);
+  p.log.success(`Signed in as ${chalk.bold(describeMe(me))}`);
   return me;
 }
