@@ -214,7 +214,7 @@ lizard resume --service <svc> --json        # start it again from the same image
 lizard project pause [project] --json       # every service of a project; {done, skipped:[{reason}]} (also: project resume)
 lizard workspace pause <ws> --json          # every project of a workspace, owner only (also: workspace resume)
 lizard workspace resale-pricing <ws> --cpu 4 --sandbox 4 --json  # prices this workspace's SCOPED keys see, x Lizard's (owner, key with no scopes; bill unchanged; --all N, --off)
-lizard workspace limits <ws> --json         # running sandboxes / vCPU / memory now vs limits; owner sets --sandboxes N --cpu N --memory 4GB (none = no limit)
+lizard workspace limits <ws> --json         # running sandboxes / vCPU / memory / SSD now vs limits; owner sets --sandboxes N --cpu N --memory 4GB --disk 20GB (none = no limit)
 lizard sleep --service <svc> --json         # serverless state: enabled, idleMinutes, sleeps/wakes, last error
 lizard sleep --service <svc> --on --idle 15 # serverless: sleeps when idle (memory saved), wakes in ~1 s on the next request; restarts it once
 lizard sleep --service <svc> --off          # always on
@@ -301,7 +301,9 @@ idle sandboxes. A workspace can also have its own limits, set by its owner
 (`lizard workspace limits <ws>` shows them with current use): `WORKSPACE_SANDBOX_LIMIT`
 (sandboxes running at once: pause or delete one) and `WORKSPACE_USAGE_LIMIT` (its apps
 and databases use as much CPU or memory as allowed: deploys, restarts, scale-ups, new
-databases and resumes are refused until they use less; running services keep running).
+databases and resumes are refused until they use less; running services keep running;
+or its databases and volumes hold as much SSD as allowed: new volumes, volume growth, new
+databases and template deploys are refused until data is deleted).
 Retrying the same call does not help; only the owner raises them. `billing start` can also answer 402 `UNPAID_INVOICE` (pay
 `body.invoiceUrl` first) or 409 `ALREADY_SUBSCRIBED`.
 

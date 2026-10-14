@@ -56,8 +56,8 @@ function printResale(workspace: Workspace, r: ResalePricing) {
   info(chalk.dim("  Your own dashboard, keys with no scopes and your bill keep Lizard's prices."));
 }
 
-export type WorkspaceLimits = { maxRunningSandboxes: number | null; maxCpuVcpus: number | null; maxMemoryMb: number | null };
-export type WorkspaceUsage = { runningSandboxes: number; cpuVcpus: number; memoryMb: number; measuredAt: number | null };
+export type WorkspaceLimits = { maxRunningSandboxes: number | null; maxCpuVcpus: number | null; maxMemoryMb: number | null; maxDiskGb?: number | null };
+export type WorkspaceUsage = { runningSandboxes: number; cpuVcpus: number; memoryMb: number; diskGb?: number; measuredAt: number | null };
 
 /** "4GB", "512mb", "2048" (MB) or "none" -> MB, or null for no limit. */
 export function parseMemoryLimit(raw: string): number | null {
@@ -69,8 +69,19 @@ export function parseMemoryLimit(raw: string): number | null {
   return Math.round(n);
 }
 
+/** "20GB", "500MB", "1TB", "50" (GB) or "none" -> GB, or null for no limit. */
+export function parseDiskLimit(raw: string): number | null {
+  const v = raw.trim().toLowerCase();
+  if (v === "none") return null;
+  const m = /^(\d+(?:\.\d+)?)\s*(tb|tib|t|gb|gib|g|mb|mib|m)?$/.exec(v);
+  if (!m) throw new Error(`--disk: a size like 20GB, 500MB or 1TB (or none), got "${raw}"`);
+  const unit = m[2]?.[0] ?? "g";
+  const gb = Number(m[1]) * (unit === "t" ? 1024 : unit === "m" ? 1 / 1024 : 1);
+  return Math.round(gb * 1000) / 1000;
+}
+
 /** The body for PUT /limits from the flags given; null when none was given (show only). */
-export function limitsBody(opts: { sandboxes?: string; cpu?: string; memory?: string }): Partial<WorkspaceLimits> | null {
+export function limitsBody(opts: { sandboxes?: string; cpu?: string; memory?: string; disk?: string }): Partial<WorkspaceLimits> | null {
   const body: Partial<WorkspaceLimits> = {};
   const num = (flag: string, raw: string, integer: boolean) => {
     if (raw.trim().toLowerCase() === "none") return null;
@@ -83,6 +94,7 @@ export function limitsBody(opts: { sandboxes?: string; cpu?: string; memory?: st
   if (opts.sandboxes !== undefined) body.maxRunningSandboxes = num("sandboxes", opts.sandboxes, true);
   if (opts.cpu !== undefined) body.maxCpuVcpus = num("cpu", opts.cpu, false);
   if (opts.memory !== undefined) body.maxMemoryMb = parseMemoryLimit(opts.memory);
+  if (opts.disk !== undefined) body.maxDiskGb = parseDiskLimit(opts.disk);
   return Object.keys(body).length ? body : null;
 }
 
@@ -93,8 +105,10 @@ function printLimits(workspace: Workspace, l: WorkspaceLimits, u: WorkspaceUsage
     ["Sandboxes running", String(u.runningSandboxes), cap(l.maxRunningSandboxes)],
     ["CPU (apps + databases)", `${u.cpuVcpus.toFixed(2)} vCPU`, cap(l.maxCpuVcpus, " vCPU")],
     ["Memory (apps + databases)", `${Math.round(u.memoryMb)} MB`, cap(l.maxMemoryMb, " MB")],
+    ["SSD (data written)", `${(u.diskGb ?? 0).toFixed(2)} GB`, cap(l.maxDiskGb ?? null, " GB")],
   ]);
   info(chalk.dim("  CPU and memory are what services use right now; at a limit nothing new starts there (running ones keep going)."));
+  info(chalk.dim("  SSD is what databases and volumes hold; at the limit no new volume, database or volume growth (data stays)."));
 }
 
 /**
@@ -213,13 +227,14 @@ Examples:
     .option("--sandboxes <n>", "Sandboxes running at once (none = no limit)")
     .option("--cpu <vcpus>", "vCPU its apps and databases may be using (none = no limit)")
     .option("--memory <size>", "Memory its apps and databases may be using, e.g. 4GB, 512MB (none = no limit)")
+    .option("--disk <size>", "SSD its databases and volumes may hold, e.g. 20GB, 1TB (none = no limit)")
     .addHelpText("after", `
 Examples:
   lizard workspace limits acme                                   # show limits and current use
-  lizard workspace limits acme --sandboxes 5 --cpu 2 --memory 4GB
+  lizard workspace limits acme --sandboxes 5 --cpu 2 --memory 4GB --disk 20GB
   lizard workspace limits acme --cpu none                        # remove one limit
 `)
-    .action(async (nameOrId: string, opts: { sandboxes?: string; cpu?: string; memory?: string }) => {
+    .action(async (nameOrId: string, opts: { sandboxes?: string; cpu?: string; memory?: string; disk?: string }) => {
       const workspace = await resolveWorkspace(nameOrId);
       const body = limitsBody(opts);
       const path = `/api/workspaces/${workspace.id}/limits`;

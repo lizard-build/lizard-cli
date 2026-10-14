@@ -465,7 +465,7 @@ async function main() {
       : limitCode === "WORKSPACE_SANDBOX_LIMIT"
         ? `${baseMsg}\n  \`lizard sandbox list\` shows them; \`lizard sandbox pause <id>\` or \`lizard sandbox rm <id>\` frees one. Limits: \`lizard workspace limits <workspace>\`.`
       : limitCode === "WORKSPACE_USAGE_LIMIT"
-        ? `${baseMsg}\n  \`lizard workspace limits <workspace>\` shows use against the limits; \`lizard metrics\` shows each service. The workspace owner can raise them.`
+        ? `${baseMsg}\n  \`lizard workspace limits <workspace>\` shows use against the limits; \`lizard metrics\` shows each service. Free CPU/memory by stopping or scaling down a service, SSD by deleting data or a volume; the workspace owner can raise them.`
       : causeDetail && !baseMsg.includes(causeDetail)
         ? `${baseMsg} (${causeDetail})`
         : baseMsg;

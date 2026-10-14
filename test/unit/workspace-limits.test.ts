@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { limitsBody, parseMemoryLimit } from "../../src/commands/workspace.js";
+import { limitsBody, parseDiskLimit, parseMemoryLimit } from "../../src/commands/workspace.js";
 
 describe("limitsBody", () => {
   test("no flag: show only", () => {
@@ -23,5 +23,17 @@ describe("parseMemoryLimit", () => {
     expect(parseMemoryLimit("2048")).toBe(2048);
     expect(parseMemoryLimit("none")).toBeNull();
     expect(() => parseMemoryLimit("4TB")).toThrow(/--memory/);
+  });
+});
+
+describe("parseDiskLimit", () => {
+  test("GB, TB, MB, a bare number in GB, none", () => {
+    expect(parseDiskLimit("20GB")).toBe(20);
+    expect(parseDiskLimit("1TB")).toBe(1024);
+    expect(parseDiskLimit("512MB")).toBe(0.5);
+    expect(parseDiskLimit("50")).toBe(50);
+    expect(parseDiskLimit("none")).toBeNull();
+    expect(() => parseDiskLimit("lots")).toThrow(/--disk/);
+    expect(limitsBody({ disk: "20GB" })).toEqual({ maxDiskGb: 20 });
   });
 });
