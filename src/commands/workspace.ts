@@ -6,10 +6,61 @@ import { fetchWorkspaces, resolveWorkspace } from "../lib/picker.js";
 import { isJSONMode, printJSON, table, success, info, isTTY } from "../lib/format.js";
 import { printBulkResult, type BulkPauseResult } from "./pause.js";
 
+export const RESALE_FIELDS = [
+  { key: "cpu", flag: "cpu", label: "CPU" },
+  { key: "memory", flag: "memory", label: "Memory" },
+  { key: "storage", flag: "storage", label: "Volumes" },
+  { key: "egress", flag: "egress", label: "Egress" },
+  { key: "objectStorage", flag: "objectStorage", label: "Object storage" },
+  { key: "sandbox", flag: "sandbox", label: "Sandboxes" },
+] as const;
+export type ResaleMultipliers = Record<(typeof RESALE_FIELDS)[number]["key"], number>;
+export type ResalePricing = { enabled: boolean; multipliers: ResaleMultipliers };
+
+/**
+ * The multipliers to save: the current ones with the given flags changed (`--all` first,
+ * then each resource flag). Null when no flag was given (show only).
+ */
+export function mergeResale(
+  current: ResaleMultipliers,
+  opts: Partial<Record<(typeof RESALE_FIELDS)[number]["flag"] | "all", string>>,
+): ResaleMultipliers | null {
+  const parse = (name: string, raw: string) => {
+    const n = Number(raw);
+    if (raw.trim() === "" || !Number.isFinite(n) || n < 1 || n > 100) {
+      throw new Error(`--${name.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}: a number from 1 to 100 (1 = Lizard's price), got "${raw}"`);
+    }
+    return n;
+  };
+  let changed = false;
+  const next = { ...current };
+  if (opts.all !== undefined) {
+    const n = parse("all", opts.all);
+    for (const f of RESALE_FIELDS) next[f.key] = n;
+    changed = true;
+  }
+  for (const f of RESALE_FIELDS) {
+    const raw = opts[f.flag];
+    if (raw !== undefined) { next[f.key] = parse(f.flag, raw); changed = true; }
+  }
+  return changed ? next : null;
+}
+
+function printResale(workspace: Workspace, r: ResalePricing) {
+  if (!r.enabled) {
+    info(`Workspace ${chalk.bold(workspace.name)}: no resale prices. Its scoped API keys see Lizard's prices.`);
+    return;
+  }
+  info(`Workspace ${chalk.bold(workspace.name)}: API keys scoped to it see these multiples of Lizard's prices.`);
+  table(["Resource", "Multiplier"], RESALE_FIELDS.map((f) => [f.label, `${r.multipliers[f.key]}x`]));
+  info(chalk.dim("  Your own dashboard, keys with no scopes and your bill keep Lizard's prices."));
+}
+
 /**
  * `lizard workspace` — create, list, and delete workspaces.
  *
- * Delete only removes empty workspaces (no projects, no sandboxes). Member
+ * Delete only removes empty workspaces (no projects, no sandboxes). `resale-pricing` sets the
+ * prices a workspace's scoped keys are shown (a reseller's users). Member
  * management (invite/remove/rename) intentionally lives in the dashboard, not
  * here, to keep the CLI surface narrow (Railway model).
  */
@@ -76,6 +127,44 @@ export function registerWorkspace(program: Command) {
         printBulkResult(op, `workspace ${chalk.bold(workspace.name)}`, result);
       });
   }
+
+  ws.command("resale-pricing")
+    .alias("resale")
+    .argument("<name-or-id>", "Workspace name, slug, or ID")
+    .description("Show or set the prices this workspace's scoped API keys see, as multiples of Lizard's (owner only, from a key with no scopes; your bill is unchanged)")
+    .option("--all <x>", "Set every resource to this multiplier")
+    .option("--cpu <x>", "CPU multiplier (1-100)")
+    .option("--memory <x>", "Memory multiplier (1-100)")
+    .option("--storage <x>", "Volumes multiplier (1-100)")
+    .option("--egress <x>", "Egress multiplier (1-100)")
+    .option("--object-storage <x>", "Object storage multiplier (1-100)")
+    .option("--sandbox <x>", "Sandbox price multiplier (1-100)")
+    .option("--off", "Turn resale prices off: scoped keys see Lizard's prices again")
+    .addHelpText("after", `
+Examples:
+  lizard workspace resale-pricing acme                         # show
+  lizard workspace resale-pricing acme --all 3                 # every price x3
+  lizard workspace resale-pricing acme --cpu 4 --sandbox 5     # change only these
+  lizard workspace resale-pricing acme --off
+`)
+    .action(async (nameOrId: string, opts: Record<string, string | boolean | undefined>) => {
+      const workspace = await resolveWorkspace(nameOrId);
+      if (workspace.role && workspace.role !== "owner") {
+        throw new Error("Only the workspace owner can see or set resale prices.");
+      }
+      const path = `/api/workspaces/${workspace.id}/resale-pricing`;
+      let result: ResalePricing;
+      if (opts.off) {
+        result = await api.put<ResalePricing>(path, {});
+      } else {
+        const current = await api.get<ResalePricing>(path);
+        const next = mergeResale(current.multipliers, opts as Parameters<typeof mergeResale>[1]);
+        result = next ? await api.put<ResalePricing>(path, next) : current;
+        if (next && !isJSONMode()) success("Resale prices saved");
+      }
+      if (isJSONMode()) { printJSON({ id: workspace.id, ...result }); return; }
+      printResale(workspace, result);
+    });
 
   ws.command("rm")
     .alias("delete")

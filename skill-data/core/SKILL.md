@@ -213,6 +213,7 @@ lizard pause --service <svc> --json         # stop an app or database without de
 lizard resume --service <svc> --json        # start it again from the same image, with its data
 lizard project pause [project] --json       # every service of a project; {done, skipped:[{reason}]} (also: project resume)
 lizard workspace pause <ws> --json          # every project of a workspace, owner only (also: workspace resume)
+lizard workspace resale-pricing <ws> --cpu 4 --sandbox 4 --json  # prices this workspace's SCOPED keys see, x Lizard's (owner, key with no scopes; bill unchanged; --all N, --off)
 lizard sleep --service <svc> --json         # serverless state: enabled, idleMinutes, sleeps/wakes, last error
 lizard sleep --service <svc> --on --idle 15 # serverless: sleeps when idle (memory saved), wakes in ~1 s on the next request; restarts it once
 lizard sleep --service <svc> --off          # always on
