@@ -73,6 +73,7 @@ lizard metrics --all # all services in the project, even with a linked service
 lizard scale      # scale replicas / CPU / memory / storage
 lizard pause      # stop a service (app or database) without deleting it; `lizard resume` starts it again
 lizard project pause   # pause every service of a project (also: project resume, workspace pause/resume)
+lizard sleep --on # serverless: sleep when idle, wake in ~1 s on the next request (--off: always on)
 lizard secrets    # manage secrets
 lizard domain     # manage domains
 lizard redeploy   # rebuild and redeploy from the current source
