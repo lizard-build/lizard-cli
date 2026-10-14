@@ -56,6 +56,47 @@ function printResale(workspace: Workspace, r: ResalePricing) {
   info(chalk.dim("  Your own dashboard, keys with no scopes and your bill keep Lizard's prices."));
 }
 
+export type WorkspaceLimits = { maxRunningSandboxes: number | null; maxCpuVcpus: number | null; maxMemoryMb: number | null };
+export type WorkspaceUsage = { runningSandboxes: number; cpuVcpus: number; memoryMb: number; measuredAt: number | null };
+
+/** "4GB", "512mb", "2048" (MB) or "none" -> MB, or null for no limit. */
+export function parseMemoryLimit(raw: string): number | null {
+  const v = raw.trim().toLowerCase();
+  if (v === "none") return null;
+  const m = /^(\d+(?:\.\d+)?)\s*(gb|gib|g|mb|mib|m)?$/.exec(v);
+  if (!m) throw new Error(`--memory: a size like 4GB or 512MB (or none), got "${raw}"`);
+  const n = Number(m[1]) * (m[2]?.startsWith("g") ? 1024 : 1);
+  return Math.round(n);
+}
+
+/** The body for PUT /limits from the flags given; null when none was given (show only). */
+export function limitsBody(opts: { sandboxes?: string; cpu?: string; memory?: string }): Partial<WorkspaceLimits> | null {
+  const body: Partial<WorkspaceLimits> = {};
+  const num = (flag: string, raw: string, integer: boolean) => {
+    if (raw.trim().toLowerCase() === "none") return null;
+    const n = Number(raw);
+    if (raw.trim() === "" || !Number.isFinite(n) || n < 0 || (integer && !Number.isInteger(n))) {
+      throw new Error(`--${flag}: ${integer ? "a whole number" : "a number"} (or none), got "${raw}"`);
+    }
+    return n;
+  };
+  if (opts.sandboxes !== undefined) body.maxRunningSandboxes = num("sandboxes", opts.sandboxes, true);
+  if (opts.cpu !== undefined) body.maxCpuVcpus = num("cpu", opts.cpu, false);
+  if (opts.memory !== undefined) body.maxMemoryMb = parseMemoryLimit(opts.memory);
+  return Object.keys(body).length ? body : null;
+}
+
+function printLimits(workspace: Workspace, l: WorkspaceLimits, u: WorkspaceUsage) {
+  const cap = (v: number | null, unit = "") => (v === null ? chalk.dim("no limit") : `${v}${unit}`);
+  info(`Workspace ${chalk.bold(workspace.name)}`);
+  table(["", "In use now", "Limit"], [
+    ["Sandboxes running", String(u.runningSandboxes), cap(l.maxRunningSandboxes)],
+    ["CPU (apps + databases)", `${u.cpuVcpus.toFixed(2)} vCPU`, cap(l.maxCpuVcpus, " vCPU")],
+    ["Memory (apps + databases)", `${Math.round(u.memoryMb)} MB`, cap(l.maxMemoryMb, " MB")],
+  ]);
+  info(chalk.dim("  CPU and memory are what services use right now; at a limit nothing new starts there (running ones keep going)."));
+}
+
 /**
  * `lizard workspace` — create, list, and delete workspaces.
  *
@@ -164,6 +205,30 @@ Examples:
       }
       if (isJSONMode()) { printJSON({ id: workspace.id, ...result }); return; }
       printResale(workspace, result);
+    });
+
+  ws.command("limits")
+    .argument("<name-or-id>", "Workspace name, slug, or ID")
+    .description("Show what a workspace may run at once and what it uses now; set it (owner only, from a key with no scopes)")
+    .option("--sandboxes <n>", "Sandboxes running at once (none = no limit)")
+    .option("--cpu <vcpus>", "vCPU its apps and databases may be using (none = no limit)")
+    .option("--memory <size>", "Memory its apps and databases may be using, e.g. 4GB, 512MB (none = no limit)")
+    .addHelpText("after", `
+Examples:
+  lizard workspace limits acme                                   # show limits and current use
+  lizard workspace limits acme --sandboxes 5 --cpu 2 --memory 4GB
+  lizard workspace limits acme --cpu none                        # remove one limit
+`)
+    .action(async (nameOrId: string, opts: { sandboxes?: string; cpu?: string; memory?: string }) => {
+      const workspace = await resolveWorkspace(nameOrId);
+      const body = limitsBody(opts);
+      const path = `/api/workspaces/${workspace.id}/limits`;
+      const result = body
+        ? await api.put<{ limits: WorkspaceLimits; usage: WorkspaceUsage }>(path, body)
+        : await api.get<{ limits: WorkspaceLimits; usage: WorkspaceUsage }>(path);
+      if (isJSONMode()) { printJSON({ id: workspace.id, ...result }); return; }
+      if (body) success("Workspace limits saved");
+      printLimits(workspace, result.limits, result.usage);
     });
 
   ws.command("rm")

@@ -74,6 +74,7 @@ lizard scale      # scale replicas / CPU / memory / storage
 lizard pause      # stop a service (app or database) without deleting it; `lizard resume` starts it again
 lizard project pause   # pause every service of a project (also: project resume, workspace pause/resume)
 lizard workspace resale-pricing <ws> --all 3   # resellers: the workspace's scoped keys see 3x Lizard's prices (your bill is unchanged)
+lizard workspace limits <ws> --sandboxes 5 --cpu 2 --memory 4GB   # cap a workspace: sandboxes at once, CPU/RAM its services use
 lizard sleep --on # serverless: sleep when idle, wake in ~1 s on the next request (--off: always on)
 lizard secrets    # manage secrets
 lizard domain     # manage domains
