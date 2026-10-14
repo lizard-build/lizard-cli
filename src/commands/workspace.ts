@@ -4,6 +4,7 @@ import { Command } from "commander";
 import { api, withQuery, type Workspace } from "../lib/api.js";
 import { fetchWorkspaces, resolveWorkspace } from "../lib/picker.js";
 import { isJSONMode, printJSON, table, success, info, isTTY } from "../lib/format.js";
+import { printBulkResult, type BulkPauseResult } from "./pause.js";
 
 /**
  * `lizard workspace` — create, list, and delete workspaces.
@@ -60,6 +61,21 @@ export function registerWorkspace(program: Command) {
         ]),
       );
     });
+
+  for (const op of ["pause", "resume"] as const) {
+    ws.command(op)
+      .argument("<name-or-id>", "Workspace name, slug, or ID")
+      .description(op === "pause"
+        ? "Pause every service in every project of a workspace (owner only; keeps URLs, passwords, settings and data)"
+        : "Resume the services you paused in a workspace (owner only)")
+      .action(async (nameOrId: string) => {
+        const workspace = await resolveWorkspace(nameOrId);
+        if (workspace.role !== "owner") throw new Error(`Only the workspace owner can ${op} all of it.`);
+        const result = await api.post<BulkPauseResult>(`/api/workspaces/${workspace.id}/${op}`);
+        if (isJSONMode()) { printJSON({ id: workspace.id, ...result }); return; }
+        printBulkResult(op, `workspace ${chalk.bold(workspace.name)}`, result);
+      });
+  }
 
   ws.command("rm")
     .alias("delete")

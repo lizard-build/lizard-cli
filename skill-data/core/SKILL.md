@@ -179,6 +179,7 @@ lizard secrets list --ref --service <svc> --json           # the ${{…}} refere
 - List before you set, so you don't duplicate or shadow a key.
 - Keep secrets in service scope. `--global` is for values that are not secret (`LOG_LEVEL`, `NODE_ENV`, feature flags).
 - Precedence, last wins: addon env < project secrets < project env < app env < app secrets < platform vars (`PORT`, `LIZARD_*`, which cannot be overridden).
+- To stop paying for a service the user may want back, pause it instead of deleting it. While paused an app's URL answers 503, a database refuses connections, and `restart`/`redeploy` refuse it until `lizard resume`; nothing else changes. Services a billing freeze paused stay paused until the account is paid.
 - Setting a secret restarts the service with it, no rebuild; `${{…}}` references are read again then and on every deploy, not on `lizard restart`. Never print a service's full environment.
 - For one service to call another, use `https://${{api.LIZARD_PUBLIC_DOMAIN}}` or the private `http://${{api.LIZARD_PRIVATE_DOMAIN}}:<port>`, not the service name.
 
@@ -207,6 +208,10 @@ lizard status --json                        # this folder's link (no auth needed
 lizard restart --service <svc>              # same image and env; rolling only for an HTTP service without a volume
 lizard redeploy --service <svc> --wait --json   # rebuild from the latest commit or last upload; waits until ready
 lizard scale --service <svc> --replicas N --memory <mb> --cpu <cores>   # replicas 1-10, memory 128-8192 MB, cpu 1-4
+lizard pause --service <svc> --json         # stop an app or database without deleting it: 0 pods, URL/host/port/password/settings/volumes kept
+lizard resume --service <svc> --json        # start it again from the same image, with its data
+lizard project pause [project] --json       # every service of a project; {done, skipped:[{reason}]} (also: project resume)
+lizard workspace pause <ws> --json          # every project of a workspace, owner only (also: workspace resume)
 lizard metrics --json                       # CPU/memory/network/disk (add --cost for cost)
 lizard metrics --all --json                 # all services in the project, even from a service-linked directory
 lizard events --service <svc> --json        # deploy history + replica status

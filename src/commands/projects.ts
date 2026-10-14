@@ -5,6 +5,7 @@ import { api, withQuery } from "../lib/api.js";
 import { success, isJSONMode, printJSON, table, isTTY } from "../lib/format.js";
 import { pickWorkspace, resolveWorkspace } from "../lib/picker.js";
 import { resolveProjectId } from "../lib/config.js";
+import { printBulkResult, type BulkPauseResult } from "./pause.js";
 
 interface Project {
   id: string;
@@ -81,6 +82,23 @@ export function registerProjects(program: Command) {
         );
       }
     });
+
+  for (const op of ["pause", "resume"] as const) {
+    proj
+      .command(op)
+      .description(op === "pause"
+        ? "Pause every service of a project (scale to 0, keep URLs, passwords, settings and data)"
+        : "Resume the services you paused in a project")
+      .argument("[project]", "Project name, slug, or ID (defaults to the project linked in this directory)")
+      .action(async (projectArg: string | undefined) => {
+        const projectId = await resolveProjectId(projectArg);
+        const result = await api.post<BulkPauseResult>(`/api/projects/${projectId}/${op}`);
+        if (isJSONMode()) { printJSON({ id: projectId, ...result }); return; }
+        const projects = await api.get<Project[]>("/api/projects");
+        const name = projects.find((proj) => proj.id === projectId)?.name ?? projectId;
+        printBulkResult(op, `project ${chalk.bold(name)}`, result);
+      });
+  }
 
   proj
     .command("delete")
