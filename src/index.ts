@@ -455,10 +455,17 @@ async function main() {
     // it so the user sees something actionable instead of just "fetch failed".
     const causeDetail = err?.cause?.code || err?.cause?.message;
     const baseMsg = err.message || String(err);
+    // A workspace's own limits (set by its owner with `lizard workspace limits`): say where to
+    // see them and what frees room, since retrying as is fails the same way.
+    const limitCode = err instanceof APIError ? err.code : undefined;
     const msg = projectDeleted
       ? "This project is being deleted — create a new one with `lizard init`."
       : accountScope
         ? `${baseMsg}\n  Your key is limited to specific workspaces or projects. Run this with an unscoped key, or see per-workspace spend with \`lizard metrics\`.`
+      : limitCode === "WORKSPACE_SANDBOX_LIMIT"
+        ? `${baseMsg}\n  \`lizard sandbox list\` shows them; \`lizard sandbox pause <id>\` or \`lizard sandbox rm <id>\` frees one. Limits: \`lizard workspace limits <workspace>\`.`
+      : limitCode === "WORKSPACE_USAGE_LIMIT"
+        ? `${baseMsg}\n  \`lizard workspace limits <workspace>\` shows use against the limits; \`lizard metrics\` shows each service. The workspace owner can raise them.`
       : causeDetail && !baseMsg.includes(causeDetail)
         ? `${baseMsg} (${causeDetail})`
         : baseMsg;

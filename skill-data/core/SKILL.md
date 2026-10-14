@@ -297,7 +297,12 @@ and `body.status` with the links:
 `sandbox resume` on an account on hold fails with 403 instead (exit `2`). Too many
 sandboxes at once, or too many starts per minute, is HTTP 429 (`SANDBOX_LIMIT_REACHED`,
 `SANDBOX_RATE_LIMITED` with `retryAfterS`), not a billing problem: wait or delete
-idle sandboxes. `billing start` can also answer 402 `UNPAID_INVOICE` (pay
+idle sandboxes. A workspace can also have its own limits, set by its owner
+(`lizard workspace limits <ws>` shows them with current use): `WORKSPACE_SANDBOX_LIMIT`
+(sandboxes running at once: pause or delete one) and `WORKSPACE_USAGE_LIMIT` (its apps
+and databases use as much CPU or memory as allowed: deploys, restarts, scale-ups, new
+databases and resumes are refused until they use less; running services keep running).
+Retrying the same call does not help; only the owner raises them. `billing start` can also answer 402 `UNPAID_INVOICE` (pay
 `body.invoiceUrl` first) or 409 `ALREADY_SUBSCRIBED`.
 
 Checkout and invoice pages open in the user's browser; you cannot finish them.
