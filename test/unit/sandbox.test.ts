@@ -103,7 +103,8 @@ describe("private sandbox snapshots", () => {
   it("creates a snapshot with five warm copies by default", async () => {
     const program = new Command().exitOverride(); registerSandbox(program);
     await program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'My app', '--no-wait'], { from: 'user' });
-    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app', poolSize: 5, scope: 'user' });
+    // No scope unless asked: the server picks 'user', or for a scoped key only what it covers.
+    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app', poolSize: 5, scope: undefined });
   });
   it.each(['0', '11', '1.5', '5junk'])("rejects invalid warm count %s", async count => {
     const program = new Command().exitOverride(); registerSandbox(program);

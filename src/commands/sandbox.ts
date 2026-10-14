@@ -507,8 +507,8 @@ Examples:
     .argument("<id>", "Running sandbox ID")
     .requiredOption("--name <name>", "Name for this private snapshot")
     .option("--warm <count>", "Copies to keep ready (1–10)", parseWarmCount, 5)
-    .addOption(new Option("--scope <scope>", "Where it may be restored: user = any of your projects and workspaces, workspace = only this workspace, project = only this project")
-      .choices(SNAPSHOT_SCOPES).default("user"))
+    .addOption(new Option("--scope <scope>", "Where it may be restored: user = any of your projects and workspaces, workspace = only this workspace, project = only this project. Default: user, or with a workspace/project-scoped key only what the key covers")
+      .choices(SNAPSHOT_SCOPES))
     .option("--no-wait", "Return once capture is queued")
     .description("Save a running sandbox and keep five copies warm by default")
     .action(async (id: string, opts) => {
