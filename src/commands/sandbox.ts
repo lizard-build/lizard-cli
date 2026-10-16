@@ -128,15 +128,16 @@ export function registerSandbox(program: Command) {
     .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium`).choices(SANDBOX_SIZES))
     .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
     .option("--region <code>", "Region to create the sandbox in")
-    .option("--snapshot <id>", "Create from a private saved snapshot (runs on the machine it was captured on)")
+    .option("--snapshot <id>", "Create from a private saved snapshot, at the size it was taken at")
     .option("--volume <name-or-id>", "Attach a persistent volume")
     .option("--with-token [key]", "Sign in `lizard` inside the sandbox with a new key limited to the sandbox's project and deleted with it (this liz_ key, or the one you use, only authorizes the request)")
     .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
     .action(async (opts) => {
-      // A snapshot restores onto the machine it was captured on, so the server ignores a
+      // A snapshot restores at its source's size (a Firecracker VM's memory is part of it; a
+      // pod snapshot goes back onto the machine it was captured on), so the server ignores a
       // size alongside it. Say so rather than quietly creating something other than asked.
       if (opts.size && opts.snapshot) {
-        throw new Error("--size can't be combined with --snapshot: a snapshot runs on the machine it was captured on.");
+        throw new Error("--size can't be combined with --snapshot: a snapshot restores at the size it was taken at.");
       }
 
       // A sandbox must belong to a project — billing is metered per project.
@@ -506,23 +507,27 @@ Examples:
   sb.command("snapshot")
     .argument("<id>", "Running sandbox ID")
     .requiredOption("--name <name>", "Name for this private snapshot")
-    .option("--warm <count>", "Copies to keep ready (1–10)", parseWarmCount, 5)
+    .option("--warm <count>", "Pod sandboxes: copies to keep warm (1–10). A Firecracker snapshot keeps none; it restores in about 0.2 s", parseWarmCount, 5)
     .addOption(new Option("--scope <scope>", "Where it may be restored: user = any of your projects and workspaces, workspace = only this workspace, project = only this project. Default: user, or with a workspace/project-scoped key only what the key covers")
       .choices(SNAPSHOT_SCOPES))
     .option("--no-wait", "Return once capture is queued")
-    .description("Save a running sandbox and keep five copies warm by default")
+    .description("Save a running sandbox, memory included (a pod sandbox's snapshot also keeps five copies warm)")
     .action(async (id: string, opts) => {
       let snapshot = await api.post<SnapshotRecord>(`/api/sandboxes/${id}/snapshot`, { name: opts.name, poolSize: opts.warm, scope: opts.scope });
       if (opts.wait) snapshot = await waitForSnapshot(snapshot.id);
       if (isJSONMode()) printJSON(snapshot);
-      else { success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}`); info(`Warm copies: ${snapshot.readyCount}/${snapshot.poolSize}`); }
+      else {
+        success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}`);
+        // Only a pod snapshot has a warm pool; a Firecracker one reports 1/1 for the snapshot itself.
+        if (snapshot.poolSize > 1) info(`Warm copies: ${snapshot.readyCount}/${snapshot.poolSize}`);
+      }
     });
 
   for (const operation of ["pause", "resume"] as const) {
     sb.command(operation)
       .argument("<id>", "Sandbox ID")
       .option("--no-wait", "Return once the operation is queued")
-      .description(operation === "pause" ? "Save running state with CRIU and stop the sandbox" : "Restore a paused sandbox with its saved memory and files")
+      .description(operation === "pause" ? "Save running state (memory and files) and stop the sandbox" : "Restore a paused sandbox with its saved memory and files")
       .action(async (id: string, opts) => {
         const queued = await api.post<{ id: string; status: string; snapshotId?: string }>(`/api/sandboxes/${id}/${operation}`, {});
         if (opts.wait && operation === 'pause' && queued.snapshotId) await waitForSnapshot(queued.snapshotId);
@@ -537,7 +542,7 @@ Examples:
     .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
     .option("-p, --project <id>", "Project to start it in, in any of your workspaces (name, slug, or ID); defaults to the volume's project, else the snapshot's own")
     .option("--volume <name-or-id>", "Mount this volume at /workspace (Firecracker snapshot of a sandbox that had no volume; same region)")
-    .description("Start a new sandbox from a private warm snapshot")
+    .description("Start a new sandbox from a private snapshot")
     .action(async (snapshotId: string, opts) => {
       const [snapshot, projectId] = await Promise.all([
         api.get<SnapshotRecord>(`/api/sandbox-snapshots/${snapshotId}`),
@@ -554,7 +559,7 @@ Examples:
   for (const operation of ["pause", "resume"] as const) {
     sb.command(`snapshot-${operation}`)
       .argument("<snapshot-id>", "Saved snapshot ID")
-      .description(operation === "pause" ? "Release a snapshot's warm copies and keep its saved state" : "Refill a paused snapshot's warm pool")
+      .description(operation === "pause" ? "Release a pod snapshot's warm copies and keep its saved state" : "Refill a paused pod snapshot's warm pool")
       .action(async (id: string) => {
         const snapshot = await api.post<SnapshotRecord>(`/api/sandbox-snapshots/${id}/${operation}`, {});
         if (isJSONMode()) printJSON(snapshot);
@@ -565,7 +570,7 @@ Examples:
   sb.command("snapshot-warm")
     .argument("<snapshot-id>", "Saved snapshot ID")
     .argument("<count>", "Copies to keep ready (1–10)", parseWarmCount)
-    .description("Change a snapshot's warm pool size")
+    .description("Change a pod snapshot's warm pool size (Firecracker snapshots have none)")
     .action(async (id: string, count: number) => {
       const snapshot = await api.patch<SnapshotRecord>(`/api/sandbox-snapshots/${id}`, { poolSize: count });
       if (isJSONMode()) printJSON(snapshot);
