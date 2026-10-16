@@ -507,20 +507,17 @@ Examples:
   sb.command("snapshot")
     .argument("<id>", "Running sandbox ID")
     .requiredOption("--name <name>", "Name for this private snapshot")
-    .option("--warm <count>", "Pod sandboxes: copies to keep warm (1–10). A Firecracker snapshot keeps none; it restores in about 0.2 s", parseWarmCount, 5)
     .addOption(new Option("--scope <scope>", "Where it may be restored: user = any of your projects and workspaces, workspace = only this workspace, project = only this project. Default: user, or with a workspace/project-scoped key only what the key covers")
       .choices(SNAPSHOT_SCOPES))
     .option("--no-wait", "Return once capture is queued")
-    .description("Save a running sandbox, memory included (a pod sandbox's snapshot also keeps five copies warm)")
+    .description("Save a running sandbox, memory included")
     .action(async (id: string, opts) => {
-      let snapshot = await api.post<SnapshotRecord>(`/api/sandboxes/${id}/snapshot`, { name: opts.name, poolSize: opts.warm, scope: opts.scope });
+      // No pool size: Firecracker and gVisor snapshots keep no warm copies, and a runc pod
+      // (the fallback when a Firecracker create fails) gets the server's default.
+      let snapshot = await api.post<SnapshotRecord>(`/api/sandboxes/${id}/snapshot`, { name: opts.name, scope: opts.scope });
       if (opts.wait) snapshot = await waitForSnapshot(snapshot.id);
       if (isJSONMode()) printJSON(snapshot);
-      else {
-        success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}`);
-        // Only a pod snapshot has a warm pool; a Firecracker one reports 1/1 for the snapshot itself.
-        if (snapshot.poolSize > 1) info(`Warm copies: ${snapshot.readyCount}/${snapshot.poolSize}`);
-      }
+      else success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}`);
     });
 
   for (const operation of ["pause", "resume"] as const) {
@@ -556,8 +553,10 @@ Examples:
       else success(`Sandbox ${chalk.bold(sandbox.id)} created from ${snapshot.name}`);
     });
 
+  // Warm pools exist only for CRIU snapshots of runc pod sandboxes, which are no longer
+  // created. These stay, out of the help, for the few such snapshots still around.
   for (const operation of ["pause", "resume"] as const) {
-    sb.command(`snapshot-${operation}`)
+    sb.command(`snapshot-${operation}`, { hidden: true })
       .argument("<snapshot-id>", "Saved snapshot ID")
       .description(operation === "pause" ? "Release a pod snapshot's warm copies and keep its saved state" : "Refill a paused pod snapshot's warm pool")
       .action(async (id: string) => {
@@ -567,7 +566,7 @@ Examples:
       });
   }
 
-  sb.command("snapshot-warm")
+  sb.command("snapshot-warm", { hidden: true })
     .argument("<snapshot-id>", "Saved snapshot ID")
     .argument("<count>", "Copies to keep ready (1–10)", parseWarmCount)
     .description("Change a pod snapshot's warm pool size (Firecracker snapshots have none)")

@@ -100,16 +100,20 @@ describe("unsupported sandbox commands", () => {
 
 describe("private sandbox snapshots", () => {
   beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.post).mockResolvedValue({ id: 'snap-test', status: 'building' }); });
-  it("creates a snapshot with five warm copies by default", async () => {
+  it("creates a snapshot without a pool size", async () => {
     const program = new Command().exitOverride(); registerSandbox(program);
     await program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'My app', '--no-wait'], { from: 'user' });
     // No scope unless asked: the server picks 'user', or for a scoped key only what it covers.
-    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app', poolSize: 5, scope: undefined });
+    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app', scope: undefined });
   });
-  it.each(['0', '11', '1.5', '5junk'])("rejects invalid warm count %s", async count => {
+  it("no longer takes --warm", async () => {
     const program = new Command().exitOverride(); registerSandbox(program);
-    await expect(program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'app', '--warm', count, '--no-wait'], { from: 'user' })).rejects.toThrow(/Warm copies/);
+    await expect(program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'app', '--warm', '3', '--no-wait'], { from: 'user' })).rejects.toThrow(/unknown option/);
     expect(api.post).not.toHaveBeenCalled();
+  });
+  it.each(['0', '11', '1.5', '5junk'])("snapshot-warm rejects invalid count %s", async count => {
+    const program = new Command().exitOverride(); registerSandbox(program);
+    await expect(program.parseAsync(['sandbox', 'snapshot-warm', 'snap-test', count], { from: 'user' })).rejects.toThrow(/Warm copies/);
   });
   it.each(['pause', 'resume'])("queues %s without waiting when requested", async operation => {
     const program = new Command().exitOverride(); registerSandbox(program);
