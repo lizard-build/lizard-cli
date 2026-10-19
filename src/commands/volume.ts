@@ -127,8 +127,8 @@ export function registerVolume(program: Command) {
     .argument("<volume>", "Volume name or ID")
     .description(
       "Grow a volume in place. Online: no data is copied, and an attached sandbox keeps running " +
-        "and sees the new size. Firecracker volumes (the default) only grow; a Kubernetes volume " +
-        "can also shrink if at least 10% of the new size stays free.",
+        "and sees the new size. A volume cannot shrink, except an older one, which can if at " +
+        "least 10% of the new size stays free.",
     )
     .requiredOption("--size <gb>", "New size in GB (whole number; the server enforces the project's min/max)", parseSizeGbOption)
     .option("-p, --project <id>", "Project name, slug, or ID")

@@ -558,7 +558,7 @@ Examples:
   for (const operation of ["pause", "resume"] as const) {
     sb.command(`snapshot-${operation}`, { hidden: true })
       .argument("<snapshot-id>", "Saved snapshot ID")
-      .description(operation === "pause" ? "Release a pod snapshot's warm copies and keep its saved state" : "Refill a paused pod snapshot's warm pool")
+      .description(operation === "pause" ? "Release an older snapshot's warm copies and keep its saved state" : "Refill a paused older snapshot's warm pool")
       .action(async (id: string) => {
         const snapshot = await api.post<SnapshotRecord>(`/api/sandbox-snapshots/${id}/${operation}`, {});
         if (isJSONMode()) printJSON(snapshot);
@@ -569,7 +569,7 @@ Examples:
   sb.command("snapshot-warm", { hidden: true })
     .argument("<snapshot-id>", "Saved snapshot ID")
     .argument("<count>", "Copies to keep ready (1–10)", parseWarmCount)
-    .description("Change a pod snapshot's warm pool size (Firecracker snapshots have none)")
+    .description("Change an older snapshot's warm pool size (Firecracker snapshots have none)")
     .action(async (id: string, count: number) => {
       const snapshot = await api.patch<SnapshotRecord>(`/api/sandbox-snapshots/${id}`, { poolSize: count });
       if (isJSONMode()) printJSON(snapshot);
