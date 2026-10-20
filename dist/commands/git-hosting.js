@@ -765,6 +765,133 @@ export function registerLizardGit(git) {
             await sleep(3000);
         }
     });
+    // ── Deployments, environments, variables ─────────────────────────────
+    repoOpt(run.command("deployments").description("A run's deployments to environments and what they wait for").argument("<number>", "", int))
+        .action(async (n, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const d = await lg.get(`${repoPath(r)}/actions/runs/${n}/deployments`);
+        out(d, () => d.deployments.length ? table(["ENVIRONMENT", "STATE", "REVIEWERS", "BY", "YOU CAN REVIEW"], d.deployments.map((x) => [
+            x.environment, state(x.state === "waiting" ? "waiting" : x.state === "approved" ? "success" : x.state === "rejected" ? "failure" : "pending") + (x.state === "timer" ? " (timer)" : ""),
+            (x.reviewers ?? []).join(","), x.reviewer ?? "", x.canReview ? "yes" : "",
+        ])) : info("No job in this run deploys to an environment."));
+    });
+    repoOpt(run.command("review").description("Approve or reject a run's deployments waiting for you").argument("<number>", "", int))
+        .option("--approve").option("--reject")
+        .option("-e, --env <name>", "Only this environment; repeatable", collect, [])
+        .option("-c, --comment <text>")
+        .action(async (n, opts) => {
+        if (!!opts.approve === !!opts.reject)
+            throw new APIError(400, "pass --approve or --reject");
+        const r = await resolveRepo(opts.repo);
+        const x = await lg.post(`${repoPath(r)}/actions/runs/${n}/deployments`, {
+            state: opts.approve ? "approved" : "rejected", environments: opts.env.length ? opts.env : undefined, comment: opts.comment,
+        });
+        done(x, `${opts.approve ? "Approved" : "Rejected"} the deployment to ${x.environments.join(", ")}`);
+    });
+    const envc = git.command("env").alias("environment").description("Environments: who approves deployments, from which branches, their secrets and variables");
+    const envPath = (r, name) => `${repoPath(r)}/actions/environments/${seg(name)}`;
+    repoOpt(envc.command("list").alias("ls").description("Environments and their rules"))
+        .action(async (opts) => {
+        const r = await resolveRepo(opts.repo);
+        const l = await lg.get(`${repoPath(r)}/actions/environments`);
+        out(l, () => l.environments.length ? table(["ENVIRONMENT", "REVIEWERS", "WAIT", "BRANCHES", "SECRETS", "VARIABLES"], l.environments.map((e) => [
+            e.name, e.reviewers.join(",") + (e.preventSelfReview ? " (not self)" : ""), e.waitMinutes ? `${e.waitMinutes}m` : "",
+            e.branchPolicy === "custom" ? e.branches.join(",") : e.branchPolicy, String(e.secrets.length), String(e.variables.length),
+        ])) : info("No environments. A job with `environment: <name>` creates one, or: lizard git env set <name>"));
+    });
+    repoOpt(envc.command("view").description("One environment").argument("<name>"))
+        .action(async (name, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const e = await lg.get(envPath(r, name));
+        out(e, () => {
+            info(`${chalk.bold(e.name)}`);
+            info(`  reviewers: ${e.reviewers.join(", ") || "none"}${e.preventSelfReview ? " (not whoever started the run)" : ""}`);
+            info(`  wait timer: ${e.waitMinutes ? e.waitMinutes + " min" : "none"}`);
+            info(`  branches: ${e.branchPolicy === "custom" ? e.branches.join(", ") : e.branchPolicy}`);
+            info(`  secrets: ${e.secrets.join(", ") || "none"}`);
+            info(`  variables: ${e.variables.join(", ") || "none"}`);
+        });
+    });
+    repoOpt(envc.command("set").description("Create an environment or change its protection rules").argument("<name>"))
+        .option("--reviewer <login>", "Required reviewer (write access); repeatable. --reviewer '' for none", collect, [])
+        .option("--prevent-self-review").option("--no-prevent-self-review")
+        .option("--wait <minutes>", "Wait timer after approval")
+        .option("--branches <list>", "all | protected | comma-separated branch/tag patterns (main,release/*,v*)")
+        .action(async (name, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const body = {};
+        if (opts.reviewer.length)
+            body.reviewers = opts.reviewer.filter(Boolean);
+        if (opts.preventSelfReview !== undefined)
+            body.preventSelfReview = opts.preventSelfReview;
+        if (opts.wait !== undefined)
+            body.waitMinutes = Number(opts.wait);
+        if (opts.branches !== undefined) {
+            if (opts.branches === "all" || opts.branches === "protected")
+                body.branchPolicy = opts.branches;
+            else
+                Object.assign(body, { branchPolicy: "custom", branches: list(opts.branches) ?? [] });
+        }
+        done(await lg.put(envPath(r, name), body), `Environment ${name} saved`);
+    });
+    repoOpt(envc.command("delete").alias("rm").description("Delete an environment with its secrets and variables").argument("<name>"))
+        .option("--yes", "Confirm")
+        .action(async (name, opts) => {
+        if (!opts.yes)
+            throw new APIError(400, `This deletes ${name} with its secrets and variables. Run again with --yes.`);
+        const r = await resolveRepo(opts.repo);
+        await lg.delete(envPath(r, name));
+        done({ ok: true }, `Deleted environment ${name}`);
+    });
+    const envSecret = envc.command("secret").description("Environment secrets (only that environment's jobs, after its rules pass)");
+    repoOpt(envSecret.command("list").alias("ls").argument("<env>"))
+        .action(async (env, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const l = await lg.get(`${envPath(r, env)}/secrets`);
+        out(l, () => l.secrets.length ? table(["NAME", "UPDATED"], l.secrets.map((x) => [x.name, ago(x.updatedAt)])) : info("No secrets."));
+    });
+    repoOpt(envSecret.command("set").argument("<env>").argument("<name>"))
+        .option("-b, --body <value>", "The value (default: read from stdin)")
+        .action(async (env, name, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const value = opts.body ?? readFileSync(0, "utf8").replace(/\n$/, "");
+        await lg.put(`${envPath(r, env)}/secrets/${seg(name)}`, { value });
+        done({ ok: true, name }, `Set ${name} in ${env}`);
+    });
+    repoOpt(envSecret.command("delete").alias("rm").argument("<env>").argument("<name>"))
+        .action(async (env, name, opts) => {
+        const r = await resolveRepo(opts.repo);
+        await lg.delete(`${envPath(r, env)}/secrets/${seg(name)}`);
+        done({ ok: true }, `Deleted ${name} from ${env}`);
+    });
+    const varCommands = (grp, base, withEnv) => {
+        const a = (c) => (withEnv ? c.argument("<env>") : c);
+        repoOpt(a(grp.command("list").alias("ls").description("Variables and their values")))
+            .action(async (...args) => {
+            const opts = args[args.length - 2];
+            const r = await resolveRepo(opts.repo);
+            const l = await lg.get(`${base(r, withEnv ? args[0] : undefined)}/variables`);
+            out(l, () => l.variables.length ? table(["NAME", "VALUE", "UPDATED"], l.variables.map((v) => [v.name, v.value, ago(v.updatedAt)])) : info("No variables."));
+        });
+        repoOpt(a(grp.command("set").description("Set a variable")).argument("<name>").argument("<value>"))
+            .action(async (...args) => {
+            const opts = args[args.length - 2];
+            const [env, name, value] = withEnv ? args : [undefined, args[0], args[1]];
+            const r = await resolveRepo(opts.repo);
+            await lg.put(`${base(r, env)}/variables/${seg(name)}`, { value });
+            done({ ok: true, name }, `Set ${name}`);
+        });
+        repoOpt(a(grp.command("delete").alias("rm").description("Delete a variable")).argument("<name>"))
+            .action(async (...args) => {
+            const opts = args[args.length - 2];
+            const [env, name] = withEnv ? args : [undefined, args[0]];
+            const r = await resolveRepo(opts.repo);
+            await lg.delete(`${base(r, env)}/variables/${seg(name)}`);
+            done({ ok: true }, `Deleted ${name}`);
+        });
+    };
+    varCommands(envc.command("var").description("Environment variables (vars.NAME in its jobs)"), (r, env) => envPath(r, env), true);
+    varCommands(git.command("variable").alias("var").description("Repository variables: vars.NAME in every job"), (r) => `${repoPath(r)}/actions`, false);
     // ── Secrets ──────────────────────────────────────────────────────────
     const secret = git.command("secret").description("CI secrets of a repository (${{ secrets.NAME }})");
     repoOpt(secret.command("list").alias("ls").description("Secret names (values are never shown)"))
