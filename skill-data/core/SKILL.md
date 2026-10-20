@@ -232,7 +232,7 @@ There is no shell into a running service (`lizard ssh` answers 403); for a sandb
 
 ## Lizard Git
 
-Lizard Git (git.lizard.build) hosts repositories with issues, pull requests, reviews, CI (`.lizard/workflows/*.yml`, GitHub Actions syntax), releases and webhooks. `lizard git ...` signs in with the same Lizard login; a scoped API key is refused there. Commands take `-R owner/name` (or just `name` for yours) and otherwise use the Lizard Git remote of the current checkout.
+Lizard Git (lizard.build/git) hosts repositories with issues, pull requests, reviews, CI (`.lizard/workflows/*.yml`, GitHub Actions syntax), releases and webhooks. `lizard git ...` signs in with the same Lizard login; a scoped API key is refused there. Commands take `-R owner/name` (or just `name` for yours) and otherwise use the Lizard Git remote of the current checkout.
 
 - **Repos**: `lizard git repo create <name> --private [--readme] --json`, `repo list|view|edit|delete --yes|fork|star`. Plain git: `lizard git setup` (credential helper, once), then `lizard git clone <repo>` or `git push`. `lizard git whoami` shows the Lizard Git login.
 - **Work locally**: commits are made on your machine; `git push` is the only way code reaches Lizard Git (plus merging pull requests). Several agents pushing to one branch: `git push origin HEAD:refs/for/main` lands on the latest main without pulling first. Read without a clone: `lizard git ls [path] [-r]`, `cat <path> [--ref]`, `log`, `show <sha>`, `search <text>`, `branch list|create|delete`. (Commits written through the API exist only for repositories whose admin turned them on, `lizard git repo edit --api-commits`; use the SDK's `commitFiles` there.)

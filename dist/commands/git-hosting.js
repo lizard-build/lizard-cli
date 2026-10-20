@@ -5,9 +5,9 @@ import { basename } from "node:path";
 import { APIError } from "../lib/api.js";
 import { validToken } from "../lib/auth.js";
 import { isJSONMode, printJSON, table, success, info, warn, link } from "../lib/format.js";
-import { lg, qs, seg, segs, resolveRepo, repoPath, myLogin, cloneURL, gitURL, helperCommand, ago, ACTIVE_RUN, } from "../lib/lizard-git.js";
+import { lg, qs, seg, segs, resolveRepo, repoPath, myLogin, cloneURL, gitURL, gitURLs, helperCommand, ago, ACTIVE_RUN, } from "../lib/lizard-git.js";
 /**
- * Lizard Git (git.lizard.build) from the terminal: repositories, issues, pull requests,
+ * Lizard Git (lizard.build/git) from the terminal: repositories, issues, pull requests,
  * reviews, CI runs, releases, secrets, collaborators, webhooks, branch rules, labels,
  * notifications, tokens, and the credential helper that lets plain `git` push and pull.
  *
@@ -61,22 +61,25 @@ function repoOpt(c) {
     return c.option("-R, --repo <owner/name>", "Repository (default: the Lizard Git remote of this checkout)");
 }
 export function registerLizardGit(git) {
-    git.description("Lizard Git (git.lizard.build) repositories, pull requests, CI; and GitHub integration");
+    git.description("Lizard Git (lizard.build/git) repositories, pull requests, CI; and GitHub integration");
     // ── Sign-in for plain git ────────────────────────────────────────────
     git
         .command("setup")
         .description("Let git push and pull Lizard Git repositories with your Lizard sign-in (credential helper)")
         .option("--local", "Only for the repository in this directory")
         .action(async (opts) => {
-        const key = `credential.${gitURL()}.helper`;
         const scope = opts.local ? "--local" : "--global";
-        // An empty value first resets helpers inherited for this host; then ours.
-        for (const value of ["", helperCommand()]) {
-            const r = spawnSync("git", ["config", scope, value ? "--add" : "--replace-all", key, value], { encoding: "utf8" });
-            if (r.status !== 0)
-                throw new APIError(500, `git config failed: ${r.stderr || r.error?.message}`);
+        // For lizard.build/git only (git matches the path: the rest of lizard.build never gets
+        // the helper), and the old git.lizard.build for clones made before.
+        for (const url of gitURLs()) {
+            // An empty value first resets helpers inherited for this address; then ours.
+            for (const value of ["", helperCommand()]) {
+                const r = spawnSync("git", ["config", scope, value ? "--add" : "--replace-all", `credential.${url}.helper`, value], { encoding: "utf8" });
+                if (r.status !== 0)
+                    throw new APIError(500, `git config failed: ${r.stderr || r.error?.message}`);
+            }
+            spawnSync("git", ["config", scope, `credential.${url}.username`, "lizard"]);
         }
-        spawnSync("git", ["config", scope, `credential.${gitURL()}.username`, "lizard"]);
         const who = await myLogin();
         out({ helper: helperCommand(), scope: opts.local ? "local" : "global", host: gitURL(), login: who }, () => {
             success(`git now signs in to ${gitURL()} as ${chalk.bold(who)} (${opts.local ? "this repository" : "every repository"})`);
@@ -92,9 +95,8 @@ export function registerLizardGit(git) {
             return; // store/erase: nothing kept, nothing to forget
         const input = readFileSync(0, "utf8");
         const fields = Object.fromEntries(input.split("\n").filter(Boolean).map((l) => l.split(/=(.*)/s).slice(0, 2)));
-        const want = new URL(gitURL());
         // Only for Lizard Git itself, over the same protocol (git always says both).
-        if (fields.host !== want.host || fields.protocol !== want.protocol.replace(":", ""))
+        if (!gitURLs().some((u) => { const w = new URL(u); return fields.host === w.host && fields.protocol === w.protocol.replace(":", ""); }))
             return;
         const token = process.env.LIZARD_GIT_TOKEN || validToken();
         if (!token) {

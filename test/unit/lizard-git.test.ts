@@ -8,10 +8,15 @@ afterEach(() => {
 
 describe("lizard git helpers", () => {
   it("reads owner/name from Lizard Git remotes only", () => {
-    expect(repoFromRemote("https://git.lizard.build/alice/app.git")).toBe("alice/app");
+    expect(repoFromRemote("https://lizard.build/git/alice/app.git")).toBe("alice/app");
+    expect(repoFromRemote("https://lizard:liz_x@lizard.build/git/alice/app")).toBe("alice/app");
+    expect(repoFromRemote("https://git.lizard.build/alice/app.git")).toBe("alice/app"); // older clones
     expect(repoFromRemote("https://lizard:liz_x@git.lizard.build/alice/app")).toBe("alice/app");
     expect(repoFromRemote("https://github.com/alice/app.git")).toBeNull();
     expect(repoFromRemote("git@github.com:alice/app.git")).toBeNull();
+    expect(repoFromRemote("https://lizard.build/alice/app.git")).toBeNull();
+    expect(repoFromRemote("https://lizard.build/gitx/alice/app.git")).toBeNull();
+    expect(repoFromRemote("https://lizard.build/git/alice/app/extra.git")).toBeNull();
   });
 
   it("drops empty query values", () => {
@@ -21,7 +26,8 @@ describe("lizard git helpers", () => {
   it("honours LIZARD_GIT_URL", () => {
     vi.stubEnv("LIZARD_GIT_URL", "http://localhost:8080/");
     expect(gitURL()).toBe("http://localhost:8080");
-    expect(repoFromRemote("http://localhost:8080/a/b.git", gitURL())).toBe("a/b");
+    expect(repoFromRemote("http://localhost:8080/a/b.git")).toBe("a/b");
+    expect(repoFromRemote("https://git.lizard.build/a/b.git")).toBeNull(); // another server: only it
   });
 
   it("runs itself as git's credential helper", () => {
@@ -37,7 +43,7 @@ describe("lizard git helpers", () => {
     }));
     expect(await resolveRepo("alice/app")).toBe("alice/app");
     expect(await resolveRepo("app")).toBe("me/app");
-    expect(calls).toEqual(["GET https://git.lizard.build/api/session Bearer liz_test"]);
+    expect(calls).toEqual(["GET https://lizard.build/git/api/session Bearer liz_test"]);
     await expect(resolveRepo("a/b/c")).rejects.toThrow(/owner\/name/);
   });
 
@@ -61,5 +67,7 @@ describe("lizard git safety", () => {
     expect(() => segs("../../api/user/tokens")).toThrow(/bad path/);
     expect(segs("src/a b.js")).toBe("src/a%20b.js");
     expect(repoFromRemote("https://git.lizard.build/../x.git")).toBeNull();
+    expect(repoFromRemote("https://lizard.build/git/../x.git")).toBeNull();
+    expect(repoFromRemote("https://lizard.build/git/a/...git")).toBeNull();
   });
 });

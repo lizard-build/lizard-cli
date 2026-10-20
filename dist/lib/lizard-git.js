@@ -2,13 +2,15 @@ import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { apiErrorFrom, clientHeaders, getRequestToken, APIError } from "./api.js";
 /**
- * Lizard Git (git.lizard.build) with the CLI's own sign-in: the session from `lizard login`,
+ * Lizard Git (lizard.build/git) with the CLI's own sign-in: the session from `lizard login`,
  * or LIZARD_TOKEN / LIZARD_API_KEY. Lizard Git asks the platform whose it is and acts as that
  * account's user. Scoped API keys are refused there (they don't say which repositories they
  * may reach); a Lizard Git token (lzg_..., `lizard git token create`) in LIZARD_GIT_TOKEN
  * is used instead when set.
  */
-export const DEFAULT_GIT_URL = "https://git.lizard.build";
+export const DEFAULT_GIT_URL = "https://lizard.build/git";
+/** The address before lizard.build/git: git and the API still answer there, for older clones. */
+export const OLD_GIT_URL = "https://git.lizard.build";
 /**
  * Where Lizard Git is. LIZARD_GIT_URL must be https (or http on this machine): the Lizard
  * sign-in goes there with every request.
@@ -86,12 +88,21 @@ export async function myLogin() {
     return me.login;
 }
 /** owner/name from a Lizard Git remote URL (https or ssh-style), or null. */
-export function repoFromRemote(url, base = gitURL()) {
-    const host = new URL(base).host;
-    const m = url.trim().match(/^(?:https?:\/\/)(?:[^@/]+@)?([^/]+)\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
-    if (!m || m[1] !== host || [m[2], m[3]].some((x) => x === "." || x === ".."))
-        return null;
-    return `${m[2]}/${m[3]}`;
+/** Every address a Lizard Git remote may use: LIZARD_GIT_URL, or lizard.build/git and the old one. */
+export function gitURLs() {
+    const u = gitURL();
+    return u === DEFAULT_GIT_URL ? [u, OLD_GIT_URL] : [u];
+}
+export function repoFromRemote(url, bases = gitURLs()) {
+    const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    for (const base of bases) {
+        const b = new URL(base);
+        const re = new RegExp(`^https?://(?:[^@/]+@)?${esc(b.host)}${esc(b.pathname.replace(/\/+$/, ""))}/([^/]+)/([^/]+?)(?:\\.git)?/?$`);
+        const m = url.trim().match(re);
+        if (m && ![m[1], m[2]].some((x) => x === "." || x === ".."))
+            return `${m[1]}/${m[2]}`;
+    }
+    return null;
 }
 function originRepo() {
     try {

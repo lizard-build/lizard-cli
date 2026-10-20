@@ -1,11 +1,13 @@
 /**
- * Lizard Git (git.lizard.build) with the CLI's own sign-in: the session from `lizard login`,
+ * Lizard Git (lizard.build/git) with the CLI's own sign-in: the session from `lizard login`,
  * or LIZARD_TOKEN / LIZARD_API_KEY. Lizard Git asks the platform whose it is and acts as that
  * account's user. Scoped API keys are refused there (they don't say which repositories they
  * may reach); a Lizard Git token (lzg_..., `lizard git token create`) in LIZARD_GIT_TOKEN
  * is used instead when set.
  */
-export declare const DEFAULT_GIT_URL = "https://git.lizard.build";
+export declare const DEFAULT_GIT_URL = "https://lizard.build/git";
+/** The address before lizard.build/git: git and the API still answer there, for older clones. */
+export declare const OLD_GIT_URL = "https://git.lizard.build";
 /**
  * Where Lizard Git is. LIZARD_GIT_URL must be https (or http on this machine): the Lizard
  * sign-in goes there with every request.
@@ -29,7 +31,9 @@ export declare const segs: (p: string) => string;
 /** Your Lizard Git login. */
 export declare function myLogin(): Promise<string>;
 /** owner/name from a Lizard Git remote URL (https or ssh-style), or null. */
-export declare function repoFromRemote(url: string, base?: string): string | null;
+/** Every address a Lizard Git remote may use: LIZARD_GIT_URL, or lizard.build/git and the old one. */
+export declare function gitURLs(): string[];
+export declare function repoFromRemote(url: string, bases?: string[]): string | null;
 /**
  * The repository a command is about: `--repo owner/name` (or just `name`: yours), else the
  * Lizard Git remote of the git checkout you're in.
