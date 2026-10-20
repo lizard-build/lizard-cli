@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { APIError } from "../lib/api.js";
 import { validToken } from "../lib/auth.js";
@@ -179,11 +179,13 @@ export function registerLizardGit(git) {
         .option("-d, --description <text>")
         .option("--private").option("--public")
         .option("--default-branch <name>")
+        .option("--api-commits", "Also accept commits written through the API by agents without a checkout")
+        .option("--no-api-commits", "Changes only by git push and merged pull requests (the default for new repositories)")
         .action(async (arg, opts) => {
         const r = await resolveRepo(arg ?? opts.repo);
         await lg.patch(repoPath(r), {
             name: opts.name, description: opts.description, defaultBranch: opts.defaultBranch,
-            private: opts.private ? true : opts.public ? false : undefined,
+            private: opts.private ? true : opts.public ? false : undefined, apiCommits: opts.apiCommits,
         });
         done({ ok: true, repo: opts.name ? `${r.split("/")[0]}/${opts.name}` : r }, `Updated ${r}`);
     });
@@ -298,42 +300,6 @@ export function registerLizardGit(git) {
         const r = await resolveRepo(opts.repo);
         const hits = await lg.get(qs(`${repoPath(r)}/search`, { q: text, ref: opts.ref }));
         out(hits, () => hits.length ? hits.forEach((h) => info(`${chalk.cyan(h.path)}:${h.line}: ${(h.text ?? "").trim()}`)) : info("No matches."));
-    });
-    repoOpt(git.command("commit").description("Commit files on the server, without a clone or push"))
-        .requiredOption("-m, --message <text>", "Commit message")
-        .option("-b, --branch <name>", "Branch (default branch)")
-        .option("-a, --add <file[:path]>", "Add or replace a file: local file, optionally :path in the repository; repeatable", collect, [])
-        .option("--delete <path>", "Delete a path; repeatable", collect, [])
-        .option("--expect <sha>", "Fail (409) unless the branch is still at this commit")
-        .option("--create-from <ref>", "Create the branch from this ref if it doesn't exist")
-        .option("--idempotency-key <key>", "The same key gives the same commit on a retry")
-        .action(async (opts) => {
-        const r = await resolveRepo(opts.repo);
-        const files = [];
-        for (const a of opts.add) {
-            const i = a.lastIndexOf(":");
-            const [local, target] = i > 0 && !existsSync(a) ? [a.slice(0, i), a.slice(i + 1)] : [a, a];
-            if (!existsSync(local) || !statSync(local).isFile())
-                throw new APIError(400, `no such file: ${local}`);
-            files.push({ path: target.replace(/^\.\//, ""), content: readFileSync(local).toString("base64"), base64: true });
-        }
-        for (const d of opts.delete)
-            files.push({ path: d, delete: true });
-        if (!files.length)
-            throw new APIError(400, "nothing to commit: pass --add and/or --delete");
-        const branchName = opts.branch ?? (await lg.get(repoPath(r))).repo.defaultBranch;
-        const c = await lg.post(`${repoPath(r)}/commits`, {
-            branch: branchName, message: opts.message, files, expect: opts.expect, createFrom: opts.createFrom,
-        }, opts.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : undefined);
-        done(c, `Committed ${String(c.sha).slice(0, 7)} to ${branchName}`);
-    });
-    repoOpt(git.command("land").description("Rebase a branch onto another on the server and move it there").argument("<head>", "Branch or commit to land"))
-        .requiredOption("--onto <branch>", "Branch to land on")
-        .option("--delete-head", "Delete the head branch afterwards")
-        .action(async (head, opts) => {
-        const r = await resolveRepo(opts.repo);
-        const l = await lg.post(`${repoPath(r)}/land`, { head, onto: opts.onto, deleteHead: !!opts.deleteHead });
-        done(l, `Landed ${head} on ${opts.onto} at ${String(l.sha ?? "").slice(0, 7)}`);
     });
     // ── Issues and pull requests ─────────────────────────────────────────
     for (const kind of ["issue", "pr"]) {
