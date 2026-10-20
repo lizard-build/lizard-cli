@@ -17,12 +17,27 @@ export interface CheckResponse {
         avatarUrl?: string;
     };
 }
-export interface Me {
+/** One project or workspace a scoped API key reaches, by name. */
+export interface KeyScope {
+    type: "workspace" | "project";
     id: string;
-    username: string;
+    name?: string | null;
+    workspaceId?: string | null;
+    workspaceName?: string | null;
+}
+export interface Me {
+    id?: string;
+    username?: string;
     email?: string | null;
     scoped?: boolean;
+    scopes?: KeyScope[];
 }
+/** "Project X (workspace Y)" for one scope; the id when the name is unknown. */
+export declare function describeScope(sc: KeyScope): string;
+/** Who a login is, for "Signed in as ...": the username for an account, and the
+ *  project/workspace for a scoped key -- never the account owner's name, even from an
+ *  older platform that still sends it. */
+export declare function describeMe(me: Me): string;
 export interface Pending {
     sessionId: string;
     sessionSecret: string;

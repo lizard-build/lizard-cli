@@ -8,6 +8,26 @@ const PROVIDER_LABEL = { github: "GitHub", google: "Google" };
 const SESSION_TTL_MS = 300_000;
 /** The platform allows 60 polls per session over its 5 minutes: one every 5 s. */
 const POLL_MS = 5_000;
+/** "Project X (workspace Y)" for one scope; the id when the name is unknown. */
+export function describeScope(sc) {
+    if (sc.type === "project") {
+        const ws = sc.workspaceName ? ` (workspace ${sc.workspaceName})` : "";
+        return `project ${sc.name || sc.id}${ws}`;
+    }
+    return `workspace ${sc.name || sc.id}`;
+}
+/** Who a login is, for "Signed in as ...": the username for an account, and the
+ *  project/workspace for a scoped key -- never the account owner's name, even from an
+ *  older platform that still sends it. */
+export function describeMe(me) {
+    if (me.scoped) {
+        const scopes = me.scopes ?? [];
+        if (scopes.length === 0)
+            return "a scoped API key";
+        return `a key for ${scopes.map(describeScope).join(", ")}`;
+    }
+    return me.username ?? "unknown";
+}
 /**
  * The page that approves a CLI session. With a provider it signs a signed-out
  * browser in with that method; without one it uses GitHub, as it always has.
@@ -243,7 +263,7 @@ export async function signInInteractive(flag) {
     saveSessionLogin({ accessToken: result.accessToken, user: result.user });
     spin.stop("Authorized");
     const me = await api.get("/api/auth/me");
-    p.log.success(`Signed in as ${chalk.bold(me.username)}`);
+    p.log.success(`Signed in as ${chalk.bold(describeMe(me))}`);
     return me;
 }
 //# sourceMappingURL=signin.js.map

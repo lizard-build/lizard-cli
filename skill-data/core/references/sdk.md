@@ -15,6 +15,7 @@ Use Lizard SDK when the user's own code creates and drives sandboxes or manages 
 - [Desktop (computer use)](#desktop-computer-use)
 - [Sandboxes for your own users](#sandboxes-for-your-own-users)
 - [Platform APIs](#platform-apis)
+- [Lizard Git from code](#lizard-git-from-code)
 - [Billing from code](#billing-from-code)
 - [Errors](#errors)
 
@@ -206,6 +207,15 @@ Keep `project.id`: every user's project is named `default`, so the name is ambig
 ## Platform APIs
 
 The same client manages the rest of Lizard: `projects`, `services` (deploy, inspect, scale, run commands), `addons` (managed databases), `secrets`, `domains`, `storage` (S3 objects), `github`, `metrics`, `workspaces`, `apiKeys` / `api_keys`, `regions`, `billing` and `volumes`. `whoami()` returns the identity behind the key. `platform` is the raw HTTP client for endpoints without a method. A config change that saved but failed to deploy raises `ConfigApplyError`: read its `result` before retrying.
+
+## Lizard Git from code
+
+`lizard.git` reaches Lizard Git (git.lizard.build) with the same key, which must have no scopes. Repositories are `"owner/name"`. Groups: `repos` (create, refs, tree, `file`, `raw`, `commits`, `commitFiles` / `commit_files` with `expect` and an idempotency key, `land`, `archive`, `cloneUrl`), `issues`, `pulls` (`create`, `ready`, `review`, `approve`, `lineComment`, `checks`, `merge`), `actions` (`runs`, `run`, `wait`, `fullLog`, `followLog`, `artifacts`, `downloadArtifact`, `dispatch`, `rerun`, `cancel`, `approve`; `actions.secrets`), `collaborators`, `webhooks`, `branchRules` / `branch_rules`, `labels`, `releases` (with `uploadAsset`), `statuses`, `notifications`, `tokens`. `me()` is the Lizard Git login. Set `LIZARD_GIT_URL` (or `gitUrl` / `git_url`) for another server.
+
+```ts
+await lizard.git.repos.commitFiles('me/app', { branch: 'main', message: 'CI', files: [{ path: '.lizard/workflows/ci.yml', content: yaml }] })
+const run = await lizard.git.actions.wait('me/app', (await lizard.git.actions.runs('me/app')).runs[0].number)
+```
 
 ## Billing from code
 

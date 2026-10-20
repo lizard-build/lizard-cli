@@ -4,7 +4,7 @@ import { saveCredentials, jwtExpiryMs, envToken, openURL } from "../lib/auth.js"
 import { api, getBaseURL } from "../lib/api.js";
 import { getProjectLink } from "../lib/config.js";
 import { success, isJSONMode, printJSON } from "../lib/format.js";
-import { currentUser, fetchAuthProviders, pendingPayload, providerFlag, resumePending, signInInteractive, startSession, } from "../lib/signin.js";
+import { currentUser, fetchAuthProviders, pendingPayload, providerFlag, resumePending, signInInteractive, startSession, describeMe, } from "../lib/signin.js";
 import { CREDITS_END, billingUrl, daysLeft, describeSubscription, usd } from "./billing.js";
 /** What the account still needs, from `GET /api/billing/subscription` (null when it could not be read). */
 export function accountState(sub) {
@@ -128,9 +128,9 @@ async function loginForAgent(flag) {
     const state = accountState(sub);
     printJSON({
         status: "complete",
-        username: me.username,
-        ...(me.email ? { email: me.email } : {}),
-        ...(me.scoped ? { scoped: true } : {}),
+        ...(me.scoped
+            ? { scoped: true, scopes: me.scopes ?? [] }
+            : { username: me.username, ...(me.email ? { email: me.email } : {}) }),
         source,
         account: {
             state,
@@ -181,12 +181,12 @@ async function loginInteractive(flag) {
     p.intro(chalk.bold("Lizard CLI"));
     const me = await currentUser();
     if (me) {
-        p.log.success(`Signed in as ${chalk.bold(me.username)}`);
+        p.log.success(`Signed in as ${chalk.bold(describeMe(me))}`);
         p.log.message(chalk.dim("To use another account: lizard logout, then lizard login."));
     }
     else if ((await resumePending()).kind === "complete") {
         const resumed = await api.get("/api/auth/me");
-        p.log.success(`Signed in as ${chalk.bold(resumed.username)}`);
+        p.log.success(`Signed in as ${chalk.bold(describeMe(resumed))}`);
     }
     else {
         await signInInteractive(flag);
@@ -204,19 +204,22 @@ async function loginWithToken(token) {
         throw new Error("Invalid token");
     const user = (await res.json());
     const expMs = jwtExpiryMs(token);
+    // A scoped key's credentials keep no owner identity, even if an older platform sent it.
     saveCredentials({
         accessToken: token,
         expiresAt: expMs ? new Date(expMs).toISOString() : undefined,
-        userId: user.id,
-        username: user.username,
-        email: user.email,
-        avatarUrl: user.avatarUrl,
+        userId: user.scoped ? "" : user.id ?? "",
+        username: user.scoped ? "" : user.username ?? "",
+        email: user.scoped ? undefined : user.email ?? undefined,
+        avatarUrl: user.scoped ? undefined : user.avatarUrl,
     });
     if (isJSONMode()) {
-        printJSON({ status: "complete", username: user.username });
+        printJSON(user.scoped
+            ? { status: "complete", scoped: true, scopes: user.scopes ?? [] }
+            : { status: "complete", username: user.username });
     }
     else {
-        success(`Logged in as ${chalk.bold(user.username)}`);
+        success(`Logged in as ${chalk.bold(describeMe(user))}`);
     }
 }
 /**

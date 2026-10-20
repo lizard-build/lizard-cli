@@ -2,6 +2,7 @@ import chalk from "chalk";
 import { api } from "../lib/api.js";
 import { getProjectLink } from "../lib/config.js";
 import { isJSONMode, printJSON } from "../lib/format.js";
+import { describeScope } from "../lib/signin.js";
 export function registerWhoami(program) {
     program
         .command("whoami")
@@ -17,20 +18,29 @@ export function registerWhoami(program) {
                 workspaceName: link.workspaceName ?? null,
             }
             : null;
+        // A scoped key is handed to people who are not the account's members: it shows the
+        // projects and workspaces it reaches, never whose account it is. The platform no
+        // longer sends the owner for one; dropping it here covers an older platform too.
+        if (user.scoped) {
+            const scopes = user.scopes ?? [];
+            if (isJSONMode()) {
+                printJSON({ scoped: true, scopes, project });
+                return;
+            }
+            console.log(chalk.bold("Scoped API key") + chalk.dim(" (account details are not visible)"));
+            for (const sc of scopes)
+                console.log(chalk.dim("  ") + describeScope(sc));
+            if (project) {
+                const wsTag = project.workspaceName ? chalk.dim(` (${project.workspaceName})`) : "";
+                console.log(chalk.dim("Project: ") + (project.name || project.id) + wsTag + chalk.dim(" (linked here)"));
+            }
+            return;
+        }
         if (isJSONMode()) {
             printJSON({ ...user, project });
             return;
         }
         console.log(chalk.bold(user.username));
-        if (user.scoped) {
-            const n = user.scopes?.length ?? 0;
-            console.log(chalk.dim("Key: ") +
-                `scoped to ${n} ${n === 1 ? "resource" : "resources"}` +
-                chalk.dim(" (account billing and settings are not visible)"));
-            for (const sc of user.scopes ?? []) {
-                console.log(chalk.dim(`  ${sc.type} ${sc.id}`));
-            }
-        }
         if (user.hasGithubApp) {
             console.log(chalk.dim("GitHub App: connected"));
         }

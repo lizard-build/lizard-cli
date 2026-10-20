@@ -94,6 +94,7 @@ export function statusColor(status) {
         case "pending":
             return chalk.yellow(status);
         case "deleting":
+        case "paused":
             return chalk.dim(status);
         default:
             return status;

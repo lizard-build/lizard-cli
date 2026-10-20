@@ -230,6 +230,17 @@ lizard billing --json                       # plan, trial, usage this month, Bil
 
 There is no shell into a running service (`lizard ssh` answers 403); for a sandbox use `lizard sandbox exec`. Metrics options and `lizard run` in detail: `lizard skills get core --ref deploys --json`.
 
+## Lizard Git
+
+Lizard Git (git.lizard.build) hosts repositories with issues, pull requests, reviews, CI (`.lizard/workflows/*.yml`, GitHub Actions syntax), releases and webhooks. `lizard git ...` signs in with the same Lizard login; a scoped API key is refused there. Commands take `-R owner/name` (or just `name` for yours) and otherwise use the Lizard Git remote of the current checkout.
+
+- **Repos**: `lizard git repo create <name> --private [--readme] --json`, `repo list|view|edit|delete --yes|fork|star`. Plain git: `lizard git setup` (credential helper, once), then `lizard git clone <repo>` or `git push`. `lizard git whoami` shows the Lizard Git login.
+- **Without a clone**: `lizard git ls [path] [-r]`, `cat <path> [--ref]`, `log`, `show <sha>`, `search <text>`, `commit -m <msg> -a <file[:path]> [--delete <path>] [-b <branch>] [--expect <sha>]` (server-side commit; `--expect` fails with 409 if the branch moved), `land <head> --onto main`, `branch list|create|delete`.
+- **Issues / PRs**: `lizard git issue create -t <title> -b <body> [-l label] [-a login]`, `issue list|view|comment|edit|close|reopen`. `lizard git pr create -t <title> [-H branch] [-B base] [--draft] [-r reviewer]` (head defaults to the current branch), `pr view|diff|commits|checks [--watch]|review --approve|--request-changes|--comment [--line path:line=text]|ready|merge [--squash|--rebase] [-d]|checkout|close`. You can't approve your own PR. `Fixes #N` in a merged PR closes the issue.
+- **CI**: `lizard git run list|view <n>|logs <n> [-f] [-j job]|watch <n>|cancel|rerun|approve|artifacts <n>|download <n> <name> [-x dir]`, `workflow list`, `workflow run ci.yml -f key=value [--watch]` (needs `on: workflow_dispatch`). Secrets: `lizard git secret set NAME` (value from stdin or `-b`), `secret list|delete`. `run watch` and `pr checks` exit `1` when something failed.
+- **Admin**: `lizard git protect set main --require-pr --approvals 1 --checks ci/test --block-force-push [--enforce-admins]`, `protect list|delete`; `collaborator add <login> --role read|write|admin` (they accept with `lizard git invitation accept <id>`), `collaborator list|role|remove`; `webhook create <url> -e push,pull_request --secret s`, `webhook list|edit|ping|deliveries|redeliver|delete`; `label ...`; `release create v1.0.0 -t <title> -n <notes> -a <file>`, `release list|view|edit|upload|download|delete`; `commit-status set <sha> -s success -c <context>`; `notification list|read`; `token create <name> [--repo r] [--read-only]` (a limited lzg_ token; use it as `LIZARD_GIT_TOKEN` or the git password).
+- From code, the SDK has the same: `lizard.git.repos`, `.issues`, `.pulls`, `.actions`, `.releases`, ... (see the `sdk` reference).
+
 ## Response format
 
 After an operation, return:

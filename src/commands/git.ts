@@ -7,6 +7,7 @@ import { api, getBaseURL, streamSSE, withScope } from "../lib/api.js";
 import { openURL } from "../lib/auth.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { success, error, info, fail, isJSONMode, printJSON, isTTY, link } from "../lib/format.js";
+import { registerLizardGit } from "./git-hosting.js";
 
 interface GitHubInstallation {
   id: number;
@@ -170,7 +171,7 @@ export function registerGit(program: Command) {
   // lizard git status
   git
     .command("status")
-    .description("Show GitHub connection and repository status")
+    .description("GitHub: connection and the repositories this project's services deploy from")
     .option("-p, --project <id>", "Project name, slug, or ID")
     .action(async (opts) => {
       const { projectId, scope } = await resolveProjectScope(opts.project);
@@ -232,6 +233,7 @@ export function registerGit(program: Command) {
         );
       }
     });
+  registerLizardGit(git);
 }
 
 function pressEnter(question: string): Promise<void> {

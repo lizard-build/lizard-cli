@@ -146,6 +146,9 @@ program
       topLevel = topLevel.parent;
     }
     if (noAuth.has(topLevel.name())) return;
+    // git runs `lizard git credential get` as its credential helper: it answers from the
+    // stored sign-in or nothing, and must never start an interactive login inside git.
+    if (topLevel.name() === "git" && actionCommand.name() === "credential") return;
 
     // Require auth — auto-triggers login flow if not logged in
     const creds = await requireAuth();

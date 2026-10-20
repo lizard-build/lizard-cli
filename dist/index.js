@@ -65,12 +65,14 @@ import { registerProjects } from "./commands/projects.js";
 import { registerPs } from "./commands/ps.js";
 import { registerRedeploy } from "./commands/redeploy.js";
 import { registerRegions } from "./commands/regions.js";
+import { registerPause } from "./commands/pause.js";
 import { registerRestart } from "./commands/restart.js";
 import { registerRun } from "./commands/run.js";
 import { registerS3 } from "./commands/s3.js";
 import { registerSandbox } from "./commands/sandbox.js";
 import { registerAgents } from "./commands/agents.js";
 import { registerScale } from "./commands/scale.js";
+import { registerSleep } from "./commands/sleep.js";
 import { registerSecrets } from "./commands/secrets.js";
 import { registerService } from "./commands/service.js";
 import { registerSkill } from "./commands/skill.js";
@@ -122,6 +124,10 @@ program
     }
     if (noAuth.has(topLevel.name()))
         return;
+    // git runs `lizard git credential get` as its credential helper: it answers from the
+    // stored sign-in or nothing, and must never start an interactive login inside git.
+    if (topLevel.name() === "git" && actionCommand.name() === "credential")
+        return;
     // Require auth — auto-triggers login flow if not logged in
     const creds = await requireAuth();
     setAccessToken(creds.accessToken);
@@ -153,12 +159,14 @@ registerProjects(program);
 registerPs(program);
 registerRedeploy(program);
 registerRegions(program);
+registerPause(program);
 registerRestart(program);
 registerRun(program);
 registerS3(program);
 registerSandbox(program);
 registerAgents(program);
 registerScale(program);
+registerSleep(program);
 registerSecrets(program);
 registerService(program);
 registerSkill(program);
@@ -393,13 +401,20 @@ async function main() {
         // it so the user sees something actionable instead of just "fetch failed".
         const causeDetail = err?.cause?.code || err?.cause?.message;
         const baseMsg = err.message || String(err);
+        // A workspace's own limits (set by its owner with `lizard workspace limits`): say where to
+        // see them and what frees room, since retrying as is fails the same way.
+        const limitCode = err instanceof APIError ? err.code : undefined;
         const msg = projectDeleted
             ? "This project is being deleted — create a new one with `lizard init`."
             : accountScope
                 ? `${baseMsg}\n  Your key is limited to specific workspaces or projects. Run this with an unscoped key, or see per-workspace spend with \`lizard metrics\`.`
-                : causeDetail && !baseMsg.includes(causeDetail)
-                    ? `${baseMsg} (${causeDetail})`
-                    : baseMsg;
+                : limitCode === "WORKSPACE_SANDBOX_LIMIT"
+                    ? `${baseMsg}\n  \`lizard sandbox list\` shows them; \`lizard sandbox pause <id>\` or \`lizard sandbox rm <id>\` frees one. Limits: \`lizard workspace limits <workspace>\`.`
+                    : limitCode === "WORKSPACE_USAGE_LIMIT"
+                        ? `${baseMsg}\n  \`lizard workspace limits <workspace>\` shows use against the limits; \`lizard metrics\` shows each service. Free CPU/memory by stopping or scaling down a service, SSD by deleting data or a volume; the workspace owner can raise them.`
+                        : causeDetail && !baseMsg.includes(causeDetail)
+                            ? `${baseMsg} (${causeDetail})`
+                            : baseMsg;
         const apiErr = err instanceof APIError ? err : undefined;
         const status = apiErr?.status;
         const code = projectDeleted ? "PROJECT_DELETED" : apiErr?.code || err.code || err?.cause?.code || "ERROR";

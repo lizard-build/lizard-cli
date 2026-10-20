@@ -1,0 +1,1073 @@
+import chalk from "chalk";
+import { Command } from "commander";
+import { spawnSync } from "node:child_process";
+import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
+import { basename } from "node:path";
+import { APIError } from "../lib/api.js";
+import { validToken } from "../lib/auth.js";
+import { isJSONMode, printJSON, table, success, info, warn, link } from "../lib/format.js";
+import {
+  lg, qs, seg, segs, resolveRepo, repoPath, myLogin, cloneURL, gitURL, helperCommand, ago, ACTIVE_RUN,
+} from "../lib/lizard-git.js";
+
+/**
+ * Lizard Git (git.lizard.build) from the terminal: repositories, issues, pull requests,
+ * reviews, CI runs, releases, secrets, collaborators, webhooks, branch rules, labels,
+ * notifications, tokens, and the credential helper that lets plain `git` push and pull.
+ *
+ * Registered under `lizard git`, next to the GitHub integration commands.
+ */
+
+const collect = (v: string, prev: string[]) => [...prev, v];
+const list = (v?: string) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : undefined);
+const int = (v: string) => {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n <= 0) throw new APIError(400, `expected a number, got "${v}"`);
+  return n;
+};
+
+/** Print data in JSON mode, or run the human printer. */
+function out(data: unknown, human: () => void) {
+  if (isJSONMode()) printJSON(data ?? { ok: true });
+  else human();
+}
+
+function done(data: unknown, msg: string) {
+  out(data ?? { ok: true }, () => success(msg));
+}
+
+function state(s: string): string {
+  switch (s) {
+    case "success": case "merged": case "approved": return chalk.green(s);
+    case "failure": case "error": case "changes_requested": return chalk.red(s);
+    case "open": return chalk.green(s);
+    case "closed": case "cancelled": case "skipped": return chalk.dim(s);
+    case "queued": case "running": case "waiting": case "pending": return chalk.yellow(s);
+    default: return s;
+  }
+}
+
+/** Text from --body, --body-file, or "" */
+function bodyFrom(opts: { body?: string; bodyFile?: string }): string | undefined {
+  if (opts.bodyFile) return opts.bodyFile === "-" ? readFileSync(0, "utf8") : readFileSync(opts.bodyFile, "utf8");
+  return opts.body;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function repoOpt(c: Command): Command {
+  return c.option("-R, --repo <owner/name>", "Repository (default: the Lizard Git remote of this checkout)");
+}
+
+export function registerLizardGit(git: Command) {
+  git.description("Lizard Git (git.lizard.build) repositories, pull requests, CI; and GitHub integration");
+
+  // ── Sign-in for plain git ────────────────────────────────────────────
+  git
+    .command("setup")
+    .description("Let git push and pull Lizard Git repositories with your Lizard sign-in (credential helper)")
+    .option("--local", "Only for the repository in this directory")
+    .action(async (opts: { local?: boolean }) => {
+      const key = `credential.${gitURL()}.helper`;
+      const scope = opts.local ? "--local" : "--global";
+      // An empty value first resets helpers inherited for this host; then ours.
+      for (const value of ["", helperCommand()]) {
+        const r = spawnSync("git", ["config", scope, value ? "--add" : "--replace-all", key, value], { encoding: "utf8" });
+        if (r.status !== 0) throw new APIError(500, `git config failed: ${r.stderr || r.error?.message}`);
+      }
+      spawnSync("git", ["config", scope, `credential.${gitURL()}.username`, "lizard"]);
+      const who = await myLogin();
+      out({ helper: helperCommand(), scope: opts.local ? "local" : "global", host: gitURL(), login: who }, () => {
+        success(`git now signs in to ${gitURL()} as ${chalk.bold(who)} (${opts.local ? "this repository" : "every repository"})`);
+        info(chalk.dim(`  Try: lizard git clone ${who}/<repo>`));
+      });
+    });
+
+  git
+    .command("credential")
+    .description("git credential helper (used by `lizard git setup`; not run by hand)")
+    .argument("[operation]", "get, store or erase")
+    .action(async (op?: string) => {
+      if (op !== "get") return; // store/erase: nothing kept, nothing to forget
+      const input = readFileSync(0, "utf8");
+      const fields = Object.fromEntries(input.split("\n").filter(Boolean).map((l) => l.split(/=(.*)/s).slice(0, 2)));
+      const want = new URL(gitURL());
+      if (fields.host && fields.host !== want.host) return;
+      if (fields.protocol && fields.protocol !== want.protocol.replace(":", "")) return;
+      const token = process.env.LIZARD_GIT_TOKEN || validToken();
+      if (!token) {
+        process.stderr.write("lizard: not signed in; run `lizard login`\n");
+        return;
+      }
+      process.stdout.write(`username=lizard\npassword=${token}\n`);
+    });
+
+  git
+    .command("clone")
+    .description("Clone a Lizard Git repository (signed in with your Lizard account)")
+    .argument("<repo>", "owner/name, or name for one of yours")
+    .argument("[dir]", "Directory (default: the repository name)")
+    .action(async (repoArg: string, dir?: string) => {
+      const repo = await resolveRepo(repoArg);
+      // Kept in the clone's config (--config applies before the fetch too): an empty helper
+      // first, so helpers set globally for this host don't answer instead.
+      const args = ["clone", "--config", `credential.${gitURL()}.helper=`, "--config", `credential.${gitURL()}.helper=${helperCommand()}`, cloneURL(repo)];
+      if (dir) args.push(dir);
+      const r = spawnSync("git", args, { stdio: isJSONMode() ? ["ignore", "ignore", "inherit"] : "inherit" });
+      if (r.status !== 0) throw new APIError(500, `git clone failed (exit ${r.status})`);
+      done({ repo, dir: dir ?? repo.split("/")[1], url: cloneURL(repo) }, `Cloned ${repo}`);
+    });
+
+  // ── Repositories ─────────────────────────────────────────────────────
+  const repo = git.command("repo").description("Lizard Git repositories");
+  repo
+    .command("list")
+    .alias("ls")
+    .description("Your repositories and the ones you collaborate on")
+    .option("--owner <login>", "Only this owner's")
+    .option("--starred", "The ones you starred")
+    .option("-q, --query <text>", "Search names and descriptions")
+    .action(async (opts) => {
+      const login = await myLogin();
+      const repos = await lg.get<any[]>(qs("/api/repos", {
+        owner: opts.owner, member: opts.owner || opts.starred ? undefined : login, starred: opts.starred ? login : undefined, q: opts.query,
+      }));
+      out(repos, () => {
+        if (!repos.length) return info("No repositories. Create one: lizard git repo create <name>");
+        table(["REPO", "VISIBILITY", "UPDATED", "DESCRIPTION"], repos.map((r) => [
+          `${r.owner}/${r.name}`, r.private ? "private" : "public", ago(r.pushedAt ?? r.updatedAt), (r.description ?? "").slice(0, 60),
+        ]));
+      });
+    });
+  repo
+    .command("create")
+    .description("Create a repository")
+    .argument("<name>")
+    .option("--private", "Only you and collaborators can see it")
+    .option("-d, --description <text>")
+    .option("--readme", "Start with a README (otherwise empty, ready for a push)")
+    .option("--default-branch <name>", "Default branch (main)")
+    .action(async (name: string, opts) => {
+      const r = await lg.post<{ owner: string; name: string }>("/api/repos", {
+        name, private: !!opts.private, description: opts.description, readme: !!opts.readme, defaultBranch: opts.defaultBranch,
+      });
+      const full = `${r.owner}/${r.name}`;
+      out({ ...r, url: `${gitURL()}/${full}`, cloneUrl: cloneURL(full) }, () => {
+        success(`Created ${chalk.bold(full)}  ${link(`${gitURL()}/${full}`)}`);
+        info(chalk.dim(`  Clone: lizard git clone ${full}    Push: git remote add origin ${cloneURL(full)}`));
+      });
+    });
+  repoOpt(repo.command("view").description("A repository's details").argument("[repo]"))
+    .action(async (arg: string | undefined, opts) => {
+      const r = await resolveRepo(arg ?? opts.repo);
+      const m = await lg.get<any>(repoPath(r));
+      out(m, () => {
+        info(`${chalk.bold(r)}  ${m.repo.private ? "private" : "public"}  ${chalk.dim(`you: ${m.role || "reader"}`)}`);
+        if (m.repo.description) info(m.repo.description);
+        if (m.forkOf) info(chalk.dim(`forked from ${m.forkOf}`));
+        info(`default branch ${m.repo.defaultBranch} · ${m.branches} branches · ${m.tags} tags · ${m.openIssues} open issues · ${m.openPulls} open pull requests · ${m.repo.stars} stars`);
+        info(`${link(`${gitURL()}/${r}`)}\nclone: ${m.cloneUrl}`);
+      });
+    });
+  repoOpt(repo.command("edit").description("Change name, description, visibility or default branch").argument("[repo]"))
+    .option("--name <name>")
+    .option("-d, --description <text>")
+    .option("--private").option("--public")
+    .option("--default-branch <name>")
+    .action(async (arg: string | undefined, opts) => {
+      const r = await resolveRepo(arg ?? opts.repo);
+      await lg.patch(repoPath(r), {
+        name: opts.name, description: opts.description, defaultBranch: opts.defaultBranch,
+        private: opts.private ? true : opts.public ? false : undefined,
+      });
+      done({ ok: true, repo: opts.name ? `${r.split("/")[0]}/${opts.name}` : r }, `Updated ${r}`);
+    });
+  repoOpt(repo.command("delete").description("Delete a repository").argument("[repo]"))
+    .option("--yes", "Confirm")
+    .action(async (arg: string | undefined, opts) => {
+      const r = await resolveRepo(arg ?? opts.repo);
+      if (!opts.yes) throw new APIError(400, `This deletes ${r} with its issues, pull requests, runs and releases. Run again with --yes.`);
+      await lg.delete(repoPath(r));
+      done({ ok: true, deleted: r }, `Deleted ${r}`);
+    });
+  repoOpt(repo.command("fork").description("Fork a repository into your account").argument("[repo]"))
+    .option("--name <name>", "Name of the fork (default: the same)")
+    .option("--clone", "Clone the fork afterwards")
+    .action(async (arg: string | undefined, opts) => {
+      const r = await resolveRepo(arg ?? opts.repo);
+      const f = await lg.post<{ owner: string; name: string }>(`${repoPath(r)}/forks`, { name: opts.name });
+      const full = `${f.owner}/${f.name}`;
+      if (opts.clone) spawnSync("git", ["clone", "--config", `credential.${gitURL()}.helper=${helperCommand()}`, cloneURL(full)], { stdio: "inherit" });
+      done({ ...f, url: `${gitURL()}/${full}` }, `Forked ${r} to ${chalk.bold(full)}`);
+    });
+  repoOpt(repo.command("forks").description("Forks of a repository").argument("[repo]"))
+    .action(async (arg: string | undefined, opts) => {
+      const r = await resolveRepo(arg ?? opts.repo);
+      const fs = await lg.get<any[]>(`${repoPath(r)}/forks`);
+      out(fs, () => fs.length ? table(["FORK", "UPDATED"], fs.map((f) => [`${f.owner}/${f.name}`, ago(f.pushedAt ?? f.updatedAt)])) : info("No forks."));
+    });
+  for (const [cmd, method, msg] of [["star", "put", "Starred"], ["unstar", "delete", "Unstarred"]] as const) {
+    repoOpt(repo.command(cmd).description(`${msg.replace(/ed$/, "")} a repository`).argument("[repo]"))
+      .action(async (arg: string | undefined, opts) => {
+        const r = await resolveRepo(arg ?? opts.repo);
+        await (method === "put" ? lg.put(`${repoPath(r)}/star`) : lg.delete(`${repoPath(r)}/star`));
+        done({ ok: true }, `${msg} ${r}`);
+      });
+  }
+
+  // ── Branches, files, commits ─────────────────────────────────────────
+  const branch = git.command("branch").description("Branches and tags of a Lizard Git repository");
+  repoOpt(branch.command("list").alias("ls").description("Branches and tags"))
+    .option("--tags", "Tags only")
+    .action(async (opts) => {
+      const r = await resolveRepo(opts.repo);
+      const refs = (await lg.get<any[]>(`${repoPath(r)}/refs`)).filter((x) => (opts.tags ? x.kind === "tag" : true));
+      out(refs, () => table(["NAME", "KIND", "COMMIT", "UPDATED", "SUBJECT"], refs.map((x) => [x.name, x.kind, x.sha.slice(0, 7), ago(x.date), (x.subject ?? "").slice(0, 50)])));
+    });
+  repoOpt(branch.command("create").description("Create a branch").argument("<name>"))
+    .option("--from <ref>", "Start point (default branch)")
+    .action(async (name: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const b = await lg.post(`${repoPath(r)}/branches`, { name, from: opts.from });
+      done(b, `Created branch ${name} at ${String(b.sha).slice(0, 7)}`);
+    });
+  repoOpt(branch.command("delete").description("Delete a branch").argument("<name>"))
+    .action(async (name: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      await lg.delete(`${repoPath(r)}/branches/${segs(name)}`);
+      done({ ok: true }, `Deleted branch ${name}`);
+    });
+
+  repoOpt(git.command("ls").description("List files in a Lizard Git repository").argument("[path]"))
+    .option("--ref <ref>", "Branch, tag or commit")
+    .option("-r, --recursive", "Every file path")
+    .action(async (path: string | undefined, opts) => {
+      const r = await resolveRepo(opts.repo);
+      if (opts.recursive) {
+        const files = await lg.get<string[]>(qs(`${repoPath(r)}/files`, { ref: opts.ref }));
+        const f = path ? files.filter((p) => p.startsWith(path.replace(/\/?$/, "/"))) : files;
+        return out(f, () => process.stdout.write(f.join("\n") + (f.length ? "\n" : "")));
+      }
+      const t = await lg.get<any>(qs(`${repoPath(r)}/tree`, { ref: opts.ref, path }));
+      const entries: any[] = t.entries ?? t;
+      out(t, () => table(["TYPE", "NAME", "SIZE"], entries.map((e) => [e.type, e.type === "tree" ? chalk.bold(e.name + "/") : e.name, e.size != null ? String(e.size) : ""])));
+    });
+  repoOpt(git.command("cat").description("Print a file from a Lizard Git repository").argument("<path>"))
+    .option("--ref <ref>", "Branch, tag or commit (default branch)")
+    .option("-o, --output <file>", "Write to a file instead")
+    .action(async (path: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const ref = opts.ref ?? (await lg.get<any>(repoPath(r))).repo.defaultBranch;
+      const [o, n] = r.split("/");
+      const data = await lg.bytes(`/raw/${seg(o)}/${seg(n)}/${segs(ref)}/${segs(path)}`);
+      if (opts.output) {
+        writeFileSync(opts.output, data);
+        return done({ path, ref, bytes: data.length, output: opts.output }, `Wrote ${data.length} bytes to ${opts.output}`);
+      }
+      if (isJSONMode()) return printJSON({ path, ref, content: data.toString("utf8") });
+      process.stdout.write(data);
+    });
+  repoOpt(git.command("log").description("Commits of a Lizard Git repository"))
+    .option("--ref <ref>", "Branch, tag or commit")
+    .option("--path <path>", "Only commits that touch this path")
+    .option("--page <n>", "Page", "1")
+    .action(async (opts) => {
+      const r = await resolveRepo(opts.repo);
+      const c = await lg.get<any>(qs(`${repoPath(r)}/commits`, { ref: opts.ref, path: opts.path, page: opts.page }));
+      out(c, () => table(["COMMIT", "AUTHOR", "WHEN", "SUBJECT"], c.commits.map((x: any) => [chalk.yellow(x.sha.slice(0, 7)), x.authorName, ago(x.date), x.subject.slice(0, 70)])));
+    });
+  repoOpt(git.command("show").description("One commit: message and changed files").argument("<sha>"))
+    .action(async (sha: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const c = await lg.get<any>(`${repoPath(r)}/commits/${seg(sha)}`);
+      out(c, () => {
+        info(`${chalk.yellow(c.commit.sha)}\n${c.commit.authorName} <${c.commit.authorEmail}>  ${ago(c.commit.date)}\n\n  ${c.commit.subject}\n`);
+        for (const f of c.diff?.files ?? []) info(`  ${f.status} ${f.newPath || f.oldPath}  ${chalk.green(`+${f.additions}`)} ${chalk.red(`-${f.deletions}`)}`);
+      });
+    });
+  repoOpt(git.command("search").description("Search the code of a Lizard Git repository").argument("<text>"))
+    .option("--ref <ref>")
+    .action(async (text: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const hits = await lg.get<any[]>(qs(`${repoPath(r)}/search`, { q: text, ref: opts.ref }));
+      out(hits, () => hits.length ? hits.forEach((h) => info(`${chalk.cyan(h.path)}:${h.line}: ${(h.text ?? "").trim()}`)) : info("No matches."));
+    });
+  repoOpt(git.command("commit").description("Commit files on the server, without a clone or push"))
+    .requiredOption("-m, --message <text>", "Commit message")
+    .option("-b, --branch <name>", "Branch (default branch)")
+    .option("-a, --add <file[:path]>", "Add or replace a file: local file, optionally :path in the repository; repeatable", collect, [])
+    .option("--delete <path>", "Delete a path; repeatable", collect, [])
+    .option("--expect <sha>", "Fail (409) unless the branch is still at this commit")
+    .option("--create-from <ref>", "Create the branch from this ref if it doesn't exist")
+    .option("--idempotency-key <key>", "The same key gives the same commit on a retry")
+    .action(async (opts) => {
+      const r = await resolveRepo(opts.repo);
+      const files: any[] = [];
+      for (const a of opts.add as string[]) {
+        const i = a.lastIndexOf(":");
+        const [local, target] = i > 0 && !existsSync(a) ? [a.slice(0, i), a.slice(i + 1)] : [a, a];
+        if (!existsSync(local) || !statSync(local).isFile()) throw new APIError(400, `no such file: ${local}`);
+        files.push({ path: target.replace(/^\.\//, ""), content: readFileSync(local).toString("base64"), base64: true });
+      }
+      for (const d of opts.delete as string[]) files.push({ path: d, delete: true });
+      if (!files.length) throw new APIError(400, "nothing to commit: pass --add and/or --delete");
+      const branchName = opts.branch ?? (await lg.get<any>(repoPath(r))).repo.defaultBranch;
+      const c = await lg.post<any>(`${repoPath(r)}/commits`, {
+        branch: branchName, message: opts.message, files, expect: opts.expect, createFrom: opts.createFrom,
+      }, opts.idempotencyKey ? { "Idempotency-Key": opts.idempotencyKey } : undefined);
+      done(c, `Committed ${String(c.sha).slice(0, 7)} to ${branchName}`);
+    });
+  repoOpt(git.command("land").description("Rebase a branch onto another on the server and move it there").argument("<head>", "Branch or commit to land"))
+    .requiredOption("--onto <branch>", "Branch to land on")
+    .option("--delete-head", "Delete the head branch afterwards")
+    .action(async (head: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const l = await lg.post<any>(`${repoPath(r)}/land`, { head, onto: opts.onto, deleteHead: !!opts.deleteHead });
+      done(l, `Landed ${head} on ${opts.onto} at ${String(l.sha ?? "").slice(0, 7)}`);
+    });
+
+  // ── Issues and pull requests ─────────────────────────────────────────
+  for (const kind of ["issue", "pr"] as const) {
+    const pulls = kind === "pr";
+    const noun = pulls ? "pull request" : "issue";
+    const grp = git.command(kind).description(pulls ? "Pull requests: create, review, merge" : "Issues");
+
+    repoOpt(grp.command("list").alias("ls").description(`List ${noun}s`))
+      .option("-s, --state <state>", "open, closed or all", "open")
+      .option("-l, --label <name>")
+      .option("-a, --assignee <login>")
+      .option("-q, --query <text>")
+      .action(async (opts) => {
+        const r = await resolveRepo(opts.repo);
+        const l = await lg.get<any>(qs(`${repoPath(r)}/issues`, { state: opts.state, label: opts.label, assignee: opts.assignee, q: opts.query, pulls: pulls ? 1 : undefined }));
+        out(l, () => {
+          if (!l.items.length) return info(`No ${opts.state === "all" ? "" : opts.state + " "}${noun}s. (${l.open} open, ${l.closed} closed)`);
+          table(["#", "STATE", "TITLE", pulls ? "BRANCH" : "LABELS", "AUTHOR", "UPDATED"], l.items.map((i: any) => [
+            String(i.number), state(i.draft ? "draft" : i.state), i.title.slice(0, 60),
+            pulls ? `${i.headRepo ? i.headRepo.split("/")[0] + ":" : ""}${i.headRef} → ${i.baseRef}` : (i.labels ?? []).map((x: any) => x.name).join(","),
+            i.author, ago(i.updatedAt),
+          ]));
+        });
+      });
+
+    const create = repoOpt(grp.command("create").description(`Open ${pulls ? "a pull request" : "an issue"}`))
+      .requiredOption("-t, --title <text>")
+      .option("-b, --body <text>")
+      .option("-F, --body-file <file>", "Body from a file (- for stdin)");
+    if (pulls) {
+      create
+        .option("-H, --head <branch>", "Branch with the changes (default: the current git branch); owner:branch for a fork")
+        .option("-B, --base <branch>", "Branch to merge into (default branch)")
+        .option("--head-repo <owner/name>", "The fork the head branch is on")
+        .option("-d, --draft", "Open as a draft")
+        .option("-r, --reviewer <login>", "Ask for a review; repeatable", collect, []);
+    }
+    create.option("-l, --label <name>", "Add a label; repeatable", collect, []).option("-a, --assignee <login>", "Assign; repeatable", collect, []);
+    create.action(async (opts) => {
+      const r = await resolveRepo(opts.repo);
+      const body: Record<string, unknown> = { title: opts.title, body: bodyFrom(opts) ?? "" };
+      if (pulls) {
+        let head = opts.head;
+        if (!head) {
+          const b = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" });
+          head = b.status === 0 ? b.stdout.trim() : "";
+          if (!head || head === "HEAD") throw new APIError(400, "pass --head <branch>");
+        }
+        Object.assign(body, { head, base: opts.base, headRepo: opts.headRepo, draft: !!opts.draft, reviewers: opts.reviewer.length ? opts.reviewer : undefined });
+      }
+      const { number } = await lg.post<{ number: number }>(`${repoPath(r)}/issues`, body);
+      if (opts.label.length || opts.assignee.length) {
+        await lg.patch(`${repoPath(r)}/issues/${number}`, { labels: opts.label.length ? opts.label : undefined, assignees: opts.assignee.length ? opts.assignee : undefined });
+      }
+      const url = `${gitURL()}/${r}/${pulls ? "pull" : "issues"}/${number}`;
+      out({ number, url }, () => success(`Opened ${noun} #${number}  ${link(url)}`));
+    });
+
+    repoOpt(grp.command("view").description(`Show ${pulls ? "a pull request" : "an issue"} with its conversation`).argument("<number>", "", int))
+      .option("--comments", "Show every comment (default: the last 10)")
+      .action(async (n: number, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const d = await lg.get<any>(`${repoPath(r)}/issues/${n}`);
+        let reviews: any = null;
+        if (d.issue.isPull) reviews = await lg.get<any>(`${repoPath(r)}/pulls/${n}/reviews`).catch(() => null);
+        out(reviews ? { ...d, reviews } : d, () => {
+          const i = d.issue;
+          info(`${chalk.bold(i.title)} ${chalk.dim(`#${i.number}`)}  ${state(i.draft ? "draft" : i.state)}`);
+          info(chalk.dim(`${i.author} opened ${ago(i.createdAt)}${i.isPull ? ` · ${i.headRepo ? i.headRepo + ":" : ""}${i.headRef} → ${i.baseRef}` : ""}`));
+          if (i.labels?.length) info(`labels: ${i.labels.map((l: any) => l.name).join(", ")}`);
+          if (i.assignees?.length) info(`assignees: ${i.assignees.map((a: any) => a.login).join(", ")}`);
+          if (d.pull) {
+            const p = d.pull;
+            if (p.merge) info(`merge: ${p.merge.conflicts?.length ? chalk.red("conflicts in " + p.merge.conflicts.join(", ")) : chalk.green("no conflicts")}`);
+            if (p.gate?.blockers?.length) info(`${chalk.yellow("blocked:")} ${p.gate.blockers.join("; ")}`);
+            if (reviews?.decision) info(`reviews: ${reviews.decision.approvals.length} approved${reviews.decision.changesRequested.length ? `, changes requested by ${reviews.decision.changesRequested.join(", ")}` : ""}`);
+          }
+          if (i.body?.trim()) info(`\n${i.body.trim()}\n`);
+          const cs: any[] = (d.comments ?? []).filter((c: any) => c.kind === "comment" || !c.kind);
+          for (const c of opts.comments ? cs : cs.slice(-10)) info(`${chalk.bold(c.author)} ${chalk.dim(ago(c.createdAt))}\n  ${String(c.body).trim().replace(/\n/g, "\n  ")}\n`);
+          info(link(`${gitURL()}/${r}/${i.isPull ? "pull" : "issues"}/${i.number}`));
+        });
+      });
+
+    repoOpt(grp.command("comment").description("Add a comment").argument("<number>", "", int))
+      .option("-b, --body <text>")
+      .option("-F, --body-file <file>", "Body from a file (- for stdin)")
+      .action(async (n: number, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const body = bodyFrom(opts);
+        if (!body?.trim()) throw new APIError(400, "pass --body or --body-file");
+        const c = await lg.post(`${repoPath(r)}/issues/${n}/comments`, { body });
+        done(c, `Commented on #${n}`);
+      });
+
+    const edit = repoOpt(grp.command("edit").description("Change title, body, labels, assignees" + (pulls ? ", reviewers" : "")).argument("<number>", "", int))
+      .option("-t, --title <text>")
+      .option("-b, --body <text>")
+      .option("-F, --body-file <file>")
+      .option("--add-label <names>", "Comma-separated").option("--remove-label <names>", "Comma-separated")
+      .option("--add-assignee <logins>", "Comma-separated").option("--remove-assignee <logins>", "Comma-separated");
+    if (pulls) edit.option("--add-reviewer <logins>", "Comma-separated").option("--remove-reviewer <logins>", "Comma-separated");
+    edit.action(async (n: number, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const d = await lg.get<any>(`${repoPath(r)}/issues/${n}`);
+      const merge = (cur: string[], add?: string, remove?: string) => {
+        if (!add && !remove) return undefined;
+        const rm = new Set(list(remove) ?? []);
+        return [...new Set([...cur, ...(list(add) ?? [])])].filter((x) => !rm.has(x));
+      };
+      const reviewers = pulls ? merge((d.pull?.reviewRequests ?? []).map((x: any) => x.login), opts.addReviewer, opts.removeReviewer) : undefined;
+      await lg.patch(`${repoPath(r)}/issues/${n}`, {
+        title: opts.title, body: bodyFrom(opts),
+        labels: merge(d.issue.labels.map((l: any) => l.name), opts.addLabel, opts.removeLabel),
+        assignees: merge(d.issue.assignees.map((a: any) => a.login), opts.addAssignee, opts.removeAssignee),
+        reviewers,
+      });
+      done({ ok: true }, `Updated #${n}`);
+    });
+
+    for (const [cmd, st] of [["close", "closed"], ["reopen", "open"]] as const) {
+      repoOpt(grp.command(cmd).description(`${cmd === "close" ? "Close" : "Reopen"} ${pulls ? "a pull request" : "an issue"}`).argument("<number>", "", int))
+        .option("-c, --comment <text>", "Comment first")
+        .action(async (n: number, opts) => {
+          const r = await resolveRepo(opts.repo);
+          if (opts.comment) await lg.post(`${repoPath(r)}/issues/${n}/comments`, { body: opts.comment });
+          await lg.patch(`${repoPath(r)}/issues/${n}`, { state: st });
+          done({ ok: true, number: n, state: st }, `${cmd === "close" ? "Closed" : "Reopened"} #${n}`);
+        });
+    }
+
+    if (!pulls) continue;
+
+    repoOpt(grp.command("ready").description("Mark a draft ready for review").argument("<number>", "", int))
+      .option("--undo", "Back to draft")
+      .action(async (n: number, opts) => {
+        const r = await resolveRepo(opts.repo);
+        await lg.patch(`${repoPath(r)}/issues/${n}`, { draft: !!opts.undo });
+        done({ ok: true, draft: !!opts.undo }, opts.undo ? `#${n} is a draft again` : `#${n} is ready for review`);
+      });
+    repoOpt(grp.command("diff").description("The changes of a pull request").argument("<number>", "", int))
+      .option("--stat", "Only the files changed")
+      .action(async (n: number, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const d = await lg.get<any>(`${repoPath(r)}/pulls/${n}/diff`);
+        out(d, () => {
+          for (const f of d.diff?.files ?? []) {
+            const name = f.oldPath && f.newPath && f.oldPath !== f.newPath ? `${f.oldPath} → ${f.newPath}` : f.newPath || f.oldPath;
+            process.stdout.write(`${chalk.bold(name)}  ${chalk.green(`+${f.additions}`)} ${chalk.red(`-${f.deletions}`)}${f.binary ? " (binary)" : ""}\n`);
+            if (opts.stat) continue;
+            for (const h of f.hunks ?? []) {
+              process.stdout.write(chalk.cyan(h.header) + "\n");
+              for (const l of h.lines ?? []) {
+                const t = `${l.k}${l.t}`;
+                process.stdout.write((l.k === "+" ? chalk.green(t) : l.k === "-" ? chalk.red(t) : t) + "\n");
+              }
+            }
+          }
+        });
+      });
+    repoOpt(grp.command("commits").description("Commits of a pull request").argument("<number>", "", int))
+      .action(async (n: number, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const cs = await lg.get<any[]>(`${repoPath(r)}/pulls/${n}/commits`);
+        out(cs, () => table(["COMMIT", "AUTHOR", "SUBJECT"], cs.map((c) => [chalk.yellow(c.sha.slice(0, 7)), c.authorName, c.subject.slice(0, 70)])));
+      });
+    repoOpt(grp.command("review").description("Approve, request changes, or comment on a pull request").argument("<number>", "", int))
+      .option("--approve").option("--request-changes").option("--comment", "A review that only comments (default)")
+      .option("-b, --body <text>")
+      .option("-F, --body-file <file>")
+      .option("--line <path:line=text>", "A comment on a line of the new code; repeatable", collect, [])
+      .action(async (n: number, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const event = opts.approve ? "APPROVE" : opts.requestChanges ? "REQUEST_CHANGES" : "COMMENT";
+        const comments = (opts.line as string[]).map((s) => {
+          const m = s.match(/^(.+):(\d+)=(.*)$/s);
+          if (!m) throw new APIError(400, `--line is path:line=text, got "${s}"`);
+          return { path: m[1], line: Number(m[2]), side: "RIGHT", body: m[3] };
+        });
+        const rv = await lg.post(`${repoPath(r)}/pulls/${n}/reviews`, { event, body: bodyFrom(opts) ?? "", comments });
+        done(rv, `${event === "APPROVE" ? "Approved" : event === "REQUEST_CHANGES" ? "Requested changes on" : "Reviewed"} #${n}`);
+      });
+    repoOpt(grp.command("reviews").description("Reviews and line comments of a pull request").argument("<number>", "", int))
+      .action(async (n: number, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const rv = await lg.get<any>(`${repoPath(r)}/pulls/${n}/reviews`);
+        out(rv, () => {
+          for (const x of rv.reviews) info(`${chalk.bold(x.author)} ${state(x.state)} ${chalk.dim(ago(x.createdAt))}${x.body ? `\n  ${x.body}` : ""}`);
+          for (const c of rv.comments) info(`${chalk.cyan(`${c.path}:${c.line}`)} ${chalk.bold(c.author)}: ${c.body}`);
+          info(`approvals: ${rv.decision.approvals.join(", ") || "none"}${rv.decision.changesRequested.length ? ` · changes requested: ${rv.decision.changesRequested.join(", ")}` : ""}`);
+        });
+      });
+    repoOpt(grp.command("checks").description("CI runs and commit statuses of a pull request's head").argument("<number>", "", int))
+      .option("-w, --watch", "Wait until every check has finished")
+      .action(async (n: number, opts) => {
+        const r = await resolveRepo(opts.repo);
+        for (;;) {
+          const d = await lg.get<any>(`${repoPath(r)}/issues/${n}`);
+          const sha = d.pull?.headSha;
+          if (!sha) throw new APIError(404, `#${n} has no head commit`);
+          const [st, runs] = await Promise.all([
+            lg.get<any>(`${repoPath(r)}/commits/${sha}/status`),
+            lg.get<any>(qs(`${repoPath(r)}/actions/runs`, { sha })),
+          ]);
+          const pending = st.statuses.some((s: any) => s.state === "pending") || runs.runs.some((x: any) => ACTIVE_RUN.has(x.status));
+          if (opts.watch && pending) {
+            if (!isJSONMode()) info(chalk.dim(`waiting for ${runs.runs.filter((x: any) => ACTIVE_RUN.has(x.status)).length} run(s)...`));
+            await sleep(5000);
+            continue;
+          }
+          out({ sha, state: st.state, statuses: st.statuses, runs: runs.runs }, () => {
+            info(`${chalk.yellow(sha.slice(0, 7))} ${state(st.state)}`);
+            const rows = [
+              ...runs.runs.map((x: any) => [state(x.status), x.name, `run #${x.number}`, ago(x.finishedAt ?? x.startedAt ?? x.createdAt)]),
+              ...st.statuses.map((s: any) => [state(s.state), s.context, s.description ?? "", ago(s.createdAt)]),
+            ];
+            rows.length ? table(["STATE", "CHECK", "DETAIL", "WHEN"], rows) : info("No checks.");
+          });
+          const failed = st.state === "failure" || st.state === "error" || runs.runs.some((x: any) => x.status === "failure");
+          if (failed) process.exitCode = 1;
+          return;
+        }
+      });
+    repoOpt(grp.command("merge").description("Merge a pull request").argument("<number>", "", int))
+      .option("--squash").option("--rebase").option("--merge", "A merge commit (default)")
+      .option("-m, --message <text>", "Commit message")
+      .option("-d, --delete-branch", "Delete the head branch afterwards")
+      .option("--admin", "Merge past the branch rule (admins, when the rule allows)")
+      .action(async (n: number, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const m = await lg.post<any>(`${repoPath(r)}/pulls/${n}/merge`, {
+          method: opts.squash ? "squash" : opts.rebase ? "rebase" : "merge", message: opts.message, deleteBranch: !!opts.deleteBranch, bypass: !!opts.admin,
+        });
+        done(m, `Merged #${n} (${String(m.sha).slice(0, 7)})`);
+      });
+    repoOpt(grp.command("checkout").description("Check out a pull request's branch in this clone").argument("<number>", "", int))
+      .action(async (n: number, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const d = await lg.get<any>(`${repoPath(r)}/issues/${n}`);
+        const local = d.issue.headRepo && d.issue.headRepo !== r ? `pr-${n}` : d.issue.headRef;
+        const remoteRef = d.issue.headRepo && d.issue.headRepo !== r ? `refs/pull/${n}/head` : `refs/heads/${d.issue.headRef}`;
+        const run = (args: string[]) => {
+          const x = spawnSync("git", args, { stdio: isJSONMode() ? ["ignore", "ignore", "inherit"] : "inherit" });
+          if (x.status !== 0) throw new APIError(500, `git ${args[0]} failed`);
+        };
+        run(["fetch", "origin", `+${remoteRef}:refs/remotes/origin/${local}`]);
+        const exists = spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${local}`]).status === 0;
+        run(exists ? ["checkout", local] : ["checkout", "-b", local, "--track", `origin/${local}`]);
+        done({ branch: local }, `On branch ${local} (#${n})`);
+      });
+  }
+
+  // ── CI runs and workflows ────────────────────────────────────────────
+  const run = git.command("run").description("CI runs (.lizard/workflows, GitHub Actions syntax)");
+  repoOpt(run.command("list").alias("ls").description("Recent runs"))
+    .option("-b, --branch <name>").option("--commit <sha>").option("-w, --workflow <path>").option("-s, --status <status>")
+    .option("--pr <number>", "Runs of a pull request")
+    .option("--page <n>", "Page", "1")
+    .action(async (opts) => {
+      const r = await resolveRepo(opts.repo);
+      const l = await lg.get<any>(qs(`${repoPath(r)}/actions/runs`, { branch: opts.branch, sha: opts.commit, workflow: opts.workflow, status: opts.status, pr: opts.pr, page: opts.page }));
+      out(l, () => l.runs.length ? table(["#", "STATUS", "WORKFLOW", "EVENT", "REF", "TITLE", "WHEN"], l.runs.map((x: any) => [
+        String(x.number), state(x.status), x.name, x.event, x.ref.replace(/^refs\/(heads|tags)\//, ""), (x.title ?? "").slice(0, 40), ago(x.createdAt),
+      ])) : info("No runs yet. Add a workflow under .lizard/workflows/ and push."));
+    });
+  repoOpt(run.command("view").description("A run with its jobs and steps").argument("<number>", "", int))
+    .action(async (n: number, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const x = await lg.get<any>(`${repoPath(r)}/actions/runs/${n}`);
+      out(x, () => {
+        info(`${chalk.bold(x.name)} #${x.number}  ${state(x.status)}  ${chalk.dim(`${x.event} on ${x.ref.replace(/^refs\/heads\//, "")} at ${x.sha.slice(0, 7)} by ${x.actor}`)}`);
+        if (x.error) info(chalk.red(x.error));
+        for (const j of x.jobs ?? []) {
+          const secs = j.startedAt && j.finishedAt ? ` ${j.finishedAt - j.startedAt}s` : "";
+          info(`  ${state(j.status)} ${chalk.bold(j.name)} ${chalk.dim(`job ${j.id}${secs}`)}`);
+          for (const s of j.steps ?? []) info(`      ${state(s.status ?? "")} ${s.name}`);
+        }
+        info(link(`${gitURL()}/${r}/actions/runs/${x.number}`));
+      });
+    });
+  repoOpt(run.command("logs").alias("log").description("A run's job logs").argument("<number>", "", int))
+    .option("-j, --job <name|id>", "Only this job")
+    .option("-f, --follow", "Keep printing until the run ends")
+    .action(async (n: number, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const x = await lg.get<any>(`${repoPath(r)}/actions/runs/${n}`);
+      const jobs: any[] = (x.jobs ?? []).filter((j: any) => !opts.job || String(j.id) === opts.job || j.name === opts.job || j.key === opts.job);
+      if (!jobs.length) throw new APIError(404, opts.job ? `no job ${opts.job} in run ${n}` : `run ${n} has no jobs`);
+      const result: Record<string, string> = {};
+      for (const j of jobs) {
+        if (!isJSONMode() && jobs.length > 1) process.stdout.write(chalk.bold(`\n== ${j.name}\n`));
+        let offset = 0, text = "";
+        for (;;) {
+          const c = await lg.get<any>(qs(`${repoPath(r)}/actions/jobs/${j.id}/log`, { offset }));
+          if (c.text) {
+            text += c.text;
+            if (!isJSONMode()) process.stdout.write(c.text.replace(/^##\[lizard:(step|end)\].*\n/gm, (l: string) => (l.startsWith("##[lizard:step]") ? chalk.cyan("▸ " + l.replace(/^##\[lizard:step\] \d+ /, "")) : "")));
+          }
+          offset = c.next;
+          if (c.done && offset >= c.size) break;
+          if (!opts.follow && offset >= c.size) break;
+          if (!c.text) await sleep(1500);
+        }
+        result[j.name] = text;
+      }
+      if (isJSONMode()) printJSON({ run: n, logs: result });
+    });
+  repoOpt(run.command("watch").description("Wait for a run to finish; exit 1 if it failed").argument("<number>", "", int))
+    .option("--interval <seconds>", "", "3")
+    .action(async (n: number, opts) => {
+      const r = await resolveRepo(opts.repo);
+      let last = "";
+      for (;;) {
+        const x = await lg.get<any>(`${repoPath(r)}/actions/runs/${n}`);
+        const line = (x.jobs ?? []).map((j: any) => `${j.name}:${j.status}`).join(" ");
+        if (!isJSONMode() && line !== last) info(`${state(x.status)} ${line}`);
+        last = line;
+        if (!ACTIVE_RUN.has(x.status)) {
+          if (isJSONMode()) printJSON(x);
+          if (x.status !== "success") process.exitCode = 1;
+          return;
+        }
+        await sleep(Number(opts.interval) * 1000);
+      }
+    });
+  for (const [cmd, path, msg, desc] of [
+    ["cancel", "cancel", "Cancelled", "Cancel a run"],
+    ["rerun", "rerun", "Started again as", "Run the same workflow at the same commit again"],
+    ["approve", "approve", "Approved", "Let a run from a fork's pull request start"],
+  ] as const) {
+    repoOpt(run.command(cmd).description(desc).argument("<number>", "", int))
+      .action(async (n: number, opts) => {
+        const r = await resolveRepo(opts.repo);
+        const x = await lg.post<any>(`${repoPath(r)}/actions/runs/${n}/${path}`);
+        done(x, cmd === "rerun" ? `${msg} run #${x.number}` : `${msg} run #${n}`);
+      });
+  }
+  repoOpt(run.command("artifacts").description("Artifacts a run uploaded").argument("<number>", "", int))
+    .action(async (n: number, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const a = await lg.get<any[]>(`${repoPath(r)}/actions/runs/${n}/artifacts`);
+      out(a, () => a.length ? table(["NAME", "SIZE", "JOB", "WHEN"], a.map((x) => [x.name, `${x.size} B`, x.job, ago(x.createdAt)])) : info("No artifacts."));
+    });
+  repoOpt(run.command("download").description("Download an artifact (.tar.gz)").argument("<number>", "", int).argument("<name>"))
+    .option("-o, --output <file>", "File (default: <name>.tar.gz)")
+    .option("-x, --extract <dir>", "Unpack into this directory instead")
+    .action(async (n: number, name: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const data = await lg.bytes(`${repoPath(r)}/actions/runs/${n}/artifacts/${seg(name)}`);
+      if (opts.extract) {
+        spawnSync("mkdir", ["-p", opts.extract]);
+        const t = spawnSync("tar", ["xzf", "-", "-C", opts.extract], { input: data });
+        if (t.status !== 0) throw new APIError(500, `tar failed: ${t.stderr}`);
+        return done({ name, bytes: data.length, extracted: opts.extract }, `Unpacked ${name} into ${opts.extract}`);
+      }
+      const file = opts.output ?? `${name}.tar.gz`;
+      writeFileSync(file, data);
+      done({ name, bytes: data.length, output: file }, `Saved ${name} to ${file} (${data.length} bytes)`);
+    });
+
+  const workflow = git.command("workflow").description("CI workflows of a repository");
+  repoOpt(workflow.command("list").alias("ls").description("Workflows and their triggers"))
+    .action(async (opts) => {
+      const r = await resolveRepo(opts.repo);
+      const w = await lg.get<any>(`${repoPath(r)}/actions/workflows`);
+      out(w, () => {
+        if (!w.enabled) warn(`CI is off for this repository: ${w.reason}`);
+        w.workflows.length ? table(["WORKFLOW", "NAME", "ON", "MANUAL"], w.workflows.map((x: any) => [x.path, x.name, x.events.join(","), x.dispatch ? "yes" : ""])) : info("No workflows in .lizard/workflows/");
+      });
+    });
+  repoOpt(workflow.command("run").description("Start a workflow that has on: workflow_dispatch").argument("<workflow>", "Path or file name, e.g. ci.yml"))
+    .option("--ref <ref>", "Branch or tag (default branch)")
+    .option("-f, --field <key=value>", "An input; repeatable", collect, [])
+    .option("-w, --watch", "Wait for it to finish")
+    .action(async (wf: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const path = wf.includes("/") ? wf : `.lizard/workflows/${wf}`;
+      const inputs = Object.fromEntries((opts.field as string[]).map((f) => {
+        const i = f.indexOf("=");
+        if (i <= 0) throw new APIError(400, `--field is key=value, got "${f}"`);
+        return [f.slice(0, i), f.slice(i + 1)];
+      }));
+      const x = await lg.post<{ number: number }>(`${repoPath(r)}/actions/workflows/dispatch`, { workflow: path, ref: opts.ref, inputs });
+      if (!opts.watch) return done(x, `Started run #${x.number}  ${link(`${gitURL()}/${r}/actions/runs/${x.number}`)}`);
+      for (;;) {
+        const s = await lg.get<any>(`${repoPath(r)}/actions/runs/${x.number}`);
+        if (!ACTIVE_RUN.has(s.status)) {
+          if (s.status !== "success") process.exitCode = 1;
+          return out(s, () => info(`run #${x.number} ${state(s.status)}`));
+        }
+        await sleep(3000);
+      }
+    });
+
+  // ── Secrets ──────────────────────────────────────────────────────────
+  const secret = git.command("secret").description("CI secrets of a repository (${{ secrets.NAME }})");
+  repoOpt(secret.command("list").alias("ls").description("Secret names (values are never shown)"))
+    .action(async (opts) => {
+      const r = await resolveRepo(opts.repo);
+      const s = await lg.get<any>(`${repoPath(r)}/actions/secrets`);
+      out(s, () => s.secrets.length ? table(["NAME", "UPDATED"], s.secrets.map((x: any) => [x.name, ago(x.updatedAt)])) : info("No secrets."));
+    });
+  repoOpt(secret.command("set").description("Set a secret").argument("<name>"))
+    .option("-b, --body <value>", "The value (default: read from stdin)")
+    .action(async (name: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const value = opts.body ?? readFileSync(0, "utf8").replace(/\n$/, "");
+      await lg.put(`${repoPath(r)}/actions/secrets/${seg(name)}`, { value });
+      done({ ok: true, name }, `Set secret ${name}`);
+    });
+  repoOpt(secret.command("delete").alias("rm").description("Delete a secret").argument("<name>"))
+    .action(async (name: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      await lg.delete(`${repoPath(r)}/actions/secrets/${seg(name)}`);
+      done({ ok: true, name }, `Deleted secret ${name}`);
+    });
+
+  // ── Collaborators and invitations ────────────────────────────────────
+  const collab = git.command("collaborator").alias("collab").description("People with access to a repository");
+  repoOpt(collab.command("list").alias("ls").description("Collaborators and pending invitations"))
+    .action(async (opts) => {
+      const r = await resolveRepo(opts.repo);
+      const c = await lg.get<any>(`${repoPath(r)}/collaborators`);
+      out(c, () => {
+        c.collaborators.length ? table(["LOGIN", "ROLE", "SINCE"], c.collaborators.map((x: any) => [x.login, x.role, ago(x.createdAt)])) : info("No collaborators.");
+        if (c.invitations?.length) {
+          info("\nInvited:");
+          table(["ID", "LOGIN", "ROLE", "BY"], c.invitations.map((x: any) => [String(x.id), x.login, x.role, x.inviter]));
+        }
+      });
+    });
+  repoOpt(collab.command("add").description("Invite someone (they sign in to Lizard Git once first)").argument("<login>"))
+    .option("--role <role>", "read, write or admin", "write")
+    .action(async (login: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const x = await lg.post<any>(`${repoPath(r)}/collaborators`, { login, role: opts.role });
+      done(x, x.status === "updated" ? `${login} is now ${opts.role}` : `Invited ${login} as ${opts.role}; they're in once they accept`);
+    });
+  repoOpt(collab.command("role").description("Change someone's role").argument("<login>").argument("<role>", "read, write or admin"))
+    .action(async (login: string, role: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      done(await lg.patch(`${repoPath(r)}/collaborators/${seg(login)}`, { role }), `${login} is now ${role}`);
+    });
+  repoOpt(collab.command("remove").alias("rm").description("Remove someone (your own login: leave)").argument("<login>"))
+    .action(async (login: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      await lg.delete(`${repoPath(r)}/collaborators/${seg(login)}`);
+      done({ ok: true }, `Removed ${login} from ${r}`);
+    });
+  const inv = git.command("invitation").alias("invite").description("Repository invitations");
+  inv.command("list").alias("ls").description("Invitations waiting for you")
+    .action(async () => {
+      const l = await lg.get<any[]>("/api/user/invitations");
+      out(l, () => l.length ? table(["ID", "REPO", "ROLE", "FROM", "EXPIRES"], l.map((x) => [String(x.id), `${x.owner}/${x.repo}`, x.role, x.inviter, ago(x.expiresAt).replace(" ago", "")])) : info("No invitations."));
+    });
+  for (const answer of ["accept", "decline"] as const) {
+    inv.command(answer).description(`${answer === "accept" ? "Accept" : "Decline"} an invitation`).argument("<id>", "", int)
+      .action(async (id: number) => {
+        await lg.post(`/api/user/invitations/${id}/${answer}`);
+        done({ ok: true }, `${answer === "accept" ? "Accepted" : "Declined"} invitation ${id}`);
+      });
+  }
+  repoOpt(inv.command("cancel").description("Withdraw an invitation you sent").argument("<id>", "", int))
+    .action(async (id: number, opts) => {
+      const r = await resolveRepo(opts.repo);
+      await lg.delete(`${repoPath(r)}/invitations/${id}`);
+      done({ ok: true }, `Cancelled invitation ${id}`);
+    });
+
+  // ── Webhooks ─────────────────────────────────────────────────────────
+  const hook = git.command("webhook").alias("hook").description("Webhooks (GitHub-style payloads, X-Hub-Signature-256)");
+  repoOpt(hook.command("list").alias("ls").description("Webhooks of a repository"))
+    .action(async (opts) => {
+      const r = await resolveRepo(opts.repo);
+      const h = await lg.get<any>(`${repoPath(r)}/hooks`);
+      out(h, () => h.hooks.length ? table(["ID", "URL", "EVENTS", "ACTIVE", "LAST"], h.hooks.map((x: any) => [String(x.id), x.url, x.events.join(","), x.active ? "yes" : "no", x.lastStatus ? String(x.lastStatus) : x.lastError ?? ""])) : info(`No webhooks. Events: ${h.events.join(", ")}`));
+    });
+  const hookFields = (c: Command) => c
+    .option("-e, --events <list>", "Comma-separated events (default push), or *")
+    .option("--secret <secret>", "Signs each delivery (X-Hub-Signature-256)")
+    .option("--content-type <type>", "json or form")
+    .option("--inactive", "Don't deliver for now").option("--active");
+  hookFields(repoOpt(hook.command("create").description("Add a webhook").argument("<url>")))
+    .action(async (url: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const h = await lg.post<any>(`${repoPath(r)}/hooks`, { url, events: list(opts.events), secret: opts.secret, contentType: opts.contentType, active: !opts.inactive });
+      done(h, `Added webhook ${h.id} (${h.events.join(", ")})`);
+    });
+  hookFields(repoOpt(hook.command("edit").description("Change a webhook").argument("<id>", "", int)))
+    .option("--url <url>")
+    .action(async (id: number, opts) => {
+      const r = await resolveRepo(opts.repo);
+      done(await lg.patch(`${repoPath(r)}/hooks/${id}`, {
+        url: opts.url, events: list(opts.events), secret: opts.secret, contentType: opts.contentType, active: opts.inactive ? false : opts.active ? true : undefined,
+      }), `Updated webhook ${id}`);
+    });
+  repoOpt(hook.command("delete").alias("rm").description("Delete a webhook").argument("<id>", "", int))
+    .action(async (id: number, opts) => {
+      const r = await resolveRepo(opts.repo);
+      await lg.delete(`${repoPath(r)}/hooks/${id}`);
+      done({ ok: true }, `Deleted webhook ${id}`);
+    });
+  repoOpt(hook.command("ping").description("Send a ping delivery").argument("<id>", "", int))
+    .action(async (id: number, opts) => {
+      const r = await resolveRepo(opts.repo);
+      await lg.post(`${repoPath(r)}/hooks/${id}/pings`);
+      done({ ok: true }, `Ping queued; see: lizard git webhook deliveries ${id}`);
+    });
+  repoOpt(hook.command("deliveries").description("Recent deliveries of a webhook").argument("<id>", "", int))
+    .option("--show <delivery>", "One delivery with its request and response")
+    .action(async (id: number, opts) => {
+      const r = await resolveRepo(opts.repo);
+      if (opts.show) {
+        const d = await lg.get<any>(`${repoPath(r)}/hooks/${id}/deliveries/${seg(opts.show)}`);
+        return out(d, () => info(JSON.stringify(d, null, 2)));
+      }
+      const l = await lg.get<any[]>(`${repoPath(r)}/hooks/${id}/deliveries`);
+      out(l, () => l.length ? table(["ID", "EVENT", "STATUS", "MS", "WHEN"], l.map((x) => [String(x.id), x.event, x.status ? String(x.status) : chalk.red(x.error ?? "failed"), String(x.durationMs ?? ""), ago(x.createdAt)])) : info("No deliveries yet."));
+    });
+  repoOpt(hook.command("redeliver").description("Send a delivery again").argument("<id>", "", int).argument("<delivery>", "", int))
+    .action(async (id: number, delivery: number, opts) => {
+      const r = await resolveRepo(opts.repo);
+      await lg.post(`${repoPath(r)}/hooks/${id}/deliveries/${delivery}/redeliver`);
+      done({ ok: true }, `Redelivery of ${delivery} queued`);
+    });
+
+  // ── Branch protection ────────────────────────────────────────────────
+  const protect = git.command("protect").description("Branch rules: required reviews and checks, no force pushes");
+  repoOpt(protect.command("list").alias("ls").description("Branch rules"))
+    .action(async (opts) => {
+      const r = await resolveRepo(opts.repo);
+      const l = await lg.get<any[]>(`${repoPath(r)}/branch-rules`);
+      out(l, () => l.length ? table(["ID", "BRANCHES", "PR", "APPROVALS", "CHECKS", "NO FORCE", "NO DELETE", "ADMINS TOO", "CODEOWNERS"], l.map((x) => [
+        String(x.id), x.pattern, x.requirePullRequest ? "yes" : "", String(x.requiredApprovals || ""), x.requiredChecks.join(","),
+        x.blockForcePush ? "yes" : "", x.blockDeletion ? "yes" : "", x.enforceAdmins ? "yes" : "", x.requireCodeOwners ? "yes" : "",
+      ])) : info("No branch rules."));
+    });
+  repoOpt(protect.command("set").description("Create or change the rule for a branch pattern").argument("<pattern>", "Branch name or glob, e.g. main or release/*"))
+    .option("--require-pr", "Changes only through pull requests").option("--no-require-pr")
+    .option("--approvals <n>", "Approving reviews required")
+    .option("--checks <list>", "Comma-separated status checks that must pass (\"\" for none)")
+    .option("--block-force-push").option("--no-block-force-push")
+    .option("--block-deletion").option("--no-block-deletion")
+    .option("--enforce-admins", "Admins too").option("--no-enforce-admins")
+    .option("--code-owners", "Owners in CODEOWNERS must approve").option("--no-code-owners")
+    .action(async (pattern: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const body = {
+        pattern,
+        requirePullRequest: opts.requirePr,
+        requiredApprovals: opts.approvals !== undefined ? Number(opts.approvals) : undefined,
+        requiredChecks: opts.checks !== undefined ? list(opts.checks) ?? [] : undefined,
+        blockForcePush: opts.blockForcePush,
+        blockDeletion: opts.blockDeletion,
+        enforceAdmins: opts.enforceAdmins,
+        requireCodeOwners: opts.codeOwners,
+      };
+      const existing = (await lg.get<any[]>(`${repoPath(r)}/branch-rules`)).find((x) => x.pattern === pattern);
+      const rule = existing ? await lg.patch(`${repoPath(r)}/branch-rules/${existing.id}`, body) : await lg.post(`${repoPath(r)}/branch-rules`, body);
+      done(rule, `${existing ? "Updated" : "Created"} the rule for ${pattern}`);
+    });
+  repoOpt(protect.command("delete").alias("rm").description("Remove the rule for a branch pattern").argument("<pattern>"))
+    .action(async (pattern: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const rule = (await lg.get<any[]>(`${repoPath(r)}/branch-rules`)).find((x) => x.pattern === pattern || String(x.id) === pattern);
+      if (!rule) throw new APIError(404, `no rule for ${pattern}`);
+      await lg.delete(`${repoPath(r)}/branch-rules/${rule.id}`);
+      done({ ok: true }, `Removed the rule for ${rule.pattern}`);
+    });
+
+  // ── Labels ───────────────────────────────────────────────────────────
+  const label = git.command("label").description("Issue and pull request labels");
+  repoOpt(label.command("list").alias("ls").description("Labels"))
+    .action(async (opts) => {
+      const r = await resolveRepo(opts.repo);
+      const l = await lg.get<any[]>(`${repoPath(r)}/labels`);
+      out(l, () => table(["NAME", "COLOR", "DESCRIPTION"], l.map((x) => [chalk.hex(`#${x.color}`)("● ") + x.name, x.color, x.description])));
+    });
+  repoOpt(label.command("create").description("Create a label").argument("<name>"))
+    .option("-c, --color <hex>", "e.g. d73a4a").option("-d, --description <text>")
+    .action(async (name: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      done(await lg.post(`${repoPath(r)}/labels`, { name, color: opts.color?.replace(/^#/, ""), description: opts.description }), `Created label ${name}`);
+    });
+  repoOpt(label.command("edit").description("Change a label").argument("<name>"))
+    .option("--name <new>").option("-c, --color <hex>").option("-d, --description <text>")
+    .action(async (name: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      done(await lg.patch(`${repoPath(r)}/labels/${seg(name)}`, { name: opts.name, color: opts.color?.replace(/^#/, ""), description: opts.description }), `Updated label ${name}`);
+    });
+  repoOpt(label.command("delete").alias("rm").description("Delete a label").argument("<name>"))
+    .action(async (name: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      await lg.delete(`${repoPath(r)}/labels/${seg(name)}`);
+      done({ ok: true }, `Deleted label ${name}`);
+    });
+
+  // ── Releases ─────────────────────────────────────────────────────────
+  const release = git.command("release").description("Releases and their files");
+  const findRelease = async (r: string, tag: string) => lg.get<any>(`${repoPath(r)}/releases/tags/${seg(tag)}`);
+  repoOpt(release.command("list").alias("ls").description("Releases"))
+    .action(async (opts) => {
+      const r = await resolveRepo(opts.repo);
+      const l = await lg.get<any[]>(`${repoPath(r)}/releases`);
+      out(l, () => l.length ? table(["TAG", "NAME", "KIND", "FILES", "WHEN"], l.map((x) => [x.tag, x.name, x.draft ? "draft" : x.prerelease ? "pre-release" : "", String(x.assets?.length ?? 0), ago(x.publishedAt ?? x.createdAt)])) : info("No releases."));
+    });
+  repoOpt(release.command("create").description("Create a release (and its tag, if new)").argument("<tag>"))
+    .option("--target <ref>", "Where a new tag points (default branch)")
+    .option("-t, --title <text>").option("-n, --notes <text>").option("-F, --notes-file <file>")
+    .option("--draft").option("--prerelease")
+    .option("-a, --asset <file>", "Attach a file; repeatable", collect, [])
+    .action(async (tag: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const rel = await lg.post<any>(`${repoPath(r)}/releases`, {
+        tag, target: opts.target, name: opts.title ?? tag, body: opts.notesFile ? readFileSync(opts.notesFile, "utf8") : opts.notes ?? "", draft: !!opts.draft, prerelease: !!opts.prerelease,
+      });
+      for (const f of opts.asset as string[]) await lg.upload(qs(`${repoPath(r)}/releases/${rel.id}/assets`, { name: basename(f) }), readFileSync(f), "application/octet-stream");
+      done(rel, `Created release ${tag}${opts.asset.length ? ` with ${opts.asset.length} file(s)` : ""}  ${link(`${gitURL()}/${r}/releases/tag/${tag}`)}`);
+    });
+  repoOpt(release.command("view").description("A release and its files").argument("<tag>"))
+    .action(async (tag: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const x = await findRelease(r, tag);
+      out(x, () => {
+        info(`${chalk.bold(x.name || x.tag)} ${chalk.dim(x.tag)}${x.draft ? " draft" : ""}${x.prerelease ? " pre-release" : ""}  ${x.sha?.slice(0, 7) ?? ""}`);
+        if (x.body) info(`\n${x.body}\n`);
+        for (const a of x.assets ?? []) info(`  ${a.name}  ${a.size} B`);
+      });
+    });
+  repoOpt(release.command("edit").description("Change a release").argument("<tag>"))
+    .option("-t, --title <text>").option("-n, --notes <text>")
+    .option("--draft").option("--no-draft").option("--prerelease").option("--no-prerelease")
+    .action(async (tag: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const x = await findRelease(r, tag);
+      done(await lg.patch(`${repoPath(r)}/releases/${x.id}`, { name: opts.title, body: opts.notes, draft: opts.draft, prerelease: opts.prerelease }), `Updated release ${tag}`);
+    });
+  repoOpt(release.command("delete").alias("rm").description("Delete a release (the tag stays)").argument("<tag>"))
+    .action(async (tag: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const x = await findRelease(r, tag);
+      await lg.delete(`${repoPath(r)}/releases/${x.id}`);
+      done({ ok: true }, `Deleted release ${tag}`);
+    });
+  repoOpt(release.command("upload").description("Attach files to a release").argument("<tag>").argument("<files...>"))
+    .action(async (tag: string, files: string[], opts) => {
+      const r = await resolveRepo(opts.repo);
+      const x = await findRelease(r, tag);
+      const up = [];
+      for (const f of files) up.push(await lg.upload(qs(`${repoPath(r)}/releases/${x.id}/assets`, { name: basename(f) }), readFileSync(f), "application/octet-stream"));
+      done(up, `Uploaded ${files.length} file(s) to ${tag}`);
+    });
+  repoOpt(release.command("download").description("Download a release's files").argument("<tag>"))
+    .option("-p, --pattern <name>", "Only this file")
+    .option("-D, --dir <dir>", "Directory", ".")
+    .action(async (tag: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const x = await findRelease(r, tag);
+      const got = [];
+      for (const a of (x.assets ?? []).filter((a: any) => !opts.pattern || a.name === opts.pattern)) {
+        const data = await lg.bytes(`${repoPath(r)}/releases/${x.id}/assets/${a.id}`);
+        writeFileSync(`${opts.dir}/${a.name}`, data);
+        got.push({ name: a.name, bytes: data.length });
+      }
+      done(got, `Downloaded ${got.length} file(s)`);
+    });
+  repoOpt(release.command("delete-asset").description("Remove a file from a release").argument("<tag>").argument("<name>"))
+    .action(async (tag: string, name: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const x = await findRelease(r, tag);
+      const a = (x.assets ?? []).find((a: any) => a.name === name);
+      if (!a) throw new APIError(404, `${tag} has no file ${name}`);
+      await lg.delete(`${repoPath(r)}/releases/${x.id}/assets/${a.id}`);
+      done({ ok: true }, `Removed ${name} from ${tag}`);
+    });
+
+  // ── Commit statuses ──────────────────────────────────────────────────
+  const cs = git.command("commit-status").description("Commit statuses (external checks; what branch rules can require)");
+  repoOpt(cs.command("list").alias("ls").description("Statuses of a commit or branch").argument("[ref]", "Commit, branch or tag (default branch)"))
+    .action(async (ref: string | undefined, opts) => {
+      const r = await resolveRepo(opts.repo);
+      const x = await lg.get<any>(`${repoPath(r)}/commits/${seg(ref ?? (await lg.get<any>(repoPath(r))).repo.defaultBranch)}/status`);
+      out(x, () => {
+        info(`${x.sha.slice(0, 7)} ${state(x.state)}`);
+        if (x.statuses.length) table(["STATE", "CONTEXT", "DESCRIPTION", "WHEN"], x.statuses.map((s: any) => [state(s.state), s.context, s.description ?? "", ago(s.createdAt)]));
+      });
+    });
+  repoOpt(cs.command("set").description("Report a status on a commit").argument("<sha>"))
+    .requiredOption("-s, --state <state>", "pending, success, failure or error")
+    .requiredOption("-c, --context <name>", "e.g. ci/tests")
+    .option("-d, --description <text>").option("-u, --target-url <url>")
+    .action(async (sha: string, opts) => {
+      const r = await resolveRepo(opts.repo);
+      done(await lg.post(`${repoPath(r)}/statuses/${seg(sha)}`, { state: opts.state, context: opts.context, description: opts.description, target_url: opts.targetUrl }),
+        `${opts.context}: ${opts.state} on ${sha.slice(0, 7)}`);
+    });
+
+  // ── Notifications, tokens, whoami ────────────────────────────────────
+  const notif = git.command("notification").alias("inbox").description("Your Lizard Git notifications");
+  notif.command("list").alias("ls").description("Unread notifications (--all for everything)")
+    .option("--all")
+    .action(async (opts) => {
+      const n = await lg.get<any>(qs("/api/notifications", { all: opts.all ? 1 : undefined }));
+      out(n, () => n.notifications.length ? table(["ID", "", "REPO", "#", "TITLE", "WHY", "WHEN"], n.notifications.map((x: any) => [
+        String(x.id), x.unread ? chalk.cyan("●") : "", x.repo, x.number ? String(x.number) : "", (x.title ?? "").slice(0, 50), x.reason, ago(x.updatedAt),
+      ])) : info("Nothing new."));
+    });
+  notif.command("read").description("Mark notifications read (all, or the ids given)").argument("[ids...]")
+    .action(async (ids: string[]) => {
+      await lg.post("/api/notifications/read", ids.length ? { ids: ids.map(Number) } : { all: true });
+      done({ ok: true }, ids.length ? `Marked ${ids.length} read` : "Marked all read");
+    });
+
+  const token = git.command("token").description("Lizard Git tokens (lzg_...): limited to repos, refs, paths, or read-only");
+  token.command("list").alias("ls").description("Your tokens")
+    .action(async () => {
+      const l = await lg.get<any[]>("/api/user/tokens");
+      out(l, () => l.length ? table(["ID", "NAME", "REPOS", "REFS", "PATHS", "READ-ONLY", "LAST USED"], l.map((x) => [
+        String(x.id), x.name, (x.scope?.repos ?? []).join(",") || "all", (x.scope?.refs ?? []).join(",") || "all", (x.scope?.paths ?? []).join(",") || "all", x.scope?.readOnly ? "yes" : "", ago(x.lastUsedAt),
+      ])) : info("No tokens."));
+    });
+  token.command("create").description("Make a token (shown once)").argument("<name>")
+    .option("--repo <owner/name>", "Only this repository; repeatable", collect, [])
+    .option("--ref <pattern>", "Only these branches/tags (refs/heads/x, globs); repeatable", collect, [])
+    .option("--path <prefix>", "Only these paths; repeatable", collect, [])
+    .option("--read-only")
+    .action(async (name: string, opts) => {
+      const t = await lg.post<any>("/api/user/tokens", { name, repos: opts.repo, refs: opts.ref, paths: opts.path, readOnly: !!opts.readOnly });
+      out(t, () => {
+        success(`Created token ${name}`);
+        process.stdout.write(t.token + "\n");
+        info(chalk.dim("  Shown once. Use it as the git password, or LIZARD_GIT_TOKEN for this CLI."));
+      });
+    });
+  token.command("delete").alias("rm").description("Revoke a token").argument("<id>", "", int)
+    .action(async (id: number) => {
+      await lg.delete(`/api/user/tokens/${id}`);
+      done({ ok: true }, `Revoked token ${id}`);
+    });
+
+  git.command("whoami").description("Who you are on Lizard Git")
+    .action(async () => {
+      const u = await lg.get<any>("/api/session");
+      out(u, () => info(`${chalk.bold(u.login)} on ${gitURL()}${process.env.LIZARD_GIT_TOKEN ? " (LIZARD_GIT_TOKEN)" : ""}`));
+    });
+}

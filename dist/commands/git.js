@@ -5,6 +5,7 @@ import { api, getBaseURL, streamSSE, withScope } from "../lib/api.js";
 import { openURL } from "../lib/auth.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { success, error, info, fail, isJSONMode, printJSON, isTTY, link } from "../lib/format.js";
+import { registerLizardGit } from "./git-hosting.js";
 export function registerGit(program) {
     const git = program
         .command("git")
@@ -138,7 +139,7 @@ export function registerGit(program) {
     // lizard git status
     git
         .command("status")
-        .description("Show GitHub connection and repository status")
+        .description("GitHub: connection and the repositories this project's services deploy from")
         .option("-p, --project <id>", "Project name, slug, or ID")
         .action(async (opts) => {
         const { projectId, scope } = await resolveProjectScope(opts.project);
@@ -193,6 +194,7 @@ export function registerGit(program) {
             info(`${chalk.bold(app.name)}: ${chalk.cyan(app.repo || app.repoUrl)} ${chalk.dim(`(${app.branch || "main"})`)}`);
         }
     });
+    registerLizardGit(git);
 }
 function pressEnter(question) {
     return new Promise((resolve) => {
