@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { repoFromRemote, qs, gitURL, helperCommand, resolveRepo, lg } from "../../src/lib/lizard-git.js";
+import { repoFromRemote, qs, gitURL, helperCommand, resolveRepo, lg, segs } from "../../src/lib/lizard-git.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -44,5 +44,22 @@ describe("lizard git helpers", () => {
   it("turns error bodies into APIError with the server's message", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ error: "no such repository" }), { status: 404 })));
     await expect(lg.get("/api/repos/a/b")).rejects.toMatchObject({ status: 404, message: "no such repository" });
+  });
+});
+
+describe("lizard git safety", () => {
+  it("refuses a LIZARD_GIT_URL that would send the sign-in in clear text", () => {
+    vi.stubEnv("LIZARD_GIT_URL", "http://evil.example");
+    expect(() => gitURL()).toThrow(/https/);
+    vi.stubEnv("LIZARD_GIT_URL", "http://127.0.0.1:8080");
+    expect(gitURL()).toBe("http://127.0.0.1:8080");
+  });
+
+  it("refuses . and .. in repository names and paths", async () => {
+    await expect(resolveRepo("../x")).rejects.toThrow();
+    await expect(resolveRepo("a/..")).rejects.toThrow();
+    expect(() => segs("../../api/user/tokens")).toThrow(/bad path/);
+    expect(segs("src/a b.js")).toBe("src/a%20b.js");
+    expect(repoFromRemote("https://git.lizard.build/../x.git")).toBeNull();
   });
 });

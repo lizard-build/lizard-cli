@@ -6,6 +6,10 @@
  * is used instead when set.
  */
 export declare const DEFAULT_GIT_URL = "https://git.lizard.build";
+/**
+ * Where Lizard Git is. LIZARD_GIT_URL must be https (or http on this machine): the Lizard
+ * sign-in goes there with every request.
+ */
 export declare function gitURL(): string;
 /** The credential Lizard Git gets: LIZARD_GIT_TOKEN, else the CLI's sign-in. */
 export declare function gitToken(): string | null;
@@ -20,6 +24,7 @@ export declare const lg: {
 };
 export declare function qs(path: string, values: Record<string, string | number | boolean | undefined | null>): string;
 export declare const seg: typeof encodeURIComponent;
+/** A branch or file path, each part escaped; . and .. parts refused (they'd reach other URLs). */
 export declare const segs: (p: string) => string;
 /** Your Lizard Git login. */
 export declare function myLogin(): Promise<string>;

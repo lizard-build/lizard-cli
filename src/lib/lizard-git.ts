@@ -11,8 +11,23 @@ import { apiErrorFrom, clientHeaders, getRequestToken, APIError } from "./api.js
 
 export const DEFAULT_GIT_URL = "https://git.lizard.build";
 
+/**
+ * Where Lizard Git is. LIZARD_GIT_URL must be https (or http on this machine): the Lizard
+ * sign-in goes there with every request.
+ */
 export function gitURL(): string {
-  return (process.env.LIZARD_GIT_URL || DEFAULT_GIT_URL).replace(/\/+$/, "");
+  const u = (process.env.LIZARD_GIT_URL || DEFAULT_GIT_URL).replace(/\/+$/, "");
+  let parsed: URL;
+  try {
+    parsed = new URL(u);
+  } catch {
+    throw new APIError(400, `LIZARD_GIT_URL is not a URL: ${u}`);
+  }
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
+  if (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && local)) {
+    throw new APIError(400, `LIZARD_GIT_URL must be https:// (your Lizard sign-in is sent there), got ${u}`);
+  }
+  return u;
 }
 
 /** The credential Lizard Git gets: LIZARD_GIT_TOKEN, else the CLI's sign-in. */
@@ -61,7 +76,12 @@ export function qs(path: string, values: Record<string, string | number | boolea
 }
 
 export const seg = encodeURIComponent;
-export const segs = (p: string) => p.split("/").map(seg).join("/");
+/** A branch or file path, each part escaped; . and .. parts refused (they'd reach other URLs). */
+export const segs = (p: string) => {
+  const parts = p.split("/");
+  if (parts.some((x) => x === "" || x === "." || x === "..")) throw new APIError(400, `bad path: ${p}`);
+  return parts.map(seg).join("/");
+};
 
 let me: { login: string } | null = null;
 /** Your Lizard Git login. */
@@ -74,7 +94,7 @@ export async function myLogin(): Promise<string> {
 export function repoFromRemote(url: string, base = gitURL()): string | null {
   const host = new URL(base).host;
   const m = url.trim().match(/^(?:https?:\/\/)(?:[^@/]+@)?([^/]+)\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/);
-  if (!m || m[1] !== host) return null;
+  if (!m || m[1] !== host || [m[2], m[3]].some((x) => x === "." || x === "..")) return null;
   return `${m[2]}/${m[3]}`;
 }
 
@@ -98,8 +118,9 @@ function originRepo(): string | null {
 export async function resolveRepo(flag?: string): Promise<string> {
   if (flag) {
     const f = flag.replace(/\.git$/, "");
-    if (/^[^/\s]+\/[^/\s]+$/.test(f)) return f;
-    if (/^[^/\s]+$/.test(f)) return `${await myLogin()}/${f}`;
+    const ok = (x: string) => /^[A-Za-z0-9._-]+$/.test(x) && x !== "." && x !== "..";
+    if (/^[^/\s]+\/[^/\s]+$/.test(f) && f.split("/").every(ok)) return f;
+    if (ok(f)) return `${await myLogin()}/${f}`;
     throw new APIError(400, `--repo is owner/name or name, got "${flag}"`);
   }
   const r = originRepo();

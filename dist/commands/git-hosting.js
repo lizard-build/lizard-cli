@@ -93,9 +93,8 @@ export function registerLizardGit(git) {
         const input = readFileSync(0, "utf8");
         const fields = Object.fromEntries(input.split("\n").filter(Boolean).map((l) => l.split(/=(.*)/s).slice(0, 2)));
         const want = new URL(gitURL());
-        if (fields.host && fields.host !== want.host)
-            return;
-        if (fields.protocol && fields.protocol !== want.protocol.replace(":", ""))
+        // Only for Lizard Git itself, over the same protocol (git always says both).
+        if (fields.host !== want.host || fields.protocol !== want.protocol.replace(":", ""))
             return;
         const token = process.env.LIZARD_GIT_TOKEN || validToken();
         if (!token) {
@@ -711,8 +710,16 @@ export function registerLizardGit(git) {
         const r = await resolveRepo(opts.repo);
         const data = await lg.bytes(`${repoPath(r)}/actions/runs/${n}/artifacts/${seg(name)}`);
         if (opts.extract) {
+            // A CI job made this archive: plain files and directories only. A symlink in one
+            // archive lets the next one write anywhere (GNU tar follows it on a second extract).
+            const list = spawnSync("tar", ["tvzf", "-"], { input: data, encoding: "latin1" });
+            if (list.status !== 0)
+                throw new APIError(500, `not a .tar.gz: ${list.stderr}`);
+            const bad = list.stdout.split("\n").filter((l) => l && !/^[-d]/.test(l));
+            if (bad.length)
+                throw new APIError(400, `the artifact has links or special files (${bad.length}); download it with -o and look first`);
             spawnSync("mkdir", ["-p", opts.extract]);
-            const t = spawnSync("tar", ["xzf", "-", "-C", opts.extract], { input: data });
+            const t = spawnSync("tar", ["xzf", "-", "--no-same-owner", "--no-same-permissions", "-C", opts.extract], { input: data });
             if (t.status !== 0)
                 throw new APIError(500, `tar failed: ${t.stderr}`);
             return done({ name, bytes: data.length, extracted: opts.extract }, `Unpacked ${name} into ${opts.extract}`);
@@ -1025,7 +1032,10 @@ export function registerLizardGit(git) {
         const got = [];
         for (const a of (x.assets ?? []).filter((a) => !opts.pattern || a.name === opts.pattern)) {
             const data = await lg.bytes(`${repoPath(r)}/releases/${x.id}/assets/${a.id}`);
-            writeFileSync(`${opts.dir}/${a.name}`, data);
+            const file = basename(String(a.name)); // a name from the server never leaves the directory
+            if (!file || file === "." || file === "..")
+                continue;
+            writeFileSync(`${opts.dir}/${file}`, data);
             got.push({ name: a.name, bytes: data.length });
         }
         done(got, `Downloaded ${got.length} file(s)`);
