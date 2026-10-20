@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { apiErrorFrom, clientHeaders, getRequestToken, APIError } from "./api.js";
 
 /**
@@ -139,7 +140,10 @@ export function cloneURL(repo: string): string {
 
 /** How git should run this CLI as its credential helper. */
 export function helperCommand(): string {
-  const script = process.argv[1] ?? "";
+  // `npm i -g` runs us through a bin symlink with no .js name (/usr/local/bin/lizard): resolve it,
+  // or the helper would be `node git credential`, which can't start.
+  let script = process.argv[1] ?? "";
+  try { script = realpathSync(script); } catch { /* keep argv[1] */ }
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
   // npm install: node + the script. Standalone binary: the binary itself.
   if (/\.(c|m)?js$/.test(script)) return `!${q(process.execPath)} ${q(script)} git credential`;
