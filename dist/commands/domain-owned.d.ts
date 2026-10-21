@@ -12,7 +12,7 @@ export interface OwnedDomain {
     appId: string | null;
     expiresAt: number | null;
 }
-type DnsType = "A" | "AAAA" | "CNAME" | "ALIAS" | "MX" | "TXT" | "URL301";
+type DnsType = "A" | "AAAA" | "CNAME" | "ALIAS" | "MX" | "TXT" | "URL301" | "URL" | "FRAME";
 interface DnsRecord {
     name: string;
     type: DnsType;

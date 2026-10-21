@@ -2,7 +2,10 @@ import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { api, APIError } from "../lib/api.js";
 import { success, isJSONMode, printJSON, table, isTTY, info } from "../lib/format.js";
-const DNS_TYPES = ["A", "AAAA", "CNAME", "ALIAS", "MX", "TXT", "URL301"];
+/** URL is Namecheap's 302 redirect, FRAME its masked redirect (both answered by Namecheap's
+ *  own server); a new domain has "@ URL http://www.<domain>" as its parking page. */
+const DNS_TYPES = ["A", "AAAA", "CNAME", "ALIAS", "MX", "TXT", "URL301", "URL", "FRAME"];
+const TYPE_LABEL = { URL301: "REDIRECT", URL: "REDIRECT302" };
 const SESSION_HINT = "Domains bought on Lizard need `lizard login` or an API key without scopes (a scoped key cannot reach them).";
 /** Changing a bought domain needs a login: an API key can read it but not repoint it, so a
  *  leaked key cannot take the domain or its email. */
@@ -12,12 +15,14 @@ function writeError(err) {
         throw new Error(WRITE_HINT);
     throw err;
 }
-const POINTING = ["A", "AAAA", "CNAME", "ALIAS", "URL301"];
+const POINTING = ["A", "AAAA", "CNAME", "ALIAS", "URL301", "URL", "FRAME"];
 /** Records connecting `names` would replace, leaving out ones nobody would miss: the
  *  registrar's parking page and a previous Lizard target. */
 export function recordsToReplace(records, names) {
     return records.filter((r) => names.includes(r.name) && POINTING.includes(r.type)
-        && !/(^|\.)parkingpage\.namecheap\.com\.?$/i.test(r.value) && !/(^|\.)onlizard\.com\.?$/i.test(r.value));
+        && !/(^|\.)parkingpage\.namecheap\.com\.?$/i.test(r.value) && !/(^|\.)onlizard\.com\.?$/i.test(r.value)
+        // Namecheap's parking redirect of a new domain: "@ URL http://www.<domain>?from=@".
+        && !(r.type === "URL" && /^https?:\/\/www\.[^/?]+\/?(\?from=@)?$/i.test(r.value)));
 }
 async function listOwned() {
     const r = await api.get("/api/domains/orders").catch((err) => {
@@ -100,8 +105,10 @@ export function parseType(raw) {
     const t = raw.toUpperCase();
     if (t === "REDIRECT")
         return "URL301";
+    if (t === "REDIRECT302")
+        return "URL";
     if (!DNS_TYPES.includes(t)) {
-        throw new Error(`Unknown record type "${raw}". Use one of: ${DNS_TYPES.join(", ")} (redirect = URL301)`);
+        throw new Error(`Unknown record type "${raw}". Use one of: ${DNS_TYPES.join(", ")} (redirect = URL301, redirect302 = URL)`);
     }
     return t;
 }
@@ -110,7 +117,7 @@ function printRecords(domain, records) {
         info(`${domain} has no DNS records. Add one: lizard domain dns ${domain} set <name> <type> <value>`);
         return;
     }
-    table(["NAME", "TYPE", "VALUE", "TTL"], records.map((r) => [r.name, r.type === "URL301" ? "REDIRECT" : r.type, r.priority != null ? `${r.priority} ${r.value}` : r.value, String(r.ttl)]));
+    table(["NAME", "TYPE", "VALUE", "TTL"], records.map((r) => [r.name, TYPE_LABEL[r.type] ?? r.type, r.priority != null ? `${r.priority} ${r.value}` : r.value, String(r.ttl)]));
 }
 export function registerOwnedDomainCommands(dom) {
     dom
@@ -178,7 +185,7 @@ To point a name at a Lizard service, use: lizard domain api.example.com --servic
                 rec.priority = opts.priority ?? 10;
             const kept = action === "set" ? current.records.filter((r) => !(r.name === name && r.type === type)) : current.records;
             records = [...kept, rec];
-            summary = `${action === "set" ? "Set" : "Added"} ${type === "URL301" ? "REDIRECT" : type} ${name} -> ${value}`;
+            summary = `${action === "set" ? "Set" : "Added"} ${TYPE_LABEL[type] ?? type} ${name} -> ${value}`;
         }
         else if (action === "rm" || action === "remove" || action === "delete") {
             if (args.length < 1)

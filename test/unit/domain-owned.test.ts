@@ -12,6 +12,9 @@ describe("lizard domain dns: names and types", () => {
   it("accepts record types in any case, redirect as URL301", () => {
     expect(parseType("cname")).toBe("CNAME");
     expect(parseType("redirect")).toBe("URL301");
+    expect(parseType("url")).toBe("URL");
+    expect(parseType("redirect302")).toBe("URL");
+    expect(parseType("frame")).toBe("FRAME");
     expect(() => parseType("SRV")).toThrow(/Unknown record type/);
   });
 });
@@ -26,9 +29,10 @@ describe("lizard domain <bought domain>: records it would replace", () => {
     expect(recordsToReplace(records, ["@", "www"]).map((r: { name: string }) => r.name)).toEqual(["@", "www"]);
     expect(recordsToReplace(records, ["api"])).toHaveLength(1);
     expect(recordsToReplace(records, ["blog"])).toHaveLength(0);
+    expect(recordsToReplace([rec("@", "URL", "https://elsewhere.example.net/page")], ["@"])).toHaveLength(1);
   });
   it("does not count the parking page or an earlier Lizard target", () => {
-    const records = [rec("www", "CNAME", "parkingpage.namecheap.com."), rec("@", "ALIAS", "eu.onlizard.com")];
+    const records = [rec("www", "CNAME", "parkingpage.namecheap.com."), rec("@", "ALIAS", "eu.onlizard.com"), rec("@", "URL", "http://www.godelgate.com?from=@")];
     expect(recordsToReplace(records, ["@", "www"])).toHaveLength(0);
   });
 });
