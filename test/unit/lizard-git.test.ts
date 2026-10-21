@@ -84,6 +84,8 @@ describe("lizard git checkouts", () => {
     const { root, c } = make({ "a.txt": "a", "src/b.txt": "b", "gone.txt": "g" });
     writeFileSync(join(root, "a.txt"), "a2");
     writeFileSync(join(root, "new.txt"), "n");
+    mkdirSync(join(root, ".lizard/workflows"), { recursive: true }); // a repository's CI: content like any other
+    writeFileSync(join(root, ".lizard/workflows/ci.yml"), "on: push\n");
     writeFileSync(join(root, ".gitignore"), "*.log\nbuild/\n");
     writeFileSync(join(root, "debug.log"), "x");
     mkdirSync(join(root, "build"));
@@ -93,7 +95,7 @@ describe("lizard git checkouts", () => {
     symlinkSync("a.txt", join(root, "link"));
     unlinkSync(join(root, "gone.txt"));
     const ch = changesOf(c, scanWorking(root, c));
-    expect(ch).toEqual({ added: [".gitignore", "link", "new.txt"], modified: ["a.txt"], deleted: ["gone.txt"] });
+    expect(ch).toEqual({ added: [".gitignore", ".lizard/workflows/ci.yml", "link", "new.txt"], modified: ["a.txt"], deleted: ["gone.txt"] });
   });
 
   it("a sparse checkout only looks inside its folders", () => {

@@ -104,11 +104,11 @@ export function gitURLs(): string[] {
   return u === DEFAULT_GIT_URL ? [u, OLD_GIT_URL] : [u];
 }
 
-/** owner/name of the Lizard Git checkout this directory is in (.lizard/checkout.json), or null. */
+/** owner/name of the Lizard Git checkout this directory is in (.lizard-git/checkout.json), or null. */
 function checkoutRepo(): string | null {
   for (let d = process.cwd(); ; d = dirname(d)) {
     try {
-      const c = JSON.parse(readFileSync(join(d, ".lizard", "checkout.json"), "utf8"));
+      const c = JSON.parse(readFileSync(join(d, ".lizard-git", "checkout.json"), "utf8"));
       if (typeof c.repo === "string" && /^[^/\s]+\/[^/\s]+$/.test(c.repo)) return c.repo;
     } catch {}
     if (dirname(d) === d) return null;
