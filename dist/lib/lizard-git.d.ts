@@ -15,6 +15,8 @@ export declare const OLD_GIT_URL = "https://git.lizard.build";
 export declare function gitURL(): string;
 /** The credential Lizard Git gets: LIZARD_GIT_TOKEN, else the CLI's sign-in. */
 export declare function gitToken(): string | null;
+/** One request with the Lizard Git sign-in; non-2xx answers throw. */
+export declare function sendRaw(method: string, path: string, body?: Buffer, headers?: Record<string, string>): Promise<Response>;
 export declare const lg: {
     get: <T = any>(path: string) => Promise<T>;
     post: <T = any>(path: string, body?: unknown, headers?: Record<string, string>) => Promise<T>;
@@ -30,19 +32,14 @@ export declare const seg: typeof encodeURIComponent;
 export declare const segs: (p: string) => string;
 /** Your Lizard Git login. */
 export declare function myLogin(): Promise<string>;
-/** owner/name from a Lizard Git remote URL (https or ssh-style), or null. */
-/** Every address a Lizard Git remote may use: LIZARD_GIT_URL, or lizard.build/git and the old one. */
+/** Every address Lizard Git has had: LIZARD_GIT_URL, or lizard.build/git and the old one. */
 export declare function gitURLs(): string[];
-export declare function repoFromRemote(url: string, bases?: string[]): string | null;
 /**
  * The repository a command is about: `--repo owner/name` (or just `name`: yours), else the
  * Lizard Git remote of the git checkout you're in.
  */
 export declare function resolveRepo(flag?: string): Promise<string>;
 export declare function repoPath(repo: string): string;
-export declare function cloneURL(repo: string): string;
-/** How git should run this CLI as its credential helper. */
-export declare function helperCommand(): string;
 /** Seconds (Lizard Git) to "3m ago". */
 export declare function ago(sec: number | null | undefined): string;
 export declare const ACTIVE_RUN: Set<string>;

@@ -3,13 +3,15 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { APIError } from "../lib/api.js";
-import { validToken } from "../lib/auth.js";
 import { isJSONMode, printJSON, table, success, info, warn, link } from "../lib/format.js";
-import { lg, qs, seg, segs, resolveRepo, repoPath, myLogin, cloneURL, gitURL, gitURLs, helperCommand, ago, ACTIVE_RUN, } from "../lib/lizard-git.js";
+import { lg, qs, seg, segs, resolveRepo, repoPath, myLogin, gitURL, ago, ACTIVE_RUN, } from "../lib/lizard-git.js";
+import * as wc from "../lib/checkout.js";
 /**
  * Lizard Git (lizard.build/git) from the terminal: repositories, issues, pull requests,
  * reviews, CI runs, releases, secrets, collaborators, webhooks, branch rules, labels,
- * notifications, tokens, and the credential helper that lets plain `git` push and pull.
+ * notifications, tokens; and working copies: clone, status, diff, commit, sync, switch. Lizard
+ * Git is Scion-style (no git protocol): a checkout holds files and .lizard-git/checkout.json, and
+ * every commit is made on the server (lib/checkout.ts).
  *
  * Registered under `lizard git`, next to the GitHub integration commands.
  */
@@ -57,70 +59,161 @@ function bodyFrom(opts) {
     return opts.body;
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** The checkout this directory is in, or a clear error. */
+function needCheckout() {
+    const root = wc.findCheckout();
+    if (!root)
+        throw new APIError(400, "not in a Lizard Git checkout (lizard git clone owner/name)");
+    return root;
+}
+/** `lizard git status` inside a checkout: your changes. */
+export function checkoutStatus() {
+    const root = wc.findCheckout();
+    if (!root)
+        return false;
+    const c = wc.loadCheckout(root);
+    const ch = wc.changesOf(c, wc.scanWorking(root, c));
+    out({ repo: c.repo, branch: c.branch, commit: c.base, sparse: c.sparse, ...ch }, () => {
+        info(`${chalk.bold(c.repo)} on ${chalk.cyan(c.branch)} at ${c.base.slice(0, 12)}${c.sparse ? chalk.dim(` (sparse: ${c.sparse.join(", ")})`) : ""}`);
+        const n = ch.added.length + ch.modified.length + ch.deleted.length;
+        if (!n)
+            return info(chalk.dim("no changes"));
+        for (const p of ch.modified)
+            info(`  ${chalk.yellow("modified")}  ${p}`);
+        for (const p of ch.added)
+            info(`  ${chalk.green("added")}     ${p}`);
+        for (const p of ch.deleted)
+            info(`  ${chalk.red("deleted")}   ${p}`);
+        info(chalk.dim(`  commit them: lizard git commit -m "..."`));
+    });
+    return true;
+}
 function repoOpt(c) {
-    return c.option("-R, --repo <owner/name>", "Repository (default: the Lizard Git remote of this checkout)");
+    return c.option("-R, --repo <owner/name>", "Repository (default: the one this checkout is of)");
 }
 export function registerLizardGit(git) {
     git.description("Lizard Git (lizard.build/git) repositories, pull requests, CI; and GitHub integration");
-    // ── Sign-in for plain git ────────────────────────────────────────────
-    git
-        .command("setup")
-        .description("Let git push and pull Lizard Git repositories with your Lizard sign-in (credential helper)")
-        .option("--local", "Only for the repository in this directory")
-        .action(async (opts) => {
-        const scope = opts.local ? "--local" : "--global";
-        // For lizard.build/git only (git matches the path: the rest of lizard.build never gets
-        // the helper), and the old git.lizard.build for clones made before.
-        for (const url of gitURLs()) {
-            // An empty value first resets helpers inherited for this address; then ours.
-            for (const value of ["", helperCommand()]) {
-                const r = spawnSync("git", ["config", scope, value ? "--add" : "--replace-all", `credential.${url}.helper`, value], { encoding: "utf8" });
-                if (r.status !== 0)
-                    throw new APIError(500, `git config failed: ${r.stderr || r.error?.message}`);
-            }
-            spawnSync("git", ["config", scope, `credential.${url}.username`, "lizard"]);
-        }
-        const who = await myLogin();
-        out({ helper: helperCommand(), scope: opts.local ? "local" : "global", host: gitURL(), login: who }, () => {
-            success(`git now signs in to ${gitURL()} as ${chalk.bold(who)} (${opts.local ? "this repository" : "every repository"})`);
-            info(chalk.dim(`  Try: lizard git clone ${who}/<repo>`));
-        });
-    });
-    git
-        .command("credential")
-        .description("git credential helper (used by `lizard git setup`; not run by hand)")
-        .argument("[operation]", "get, store or erase")
-        .action(async (op) => {
-        if (op !== "get")
-            return; // store/erase: nothing kept, nothing to forget
-        const input = readFileSync(0, "utf8");
-        const fields = Object.fromEntries(input.split("\n").filter(Boolean).map((l) => l.split(/=(.*)/s).slice(0, 2)));
-        // Only for Lizard Git itself, over the same protocol (git always says both).
-        if (!gitURLs().some((u) => { const w = new URL(u); return fields.host === w.host && fields.protocol === w.protocol.replace(":", ""); }))
-            return;
-        const token = process.env.LIZARD_GIT_TOKEN || validToken();
-        if (!token) {
-            process.stderr.write("lizard: not signed in; run `lizard login`\n");
-            return;
-        }
-        process.stdout.write(`username=lizard\npassword=${token}\n`);
-    });
+    // ── Working copies ───────────────────────────────────────────────────
     git
         .command("clone")
-        .description("Clone a Lizard Git repository (signed in with your Lizard account)")
+        .description("Check out a Lizard Git repository: only files, fetched on demand by hash (no history to download)")
         .argument("<repo>", "owner/name, or name for one of yours")
         .argument("[dir]", "Directory (default: the repository name)")
-        .action(async (repoArg, dir) => {
+        .option("-b, --branch <name>", "Branch (default: the repository's default branch)")
+        .option("--sparse <paths>", "Only these folders or files, comma-separated (a sparse checkout fetches nothing else)")
+        .action(async (repoArg, dir, opts) => {
         const repo = await resolveRepo(repoArg);
-        // Kept in the clone's config (--config applies before the fetch too): an empty helper
-        // first, so helpers set globally for this host don't answer instead.
-        const args = ["clone", "--config", `credential.${gitURL()}.helper=`, "--config", `credential.${gitURL()}.helper=${helperCommand()}`, cloneURL(repo)];
-        if (dir)
-            args.push(dir);
-        const r = spawnSync("git", args, { stdio: isJSONMode() ? ["ignore", "ignore", "inherit"] : "inherit" });
-        if (r.status !== 0)
-            throw new APIError(500, `git clone failed (exit ${r.status})`);
-        done({ repo, dir: dir ?? repo.split("/")[1], url: cloneURL(repo) }, `Cloned ${repo}`);
+        const target = dir ?? repo.split("/")[1];
+        const sparse = list(opts.sparse)?.map((x) => x.replace(/^\/+|\/+$/g, "")) ?? null;
+        const c = await wc.clone(repo, target, opts.branch, sparse, (m) => !isJSONMode() && process.stderr.write(chalk.dim(`  ${m}\r`)));
+        if (!isJSONMode())
+            process.stderr.write("\x1b[2K");
+        done({ repo, dir: target, branch: c.branch, commit: c.base, files: Object.keys(c.files).length, sparse }, `Checked out ${repo} (${c.branch} at ${c.base.slice(0, 12)}, ${Object.keys(c.files).length} files) into ${target}`);
+    });
+    git
+        .command("init")
+        .description("Make this folder the checkout of an empty repository (then lizard git commit)")
+        .argument("<repo>", "owner/name, or name for one of yours")
+        .action(async (repoArg) => {
+        const repo = await resolveRepo(repoArg);
+        const c = await wc.initHere(repo, process.cwd());
+        done({ repo, branch: c.branch }, `This folder is now ${repo} (${c.branch}); commit with lizard git commit -m "..."`);
+    });
+    git
+        .command("diff")
+        .description("Your changes in this checkout against the commit it's at")
+        .argument("[paths...]", "Only these files or folders")
+        .option("--name-only", "Only the changed paths")
+        .action(async (paths, opts) => {
+        const root = needCheckout();
+        const c = wc.loadCheckout(root);
+        const local = wc.scanWorking(root, c);
+        const ch = wc.changesOf(c, local);
+        const pick = (p) => !paths.length || paths.some((x) => p === x || p.startsWith(x.replace(/\/+$/, "") + "/"));
+        const all = [...ch.added.map((p) => ["added", p]), ...ch.modified.map((p) => ["modified", p]), ...ch.deleted.map((p) => ["deleted", p])].filter(([, p]) => pick(p));
+        if (isJSONMode() || opts.nameOnly) {
+            out(all.map(([status, path]) => ({ status, path })), () => all.forEach(([, p]) => console.log(p)));
+            return;
+        }
+        const before = await wc.getBlobs(c.repo, all.filter(([k]) => k !== "added").map(([, p]) => c.files[p].h));
+        for (const [kind, p] of all) {
+            const old = kind === "added" ? "" : before.get(c.files[p].h).toString();
+            const cur = kind === "deleted" ? "" : readFileSync(`${root}/${p}`, "utf8");
+            if (old.includes("\0") || cur.includes("\0")) {
+                console.log(chalk.bold(`Binary ${p} ${kind}`));
+                continue;
+            }
+            if (old.length + cur.length > 4 << 20) {
+                console.log(chalk.bold(`${p}: ${kind} (too large to show)`));
+                continue;
+            }
+            for (const line of wc.unifiedDiff(old, cur, p).split("\n")) {
+                console.log(line.startsWith("+") && !line.startsWith("+++") ? chalk.green(line) : line.startsWith("-") && !line.startsWith("---") ? chalk.red(line) : line.startsWith("@@") ? chalk.cyan(line) : line);
+            }
+        }
+    });
+    git
+        .command("commit")
+        .description("Commit your changes on the server (nothing to push): if the branch moved, the server puts them on top")
+        .argument("[paths...]", "Only these files or folders (default: every change)")
+        .requiredOption("-m, --message <text>", "Commit message")
+        .option("-b, --branch <name>", "Commit to a new branch, starting at this checkout's commit (and switch to it)")
+        .action(async (paths, opts) => {
+        const root = needCheckout();
+        const c = wc.loadCheckout(root);
+        const r = await wc.commit(root, c, opts.message.endsWith("\n") ? opts.message : opts.message + "\n", paths, opts.branch);
+        const extra = r.sync.updated.length + r.sync.removed.length;
+        done(r, `Committed ${r.files} file(s) to ${r.branch}: ${r.sha.slice(0, 12)}${r.uploaded ? chalk.dim(` (${r.uploaded} uploaded)`) : ""}${extra ? chalk.dim(` · ${extra} file(s) from others' commits updated`) : ""}`);
+    });
+    git
+        .command("sync")
+        .alias("pull")
+        .description("Bring this checkout to the branch's latest commit (keeps your changes)")
+        .action(async () => {
+        const root = needCheckout();
+        const c = wc.loadCheckout(root);
+        const r = await wc.sync(root, c);
+        done(r, r.from === r.to ? `Already at ${c.branch}'s latest (${r.to.slice(0, 12)})` :
+            `${c.branch}: ${r.from.slice(0, 12)} -> ${r.to.slice(0, 12)} (${r.updated.length} updated, ${r.removed.length} removed)`);
+    });
+    git
+        .command("switch")
+        .description("Switch this checkout to another branch (keeps your changes)")
+        .argument("<branch>")
+        .option("-c, --create", "Create the branch at this checkout's commit first")
+        .action(async (branch, opts) => {
+        const root = needCheckout();
+        const c = wc.loadCheckout(root);
+        if (opts.create)
+            await lg.post(`${repoPath(c.repo)}/branches`, { name: branch, from: c.base });
+        const r = await wc.sync(root, c, branch);
+        done({ ...r, branch }, `On ${branch} at ${r.to.slice(0, 12)} (${r.updated.length} updated, ${r.removed.length} removed)`);
+    });
+    git
+        .command("sparse")
+        .description("Change which folders this checkout has (comma-separated; \"all\" for everything)")
+        .argument("<paths>")
+        .action(async (paths) => {
+        const root = needCheckout();
+        const c = wc.loadCheckout(root);
+        const local = wc.scanWorking(root, c);
+        const ch = wc.changesOf(c, local);
+        if (ch.added.length + ch.modified.length + ch.deleted.length)
+            throw new APIError(409, "commit your changes first (lizard git commit)");
+        const next = paths === "all" ? null : list(paths).map((x) => x.replace(/^\/+|\/+$/g, ""));
+        // Drop what leaves the set, then sync with the new set (fetches what joins it).
+        const keep = (p) => !next || next.some((x) => p === x || p.startsWith(x + "/"));
+        for (const p of Object.keys(c.files)) {
+            if (!keep(p)) {
+                wc.removeFileAt(root, p);
+                delete c.files[p];
+            }
+        }
+        c.sparse = next;
+        const before = c.base;
+        c.base = ""; // make sync list and fetch everything in the new set
+        const r = await wc.sync(root, c);
+        done({ sparse: next, files: Object.keys(c.files).length, commit: r.to }, `Sparse: ${next ? next.join(", ") : "everything"} (${Object.keys(c.files).length} files at ${(r.to || before).slice(0, 12)})`);
     });
     // ── Repositories ─────────────────────────────────────────────────────
     const repo = git.command("repo").description("Lizard Git repositories");
@@ -150,16 +243,16 @@ export function registerLizardGit(git) {
         .argument("<name>")
         .option("--private", "Only you and collaborators can see it")
         .option("-d, --description <text>")
-        .option("--readme", "Start with a README (otherwise empty, ready for a push)")
+        .option("--readme", "Start with a README (otherwise empty)")
         .option("--default-branch <name>", "Default branch (main)")
         .action(async (name, opts) => {
         const r = await lg.post("/api/repos", {
             name, private: !!opts.private, description: opts.description, readme: !!opts.readme, defaultBranch: opts.defaultBranch,
         });
         const full = `${r.owner}/${r.name}`;
-        out({ ...r, url: `${gitURL()}/${full}`, cloneUrl: cloneURL(full) }, () => {
+        out({ ...r, url: `${gitURL()}/${full}` }, () => {
             success(`Created ${chalk.bold(full)}  ${link(`${gitURL()}/${full}`)}`);
-            info(chalk.dim(`  Clone: lizard git clone ${full}    Push: git remote add origin ${cloneURL(full)}`));
+            info(chalk.dim(`  Check out: lizard git clone ${full}    then: lizard git commit -m "..."`));
         });
     });
     repoOpt(repo.command("view").description("A repository's details").argument("[repo]"))
@@ -173,7 +266,7 @@ export function registerLizardGit(git) {
             if (m.forkOf)
                 info(chalk.dim(`forked from ${m.forkOf}`));
             info(`default branch ${m.repo.defaultBranch} · ${m.branches} branches · ${m.tags} tags · ${m.openIssues} open issues · ${m.openPulls} open pull requests · ${m.repo.stars} stars`);
-            info(`${link(`${gitURL()}/${r}`)}\nclone: ${m.cloneUrl}`);
+            info(`${link(`${gitURL()}/${r}`)}\ncheck out: lizard git clone ${r}`);
         });
     });
     repoOpt(repo.command("edit").description("Change name, description, visibility or default branch").argument("[repo]"))
@@ -181,13 +274,11 @@ export function registerLizardGit(git) {
         .option("-d, --description <text>")
         .option("--private").option("--public")
         .option("--default-branch <name>")
-        .option("--api-commits", "Also accept commits written through the API by agents without a checkout")
-        .option("--no-api-commits", "Changes only by git push and merged pull requests (the default for new repositories)")
         .action(async (arg, opts) => {
         const r = await resolveRepo(arg ?? opts.repo);
         await lg.patch(repoPath(r), {
             name: opts.name, description: opts.description, defaultBranch: opts.defaultBranch,
-            private: opts.private ? true : opts.public ? false : undefined, apiCommits: opts.apiCommits,
+            private: opts.private ? true : opts.public ? false : undefined,
         });
         done({ ok: true, repo: opts.name ? `${r.split("/")[0]}/${opts.name}` : r }, `Updated ${r}`);
     });
@@ -208,7 +299,7 @@ export function registerLizardGit(git) {
         const f = await lg.post(`${repoPath(r)}/forks`, { name: opts.name });
         const full = `${f.owner}/${f.name}`;
         if (opts.clone)
-            spawnSync("git", ["clone", "--config", `credential.${gitURL()}.helper=${helperCommand()}`, cloneURL(full)], { stdio: "inherit" });
+            await wc.clone(full, f.name, undefined, null);
         done({ ...f, url: `${gitURL()}/${full}` }, `Forked ${r} to ${chalk.bold(full)}`);
     });
     repoOpt(repo.command("forks").description("Forks of a repository").argument("[repo]"))
@@ -345,9 +436,9 @@ export function registerLizardGit(git) {
             if (pulls) {
                 let head = opts.head;
                 if (!head) {
-                    const b = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" });
-                    head = b.status === 0 ? b.stdout.trim() : "";
-                    if (!head || head === "HEAD")
+                    const root = wc.findCheckout();
+                    head = root ? wc.loadCheckout(root).branch : "";
+                    if (!head)
                         throw new APIError(400, "pass --head <branch>");
                 }
                 Object.assign(body, { head, base: opts.base, headRepo: opts.headRepo, draft: !!opts.draft, reviewers: opts.reviewer.length ? opts.reviewer : undefined });
@@ -551,21 +642,15 @@ export function registerLizardGit(git) {
             });
             done(m, `Merged #${n} (${String(m.sha).slice(0, 7)})`);
         });
-        repoOpt(grp.command("checkout").description("Check out a pull request's branch in this clone").argument("<number>", "", int))
+        repoOpt(grp.command("checkout").description("Switch this checkout to a pull request's branch").argument("<number>", "", int))
             .action(async (n, opts) => {
-            const r = await resolveRepo(opts.repo);
-            const d = await lg.get(`${repoPath(r)}/issues/${n}`);
-            const local = d.issue.headRepo && d.issue.headRepo !== r ? `pr-${n}` : d.issue.headRef;
-            const remoteRef = d.issue.headRepo && d.issue.headRepo !== r ? `refs/pull/${n}/head` : `refs/heads/${d.issue.headRef}`;
-            const run = (args) => {
-                const x = spawnSync("git", args, { stdio: isJSONMode() ? ["ignore", "ignore", "inherit"] : "inherit" });
-                if (x.status !== 0)
-                    throw new APIError(500, `git ${args[0]} failed`);
-            };
-            run(["fetch", "origin", `+${remoteRef}:refs/remotes/origin/${local}`]);
-            const exists = spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${local}`]).status === 0;
-            run(exists ? ["checkout", local] : ["checkout", "-b", local, "--track", `origin/${local}`]);
-            done({ branch: local }, `On branch ${local} (#${n})`);
+            const root = needCheckout();
+            const c = wc.loadCheckout(root);
+            const d = await lg.get(`${repoPath(c.repo)}/issues/${n}`);
+            // A fork's branch is read here under refs/pull/<n>/head: look, don't commit.
+            const target = d.issue.headRepo && d.issue.headRepo !== c.repo ? `pull/${n}/head` : d.issue.headRef;
+            const r = await wc.sync(root, c, target);
+            done({ branch: target, commit: r.to }, `On ${target} (#${n}) at ${r.to.slice(0, 12)}`);
         });
     }
     // ── CI runs and workflows ────────────────────────────────────────────
