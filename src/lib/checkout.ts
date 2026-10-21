@@ -347,13 +347,29 @@ export function changesOf(c: Checkout, local: Map<string, LocalFile>): Changes {
 
 // ── operations ─────────────────────────────────────────────────────────
 
+/** Make an existing folder the checkout of an empty repository: its files become the first commit. */
+export async function initHere(repo: string, dir: string): Promise<Checkout> {
+  if (findCheckout(dir)) throw new APIError(400, `${dir} is in a checkout already`);
+  const info = await lg.get<{ empty: boolean; repo: { defaultBranch: string } }>(repoPath(repo));
+  if (!info.empty) throw new APIError(409, `${repo} has commits already: check it out with lizard git clone ${repo}`);
+  const c: Checkout = { version: 1, url: gitURL(), repo, branch: info.repo.defaultBranch, base: "", root: "", sparse: null, files: {} };
+  saveCheckout(dir, c);
+  return c;
+}
+
 /** Point a fresh checkout at a branch's tip and write its files. */
 export async function clone(repo: string, dir: string, branch: string | undefined, sparse: string[] | null, onProgress?: (msg: string) => void): Promise<Checkout> {
   if (existsSync(dir) && readdirSync(dir).length) throw new APIError(400, `${dir} exists and is not empty`);
+  const info = await lg.get<{ empty: boolean; repo: { defaultBranch: string } }>(repoPath(repo));
   mkdirSync(dir, { recursive: true });
+  if (info.empty) {
+    // Nothing to fetch: the first commit from here creates the branch.
+    const c: Checkout = { version: 1, url: gitURL(), repo, branch: branch ?? info.repo.defaultBranch, base: "", root: "", sparse, files: {} };
+    saveCheckout(dir, c);
+    return c;
+  }
   const r = await lg.get<{ id: string; root: string }>(`${repoPath(repo)}/resolve${branch ? `?rev=${encodeURIComponent(branch)}` : ""}`);
-  const info = branch ? null : await lg.get<{ repo: { defaultBranch: string } }>(repoPath(repo));
-  const c: Checkout = { version: 1, url: gitURL(), repo, branch: branch ?? info!.repo.defaultBranch, base: r.id, root: r.root, sparse, files: {} };
+  const c: Checkout = { version: 1, url: gitURL(), repo, branch: branch ?? info.repo.defaultBranch, base: r.id, root: r.root, sparse, files: {} };
   onProgress?.("listing files");
   const files = await listFiles(repo, r.root, sparse);
   onProgress?.(`fetching ${files.size} files`);
@@ -468,7 +484,7 @@ export async function commit(root: string, c: Checkout, message: string, paths: 
   const branch = newBranch ?? c.branch;
   const body: Record<string, unknown> = { branch, message, files };
   if (newBranch) body.createFrom = c.base;
-  else body.expect = c.base;
+  else if (c.base) body.expect = c.base;
   const r = await lg.post<{ sha: string }>(`${repoPath(c.repo)}/commits`, body);
   // What was sent is now the base for those files.
   for (const p of changed) c.files[p] = { ...local.get(p)! };
