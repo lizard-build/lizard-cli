@@ -108,6 +108,16 @@ export function registerLizardGit(git: Command) {
     });
 
   git
+    .command("init")
+    .description("Make this folder the checkout of an empty repository (then lizard git commit)")
+    .argument("<repo>", "owner/name, or name for one of yours")
+    .action(async (repoArg: string) => {
+      const repo = await resolveRepo(repoArg);
+      const c = await wc.initHere(repo, process.cwd());
+      done({ repo, branch: c.branch }, `This folder is now ${repo} (${c.branch}); commit with lizard git commit -m "..."`);
+    });
+
+  git
     .command("diff")
     .description("Your changes in this checkout against the commit it's at")
     .argument("[paths...]", "Only these files or folders")
