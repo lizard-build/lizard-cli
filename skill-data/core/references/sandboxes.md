@@ -79,7 +79,7 @@ Prices are per hour, billed per second while the sandbox runs, flat by size: mea
 
 Lizard Sandboxes run as Firecracker microVMs, each with its own kernel. If a sandbox cannot start, creation fails with an error.
 
-An account runs at most 5 sandboxes at once on a trial and 100 after its first paid invoice (paused ones don't count), with limits on starts per minute, hour and day. Enterprise accounts have a cap per workspace instead (50 by default). Over a limit the API answers 429 `SANDBOX_LIMIT_REACHED` or `SANDBOX_RATE_LIMITED` (with `retryAfterS`).
+An account runs at most 5 sandboxes at once on a trial and 100 after its first paid invoice (paused ones don't count), with limits on starts per minute, hour and day. Enterprise has no fixed limit on sandboxes running at once: each customer's agreement sets the limit per workspace, and running, paused and crashed sandboxes all count toward it. Over a limit the API answers 429 `SANDBOX_LIMIT_REACHED` or `SANDBOX_RATE_LIMITED` (with `retryAfterS`).
 
 ## Interactive shell
 
