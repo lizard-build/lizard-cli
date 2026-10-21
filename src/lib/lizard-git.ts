@@ -1,5 +1,5 @@
-import { execFileSync } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { apiErrorFrom, clientHeaders, getRequestToken, APIError } from "./api.js";
 
 /**
@@ -36,6 +36,11 @@ export function gitURL(): string {
 /** The credential Lizard Git gets: LIZARD_GIT_TOKEN, else the CLI's sign-in. */
 export function gitToken(): string | null {
   return process.env.LIZARD_GIT_TOKEN || getRequestToken();
+}
+
+/** One request with the Lizard Git sign-in; non-2xx answers throw. */
+export function sendRaw(method: string, path: string, body?: Buffer, headers: Record<string, string> = {}): Promise<Response> {
+  return send(method, path, body === undefined ? undefined : new Uint8Array(body), headers);
 }
 
 async function send(method: string, path: string, body?: BodyInit, headers: Record<string, string> = {}): Promise<Response> {
@@ -93,35 +98,21 @@ export async function myLogin(): Promise<string> {
   return me.login;
 }
 
-/** owner/name from a Lizard Git remote URL (https or ssh-style), or null. */
-/** Every address a Lizard Git remote may use: LIZARD_GIT_URL, or lizard.build/git and the old one. */
+/** Every address Lizard Git has had: LIZARD_GIT_URL, or lizard.build/git and the old one. */
 export function gitURLs(): string[] {
   const u = gitURL();
   return u === DEFAULT_GIT_URL ? [u, OLD_GIT_URL] : [u];
 }
 
-export function repoFromRemote(url: string, bases = gitURLs()): string | null {
-  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  for (const base of bases) {
-    const b = new URL(base);
-    const re = new RegExp(`^https?://(?:[^@/]+@)?${esc(b.host)}${esc(b.pathname.replace(/\/+$/, ""))}/([^/]+)/([^/]+?)(?:\\.git)?/?$`);
-    const m = url.trim().match(re);
-    if (m && ![m[1], m[2]].some((x) => x === "." || x === "..")) return `${m[1]}/${m[2]}`;
+/** owner/name of the Lizard Git checkout this directory is in (.lizard/checkout.json), or null. */
+function checkoutRepo(): string | null {
+  for (let d = process.cwd(); ; d = dirname(d)) {
+    try {
+      const c = JSON.parse(readFileSync(join(d, ".lizard", "checkout.json"), "utf8"));
+      if (typeof c.repo === "string" && /^[^/\s]+\/[^/\s]+$/.test(c.repo)) return c.repo;
+    } catch {}
+    if (dirname(d) === d) return null;
   }
-  return null;
-}
-
-function originRepo(): string | null {
-  try {
-    const remotes = execFileSync("git", ["remote", "-v"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-    const lines = remotes.split("\n").filter((l) => l.includes("(fetch)"));
-    const ordered = [...lines.filter((l) => l.startsWith("origin\t")), ...lines];
-    for (const l of ordered) {
-      const r = repoFromRemote(l.split(/\s+/)[1] ?? "");
-      if (r) return r;
-    }
-  } catch {}
-  return null;
 }
 
 /**
@@ -136,30 +127,14 @@ export async function resolveRepo(flag?: string): Promise<string> {
     if (ok(f)) return `${await myLogin()}/${f}`;
     throw new APIError(400, `--repo is owner/name or name, got "${flag}"`);
   }
-  const r = originRepo();
+  const r = checkoutRepo();
   if (r) return r;
-  throw new APIError(400, `Which repository? Pass --repo owner/name, or run this inside a clone of a Lizard Git repository (${gitURL()}).`);
+  throw new APIError(400, `Which repository? Pass --repo owner/name, or run this inside a checkout (lizard git clone owner/name).`);
 }
 
 export function repoPath(repo: string): string {
   const [owner, name] = repo.split("/");
   return `/api/repos/${seg(owner)}/${seg(name)}`;
-}
-
-export function cloneURL(repo: string): string {
-  return `${gitURL()}/${repo}.git`;
-}
-
-/** How git should run this CLI as its credential helper. */
-export function helperCommand(): string {
-  // `npm i -g` runs us through a bin symlink with no .js name (/usr/local/bin/lizard): resolve it,
-  // or the helper would be `node git credential`, which can't start.
-  let script = process.argv[1] ?? "";
-  try { script = realpathSync(script); } catch { /* keep argv[1] */ }
-  const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-  // npm install: node + the script. Standalone binary: the binary itself.
-  if (/\.(c|m)?js$/.test(script)) return `!${q(process.execPath)} ${q(script)} git credential`;
-  return `!${q(process.execPath)} git credential`;
 }
 
 /** Seconds (Lizard Git) to "3m ago". */

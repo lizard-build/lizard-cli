@@ -1,5 +1,9 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { repoFromRemote, qs, gitURL, helperCommand, resolveRepo, lg, segs } from "../../src/lib/lizard-git.js";
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, unlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { qs, gitURL, resolveRepo, lg, segs } from "../../src/lib/lizard-git.js";
+import { changesOf, scanWorking, saveCheckout, findCheckout, sha256, unifiedDiff, type Checkout } from "../../src/lib/checkout.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -7,18 +11,6 @@ afterEach(() => {
 });
 
 describe("lizard git helpers", () => {
-  it("reads owner/name from Lizard Git remotes only", () => {
-    expect(repoFromRemote("https://lizard.build/git/alice/app.git")).toBe("alice/app");
-    expect(repoFromRemote("https://lizard:liz_x@lizard.build/git/alice/app")).toBe("alice/app");
-    expect(repoFromRemote("https://git.lizard.build/alice/app.git")).toBe("alice/app"); // older clones
-    expect(repoFromRemote("https://lizard:liz_x@git.lizard.build/alice/app")).toBe("alice/app");
-    expect(repoFromRemote("https://github.com/alice/app.git")).toBeNull();
-    expect(repoFromRemote("git@github.com:alice/app.git")).toBeNull();
-    expect(repoFromRemote("https://lizard.build/alice/app.git")).toBeNull();
-    expect(repoFromRemote("https://lizard.build/gitx/alice/app.git")).toBeNull();
-    expect(repoFromRemote("https://lizard.build/git/alice/app/extra.git")).toBeNull();
-  });
-
   it("drops empty query values", () => {
     expect(qs("/x", { a: "1", b: undefined, c: "", d: false, e: 2 })).toBe("/x?a=1&e=2");
   });
@@ -26,12 +18,6 @@ describe("lizard git helpers", () => {
   it("honours LIZARD_GIT_URL", () => {
     vi.stubEnv("LIZARD_GIT_URL", "http://localhost:8080/");
     expect(gitURL()).toBe("http://localhost:8080");
-    expect(repoFromRemote("http://localhost:8080/a/b.git")).toBe("a/b");
-    expect(repoFromRemote("https://git.lizard.build/a/b.git")).toBeNull(); // another server: only it
-  });
-
-  it("runs itself as git's credential helper", () => {
-    expect(helperCommand()).toMatch(/^!'.+' .*git credential$/);
   });
 
   it("takes owner/name or a bare name (yours) for --repo", async () => {
@@ -66,8 +52,61 @@ describe("lizard git safety", () => {
     await expect(resolveRepo("a/..")).rejects.toThrow();
     expect(() => segs("../../api/user/tokens")).toThrow(/bad path/);
     expect(segs("src/a b.js")).toBe("src/a%20b.js");
-    expect(repoFromRemote("https://git.lizard.build/../x.git")).toBeNull();
-    expect(repoFromRemote("https://lizard.build/git/../x.git")).toBeNull();
-    expect(repoFromRemote("https://lizard.build/git/a/...git")).toBeNull();
+  });
+});
+
+describe("lizard git checkouts", () => {
+  const make = (files: Record<string, string>, state: Partial<Checkout> = {}) => {
+    const root = mkdtempSync(join(tmpdir(), "lzg-"));
+    const c: Checkout = { version: 1, url: "x", repo: "alice/app", branch: "main", base: "b".repeat(64), root: "r".repeat(64), sparse: null, files: {}, ...state };
+    for (const [p, body] of Object.entries(files)) {
+      mkdirSync(join(root, p, ".."), { recursive: true });
+      writeFileSync(join(root, p), body);
+      c.files[p] = { h: sha256(body), m: "100644" };
+    }
+    saveCheckout(root, c);
+    return { root, c };
+  };
+
+  it("finds its checkout from a subdirectory and the repository from it", async () => {
+    const { root } = make({ "src/a.ts": "a" });
+    expect(findCheckout(join(root, "src"))).toBe(root);
+    const cwd = process.cwd();
+    process.chdir(join(root, "src"));
+    try {
+      expect(await resolveRepo()).toBe("alice/app");
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it("sees added, modified and deleted files, and nothing it shouldn't", () => {
+    const { root, c } = make({ "a.txt": "a", "src/b.txt": "b", "gone.txt": "g" });
+    writeFileSync(join(root, "a.txt"), "a2");
+    writeFileSync(join(root, "new.txt"), "n");
+    writeFileSync(join(root, ".gitignore"), "*.log\nbuild/\n");
+    writeFileSync(join(root, "debug.log"), "x");
+    mkdirSync(join(root, "build"));
+    writeFileSync(join(root, "build/out.js"), "x");
+    mkdirSync(join(root, "node_modules/x"), { recursive: true });
+    writeFileSync(join(root, "node_modules/x/i.js"), "x");
+    symlinkSync("a.txt", join(root, "link"));
+    unlinkSync(join(root, "gone.txt"));
+    const ch = changesOf(c, scanWorking(root, c));
+    expect(ch).toEqual({ added: [".gitignore", "link", "new.txt"], modified: ["a.txt"], deleted: ["gone.txt"] });
+  });
+
+  it("a sparse checkout only looks inside its folders", () => {
+    const { root, c } = make({ "src/a.txt": "a" }, { sparse: ["src"] });
+    writeFileSync(join(root, "outside.txt"), "o");
+    writeFileSync(join(root, "src/b.txt"), "b");
+    expect(changesOf(c, scanWorking(root, c)).added).toEqual(["src/b.txt"]);
+  });
+
+  it("diffs lines", () => {
+    const d = unifiedDiff("a\nb\nc\n", "a\nB\nc\n", "f");
+    expect(d).toContain("@@ -1,4 +1,4 @@");
+    expect(d).toContain("-b");
+    expect(d).toContain("+B");
   });
 });
