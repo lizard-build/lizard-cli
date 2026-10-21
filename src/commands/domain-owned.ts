@@ -24,6 +24,22 @@ interface DnsRecord { name: string; type: DnsType; value: string; ttl: number; p
 const DNS_TYPES: DnsType[] = ["A", "AAAA", "CNAME", "ALIAS", "MX", "TXT", "URL301"];
 
 const SESSION_HINT = "Domains bought on Lizard need `lizard login` or an API key without scopes (a scoped key cannot reach them).";
+/** Changing a bought domain needs a login: an API key can read it but not repoint it, so a
+ *  leaked key cannot take the domain or its email. */
+const WRITE_HINT = "Changing a domain bought on Lizard needs `lizard login` (an API key can read its records but not change them).";
+
+function writeError(err: unknown): never {
+  if (err instanceof APIError && err.status === 401) throw new Error(WRITE_HINT);
+  throw err;
+}
+
+const POINTING: DnsType[] = ["A", "AAAA", "CNAME", "ALIAS", "URL301"];
+/** Records connecting `names` would replace, leaving out ones nobody would miss: the
+ *  registrar's parking page and a previous Lizard target. */
+export function recordsToReplace(records: DnsRecord[], names: string[]): DnsRecord[] {
+  return records.filter((r) => names.includes(r.name) && POINTING.includes(r.type)
+    && !/(^|\.)parkingpage\.namecheap\.com\.?$/i.test(r.value) && !/(^|\.)onlizard\.com\.?$/i.test(r.value));
+}
 
 async function listOwned(): Promise<OwnedDomain[]> {
   const r = await api.get<{ orders: OwnedDomain[] }>("/api/domains/orders").catch((err: unknown) => {
@@ -43,13 +59,37 @@ export async function findOwnedDomain(hostname: string): Promise<OwnedDomain | n
     .sort((a, b) => b.domain.length - a.domain.length)[0] ?? null;
 }
 
-/** Points `hostname` (the bought domain, or a subdomain of it) at a service: DNS and attach in one call. */
-export async function connectOwned(order: OwnedDomain, hostname: string, service: { id: string; name: string }) {
+/** Points `hostname` (the bought domain, or a subdomain of it) at a service: DNS and attach
+ *  in one call. Records it would replace, and a hostname attached to another service, need
+ *  a yes at the terminal or --force, so one command cannot quietly take a working site down. */
+export async function connectOwned(order: OwnedDomain, hostname: string, service: { id: string; name: string }, force: boolean) {
   const host = hostname.toLowerCase().replace(/\.$/, "");
-  const r = await api.post<{ ok: boolean; attached: string[]; note?: string }>(
+  const names = host === order.domain ? ["@", "www"] : [host.slice(0, -(order.domain.length + 1))];
+  let move = force;
+  if (!force) {
+    const dns = await api.get<{ records: DnsRecord[] }>(`/api/domains/orders/${encodeURIComponent(order.id)}/dns`);
+    const replaced = recordsToReplace(dns.records, names);
+    if (replaced.length) {
+      const list = replaced.map((r) => `${r.name} ${r.type} ${r.value}`).join(", ");
+      if (!isTTY() || isJSONMode()) throw new Error(`This replaces existing records on ${order.domain}: ${list}. Run again with --force to replace them.`);
+      printRecords(order.domain, replaced);
+      const ok = await p.confirm({ message: `Replace ${replaced.length === 1 ? "this record" : "these records"} so ${host} points at ${service.name}?` });
+      if (p.isCancel(ok) || !ok) process.exit(5);
+    }
+  }
+  const connect = (forceMove: boolean) => api.post<{ ok: boolean; attached: string[]; note?: string }>(
     `/api/domains/orders/${encodeURIComponent(order.id)}/connect`,
-    { appId: service.id, hostname: host },
+    { appId: service.id, hostname: host, force: forceMove },
   );
+  const r = await connect(move).catch(async (err: unknown) => {
+    if (err instanceof APIError && err.status === 409 && !move && isTTY() && !isJSONMode()) {
+      const ok = await p.confirm({ message: `${err.message} Move it to ${service.name}?` });
+      if (p.isCancel(ok) || !ok) process.exit(5);
+      move = true;
+      return connect(true).catch(writeError);
+    }
+    return writeError(err);
+  });
   if (isJSONMode()) {
     printJSON({ ...r, domain: order.domain, hostname: host, service: service.name });
     return;
@@ -193,7 +233,7 @@ To point a name at a Lizard service, use: lizard domain api.example.com --servic
         throw new Error(`Unknown action "${action}". Use set, add or rm (or nothing to list).`);
       }
 
-      const saved = await api.put<{ records: DnsRecord[]; version: string }>(path, { version: current.version, records });
+      const saved = await api.put<{ records: DnsRecord[]; version: string }>(path, { version: current.version, records }).catch(writeError);
       if (isJSONMode()) return printJSON({ domain: order.domain, ...saved });
       success(`${summary} on ${order.domain}`);
       printRecords(order.domain, saved.records);

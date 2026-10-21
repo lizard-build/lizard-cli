@@ -46,7 +46,7 @@ export function registerDomain(program: Command) {
     .option("-s, --service <name>", "Service name or ID")
     .option("-p, --project <id>", "Project name, slug, or ID")
     .option("--port <n>", "Port to expose", parseIntOption)
-    .option("-f, --force", "Move the domain here if it's attached to another of your services")
+    .option("-f, --force", "Move the domain here if it's attached to another of your services; on a domain bought on Lizard, also replace its existing records without asking")
     .action(async (hostname: string | undefined, opts, _cmd) => {
       const projectId = await resolveProjectId(opts.project);
       const service = await getActiveService(opts.service, projectId);
@@ -108,7 +108,7 @@ export function registerDomain(program: Command) {
       // Bought on Lizard: set the DNS record and attach, nothing for the user to copy.
       const owned = await findOwnedDomain(hostname);
       if (owned) {
-        await connectOwned(owned, hostname, service);
+        await connectOwned(owned, hostname, service, !!opts.force);
         return;
       }
 

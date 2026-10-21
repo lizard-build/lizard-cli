@@ -13,14 +13,26 @@ export interface OwnedDomain {
     expiresAt: number | null;
 }
 type DnsType = "A" | "AAAA" | "CNAME" | "ALIAS" | "MX" | "TXT" | "URL301";
+interface DnsRecord {
+    name: string;
+    type: DnsType;
+    value: string;
+    ttl: number;
+    priority?: number;
+}
+/** Records connecting `names` would replace, leaving out ones nobody would miss: the
+ *  registrar's parking page and a previous Lizard target. */
+export declare function recordsToReplace(records: DnsRecord[], names: string[]): DnsRecord[];
 /** The bought domain `hostname` is, or is a subdomain of; null when none (or the
  *  token cannot see bought domains, e.g. an API key). */
 export declare function findOwnedDomain(hostname: string): Promise<OwnedDomain | null>;
-/** Points `hostname` (the bought domain, or a subdomain of it) at a service: DNS and attach in one call. */
+/** Points `hostname` (the bought domain, or a subdomain of it) at a service: DNS and attach
+ *  in one call. Records it would replace, and a hostname attached to another service, need
+ *  a yes at the terminal or --force, so one command cannot quietly take a working site down. */
 export declare function connectOwned(order: OwnedDomain, hostname: string, service: {
     id: string;
     name: string;
-}): Promise<void>;
+}, force: boolean): Promise<void>;
 /** "@", "api", or "api.example.com" -> the name relative to the domain. */
 export declare function relativeName(name: string, domain: string): string;
 export declare function parseType(raw: string): DnsType;
