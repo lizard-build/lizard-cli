@@ -194,6 +194,10 @@ lizard domain list --service <svc> --json            # its domains, and custom o
 lizard domain example.com --service <svc> --json     # attach; the hostname is positional, there is no `add`
 lizard domain verify example.com --service <svc>     # once the DNS records have propagated
 lizard domain example.com --service <svc> --force    # move it here from another of your services
+lizard domain owned --json                          # domains bought on Lizard (lizard.build/domains)
+lizard domain api.mydomain.com --service <svc>      # on a bought domain: DNS set for you, attached at once (apex also gets www)
+lizard domain dns mydomain.com --json               # its DNS records
+lizard domain dns mydomain.com set api CNAME x.example.com   # replace that name+type; also add (keep others), rm <name> [type] -y
 ```
 
 Give the user `dnsRecords` from the attach JSON: a TXT record `_lizard-verify.<apex>` and a CNAME for the host. Then run `verify`; it checks only the TXT, and nothing verifies on its own. No TXT in the output means the apex is already proven: only the CNAME is needed. An apex host (`example.com`) needs a DNS provider that can put a CNAME at `@`.

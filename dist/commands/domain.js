@@ -4,12 +4,17 @@ import { api } from "../lib/api.js";
 import { resolveProjectId } from "../lib/config.js";
 import { getActiveService } from "../lib/resolve.js";
 import { success, isJSONMode, printJSON, isTTY, info } from "../lib/format.js";
+import { connectOwned, findOwnedDomain, registerOwnedDomainCommands } from "./domain-owned.js";
 /**
  * `lizard domain` — domain management.
  *   bare         → if no domain, auto-generate one; otherwise show current
  *   <hostname>   → attach a custom domain
  *   delete <h>   → remove a domain
  *   generate     → force-generate a fresh *.onlizard.com subdomain
+ *   owned        → domains bought on Lizard; dns <domain> → their DNS records
+ *
+ * A hostname on a domain bought on Lizard (or a subdomain of one) is pointed and attached
+ * in one step: the platform writes the DNS record itself, no records to copy.
  */
 export function registerDomain(program) {
     const dom = program
@@ -63,6 +68,12 @@ export function registerDomain(program) {
         if (!/^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/i.test(hostname)) {
             throw new Error(`"${hostname}" is not a domain name. Attach a full hostname such as app.example.com; ` +
                 "`lizard domain list` shows the service's domains.");
+        }
+        // Bought on Lizard: set the DNS record and attach, nothing for the user to copy.
+        const owned = await findOwnedDomain(hostname);
+        if (owned) {
+            await connectOwned(owned, hostname, service);
+            return;
         }
         const result = await api
             .post(`/api/apps/${service.id}/domains`, {
@@ -226,6 +237,7 @@ export function registerDomain(program) {
             console.log(chalk.dim(`    then: lizard domain verify ${p.hostname} --service ${service.name}`));
         }
     });
+    registerOwnedDomainCommands(dom);
     dom
         .command("verify")
         .argument("<hostname>", "Custom domain to verify")
