@@ -486,10 +486,20 @@ export async function commit(root: string, c: Checkout, message: string, paths: 
   const body: Record<string, unknown> = { branch, message, files };
   if (newBranch) body.createFrom = c.base;
   else if (c.base) body.expect = c.base;
-  const r = await lg.post<{ sha: string }>(`${repoPath(c.repo)}/commits`, body);
+  const r = await lg.post<{ sha: string; parent?: string; root?: string }>(`${repoPath(c.repo)}/commits`, body);
   // What was sent is now the base for those files.
   for (const p of changed) c.files[p] = { ...local.get(p)! };
   for (const p of deleted) delete c.files[p];
+  // Nobody else committed in between (the new commit sits right on our base): the files here
+  // are exactly the new commit's, nothing to fetch.
+  if (r.root && r.parent && r.parent === c.base) {
+    const from = c.base;
+    c.base = r.sha;
+    c.root = r.root;
+    c.branch = branch;
+    saveCheckout(root, c);
+    return { sha: r.sha, branch, uploaded: missing.size, files: files.length, sync: { from, to: r.sha, updated: [], removed: [] } };
+  }
   saveCheckout(root, c);
   const s = await sync(root, c, branch);
   return { sha: r.sha, branch, uploaded: missing.size, files: files.length, sync: s };
