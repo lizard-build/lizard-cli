@@ -14,7 +14,7 @@ import * as wc from "../lib/checkout.js";
  * Lizard Git (lizard.build/git) from the terminal: repositories, issues, pull requests,
  * reviews, CI runs, releases, secrets, collaborators, webhooks, branch rules, labels,
  * notifications, tokens; and working copies: clone, status, diff, commit, sync, switch. Lizard
- * Git is Scion-style (no git protocol): a checkout holds files and .lizard/checkout.json, and
+ * Git is Scion-style (no git protocol): a checkout holds files and .lizard-git/checkout.json, and
  * every commit is made on the server (lib/checkout.ts).
  *
  * Registered under `lizard git`, next to the GitHub integration commands.

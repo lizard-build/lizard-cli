@@ -9,7 +9,8 @@ import { gitURL, lg, repoPath, sendRaw } from "./lizard-git.js";
  * A Lizard Git working copy (after Scion: lizard.build/git keeps no repositories as files and
  * makes every commit on the server).
  *
- * A checkout is files plus .lizard/checkout.json: which repository and branch, the changeset
+ * A checkout is files plus .lizard-git/checkout.json (named like .git: a repository's own
+ * .lizard/ folder holds its CI workflows): which repository and branch, the changeset
  * the files came from (base), and each file's hash. Nothing else is local: no history, no
  * object database. Contents come from the server by hash, through a cache shared by every
  * checkout on this machine (~/.cache/lizard/git; immutable, so it never needs invalidating),
@@ -21,7 +22,7 @@ import { gitURL, lg, repoPath, sendRaw } from "./lizard-git.js";
  * real conflict comes back.
  */
 
-export const STATE_DIR = ".lizard";
+export const STATE_DIR = ".lizard-git";
 const STATE_FILE = "checkout.json";
 
 export interface FileState {
