@@ -12,6 +12,9 @@ const CATALOG = [
     { name: "s3", label: "S3 Bucket", description: "S3-compatible object storage" },
 ];
 async function detectPortFromDockerfile(repo) {
+    // A Lizard Git repository: the build detects the port itself (never ask GitHub about a namesake).
+    if (repo.startsWith("lizard:") || /lizard\.build\/git\/|git\.lizard\.build\//.test(repo))
+        return undefined;
     const repoPath = repo.startsWith("http") ? repo.replace(/^https?:\/\/github\.com\//, "") : repo;
     for (const branch of ["main", "master"]) {
         try {
@@ -113,7 +116,7 @@ export function registerAdd(program) {
         .description("Add a database, service, or repo to the project")
         .option("-a, --addon <type...>", "Add one or more managed addons (multi-add: -a postgres -a redis -a s3)")
         .option("-s, --service <name>", "Create an empty service with this name")
-        .option("-r, --repo <repo>", "Create a service from a GitHub repo (owner/repo)")
+        .option("-r, --repo <repo>", "Create a service from a repo: owner/repo on GitHub, or lizard:owner/repo on Lizard Git")
         .option("-v, --variables <kv>", "KEY=value pair to seed the service. Repeat for multiple: -v K1=v1 -v K2=v2. Ignored for managed addons.", (val, prev) => [...prev, val], [])
         .option("-n, --name <name>", "Name used in ${{<name>.KEY}} templates and shown in the dashboard. Renaming it later breaks those refs.")
         .option("--instance-name <name>", "(deprecated) alias for --name")
@@ -232,9 +235,12 @@ async function runAdd(input) {
                 info(`Detected port ${chalk.bold(detectedPort)} from Dockerfile`);
             const app = await api.post(withScope(`/api/projects/${projectId}/apps`, scope), {
                 name: serviceName,
+                // lizard:owner/repo: a Lizard Git repository (pushes to it deploy the service).
                 repoUrl: opts.repo.startsWith("http")
                     ? opts.repo
-                    : `https://github.com/${opts.repo}`,
+                    : opts.repo.startsWith("lizard:")
+                        ? `https://lizard.build/git/${opts.repo.slice("lizard:".length)}`
+                        : `https://github.com/${opts.repo}`,
                 region,
                 envVars: variables,
                 ...(detectedPort ? { containerPort: detectedPort } : {}),

@@ -22,6 +22,8 @@ const CATALOG = [
 ] as const;
 
 async function detectPortFromDockerfile(repo: string): Promise<number | undefined> {
+  // A Lizard Git repository: the build detects the port itself (never ask GitHub about a namesake).
+  if (repo.startsWith("lizard:") || /lizard\.build\/git\/|git\.lizard\.build\//.test(repo)) return undefined;
   const repoPath = repo.startsWith("http") ? repo.replace(/^https?:\/\/github\.com\//, "") : repo;
   for (const branch of ["main", "master"]) {
     try {
@@ -174,7 +176,7 @@ export function registerAdd(program: Command) {
       "Add one or more managed addons (multi-add: -a postgres -a redis -a s3)",
     )
     .option("-s, --service <name>", "Create an empty service with this name")
-    .option("-r, --repo <repo>", "Create a service from a GitHub repo (owner/repo)")
+    .option("-r, --repo <repo>", "Create a service from a repo: owner/repo on GitHub, or lizard:owner/repo on Lizard Git")
     .option(
       "-v, --variables <kv>",
       "KEY=value pair to seed the service. Repeat for multiple: -v K1=v1 -v K2=v2. Ignored for managed addons.",
@@ -318,9 +320,12 @@ async function runAdd(input: AddInput): Promise<void> {
           withScope(`/api/projects/${projectId}/apps`, scope),
           {
             name: serviceName,
+            // lizard:owner/repo: a Lizard Git repository (pushes to it deploy the service).
             repoUrl: opts.repo.startsWith("http")
               ? opts.repo
-              : `https://github.com/${opts.repo}`,
+              : opts.repo.startsWith("lizard:")
+                ? `https://lizard.build/git/${opts.repo.slice("lizard:".length)}`
+                : `https://github.com/${opts.repo}`,
             region,
             envVars: variables,
             ...(detectedPort ? { containerPort: detectedPort } : {}),

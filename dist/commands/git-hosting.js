@@ -279,14 +279,15 @@ export function registerLizardGit(git) {
         .option("-d, --description <text>")
         .option("--readme", "Start with a README (otherwise empty)")
         .option("--default-branch <name>", "Default branch (main)")
+        .option("-w, --workspace <slug>", "Workspace whose members become its collaborators (default: your personal one)")
         .action(async (name, opts) => {
         const r = await lg.post("/api/repos", {
-            name, private: !!opts.private, description: opts.description, readme: !!opts.readme, defaultBranch: opts.defaultBranch,
+            name, private: !!opts.private, description: opts.description, readme: !!opts.readme, defaultBranch: opts.defaultBranch, workspace: opts.workspace,
         });
         const full = `${r.owner}/${r.name}`;
         out({ ...r, url: `${gitURL()}/${full}` }, () => {
             success(`Created ${chalk.bold(full)}  ${link(`${gitURL()}/${full}`)}`);
-            info(chalk.dim(`  Check out: lizard git clone ${full}    then: lizard git commit -m "..."`));
+            info(chalk.dim(`  Check out: lizard git clone ${full}    then: lizard git commit -m "..." && lizard git push`));
         });
     });
     repoOpt(repo.command("view").description("A repository's details").argument("[repo]"))
@@ -295,6 +296,8 @@ export function registerLizardGit(git) {
         const m = await lg.get(repoPath(r));
         out(m, () => {
             info(`${chalk.bold(r)}  ${m.repo.private ? "private" : "public"}  ${chalk.dim(`you: ${m.role || "reader"}`)}`);
+            if (m.workspace)
+                info(chalk.dim(`workspace: ${m.workspace.name} (${m.workspace.slug}): its members are collaborators`));
             if (m.repo.description)
                 info(m.repo.description);
             if (m.forkOf)
@@ -303,16 +306,18 @@ export function registerLizardGit(git) {
             info(`${link(`${gitURL()}/${r}`)}\ncheck out: lizard git clone ${r}`);
         });
     });
-    repoOpt(repo.command("edit").description("Change name, description, visibility or default branch").argument("[repo]"))
+    repoOpt(repo.command("edit").description("Change name, description, visibility, default branch or workspace").argument("[repo]"))
         .option("--name <name>")
         .option("-d, --description <text>")
         .option("--private").option("--public")
         .option("--default-branch <name>")
+        .option("-w, --workspace <slug>", "Attach to a workspace you're in: its members become collaborators (\"none\" detaches; owner only)")
         .action(async (arg, opts) => {
         const r = await resolveRepo(arg ?? opts.repo);
         await lg.patch(repoPath(r), {
             name: opts.name, description: opts.description, defaultBranch: opts.defaultBranch,
             private: opts.private ? true : opts.public ? false : undefined,
+            workspace: opts.workspace === undefined ? undefined : opts.workspace === "none" ? "" : opts.workspace,
         });
         done({ ok: true, repo: opts.name ? `${r.split("/")[0]}/${opts.name}` : r }, `Updated ${r}`);
     });
@@ -1008,7 +1013,7 @@ export function registerLizardGit(git) {
         const r = await resolveRepo(opts.repo);
         const c = await lg.get(`${repoPath(r)}/collaborators`);
         out(c, () => {
-            c.collaborators.length ? table(["LOGIN", "ROLE", "SINCE"], c.collaborators.map((x) => [x.login, x.role, ago(x.createdAt)])) : info("No collaborators.");
+            c.collaborators.length ? table(["LOGIN", "ROLE", "SINCE", "VIA"], c.collaborators.map((x) => [x.login, x.role, ago(x.createdAt), x.fromWorkspace ? "workspace" : ""])) : info("No collaborators.");
             if (c.invitations?.length) {
                 info("\nInvited:");
                 table(["ID", "LOGIN", "ROLE", "BY"], c.invitations.map((x) => [String(x.id), x.login, x.role, x.inviter]));
