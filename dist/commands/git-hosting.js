@@ -74,12 +74,17 @@ export function checkoutStatus() {
     const c = wc.loadCheckout(root);
     const ch = wc.changesOf(c, wc.scanWorking(root, c));
     const unpushed = (c.pending?.commits ?? []).map((x) => ({ message: x.message.trim(), time: x.time, files: x.files.length }));
-    out({ repo: c.repo, branch: c.branch, commit: c.base, sparse: c.sparse, ...ch, unpushed }, () => {
+    out({ repo: c.repo, branch: c.branch, commit: c.base, sparse: c.sparse, ...ch, unpushed, conflicts: c.conflicts ?? [] }, () => {
         info(`${chalk.bold(c.repo)} on ${chalk.cyan(c.branch)} at ${c.base.slice(0, 12)}${c.sparse ? chalk.dim(` (sparse: ${c.sparse.join(", ")})`) : ""}`);
         if (unpushed.length) {
             info(`${chalk.yellow(`${unpushed.length} commit${unpushed.length === 1 ? "" : "s"} not pushed`)} ${chalk.dim("(lizard git push)")}`);
             for (const u of unpushed)
                 info(`  ${chalk.dim("•")} ${u.message.split("\n")[0]}`);
+        }
+        if (c.conflicts?.length) {
+            info(chalk.red(`${c.conflicts.length} conflict${c.conflicts.length === 1 ? "" : "s"} to fix`));
+            for (const x of c.conflicts)
+                info(`  ${chalk.red("conflict")}  ${x.path}  ${chalk.dim(x.reason)}`);
         }
         const n = ch.added.length + ch.modified.length + ch.deleted.length;
         if (!n)
@@ -162,6 +167,26 @@ export function registerLizardGit(git) {
         const extra = r.sync.updated.length + r.sync.removed.length;
         return `Pushed ${r.shas.length} commit${r.shas.length === 1 ? "" : "s"} to ${r.branch}: ${r.sha.slice(0, 12)}${r.uploaded ? chalk.dim(` (${r.uploaded} file(s) uploaded)`) : ""}${extra ? chalk.dim(` · ${extra} file(s) from others' commits updated`) : ""}`;
     };
+    // A sync's merges and conflicts, for people.
+    const showMerge = (s) => {
+        for (const p of s.merged ?? [])
+            info(`  ${chalk.green("merged")}    ${p}`);
+        for (const x of s.conflicts ?? [])
+            info(`  ${chalk.red("conflict")}  ${x.path}  ${chalk.dim(x.reason)}`);
+    };
+    // Push, or after a conflict: what was merged and what to fix (exit status 1).
+    const reportPush = (r) => {
+        if (r.pushed)
+            return done(r, pushed(r));
+        out(r, () => {
+            info(chalk.yellow(`Not pushed: ${r.branch} has commits that change the same places.`));
+            info(chalk.dim(`Your ${r.messages?.length ?? 0} commit(s) are changes in your files again, merged with ${r.branch}:`));
+            showMerge(r.sync);
+            const msg = (r.messages ?? []).map((m) => m.split("\n")[0]).join("; ");
+            info(`Fix the marked places, then: lizard git commit --push -m ${JSON.stringify(msg || "...")}`);
+        });
+        process.exitCode = 1;
+    };
     git
         .command("commit")
         .description("Commit your changes here (lizard git push sends them); --push sends at once")
@@ -169,14 +194,13 @@ export function registerLizardGit(git) {
         .requiredOption("-m, --message <text>", "Commit message")
         .option("-b, --branch <name>", "Commit to a new branch, starting at this checkout's commit (and switch to it)")
         .option("--push", "Push right after committing")
+        .option("--force", "Commit even with conflict markers left in a file")
         .action(async (paths, opts) => {
         const root = needCheckout();
         const c = wc.loadCheckout(root);
-        const r = wc.commitLocal(root, c, opts.message.endsWith("\n") ? opts.message : opts.message + "\n", paths, opts.branch);
-        if (opts.push) {
-            const p = await wc.push(root, c);
-            return done(p, pushed(p));
-        }
+        const r = wc.commitLocal(root, c, opts.message.endsWith("\n") ? opts.message : opts.message + "\n", paths, opts.branch, !!opts.force);
+        if (opts.push)
+            return reportPush(await wc.push(root, c));
         done(r, `Committed ${r.files} file(s) on ${r.branch} ${chalk.dim(`(${r.pending} not pushed: lizard git push)`)}`);
     });
     git
@@ -185,8 +209,7 @@ export function registerLizardGit(git) {
         .action(async () => {
         const root = needCheckout();
         const c = wc.loadCheckout(root);
-        const r = await wc.push(root, c);
-        done(r, pushed(r));
+        reportPush(await wc.push(root, c));
     });
     git
         .command("uncommit")
@@ -205,8 +228,15 @@ export function registerLizardGit(git) {
         const root = needCheckout();
         const c = wc.loadCheckout(root);
         const r = await wc.sync(root, c);
-        done(r, r.from === r.to ? `Already at ${c.branch}'s latest (${r.to.slice(0, 12)})` :
-            `${c.branch}: ${r.from.slice(0, 12)} -> ${r.to.slice(0, 12)} (${r.updated.length} updated, ${r.removed.length} removed)`);
+        out(r, () => {
+            info(r.from === r.to ? `Already at ${c.branch}'s latest (${r.to.slice(0, 12)})` :
+                `${c.branch}: ${r.from.slice(0, 12)} -> ${r.to.slice(0, 12)} (${r.updated.length} updated, ${r.removed.length} removed)`);
+            showMerge(r);
+            if (r.conflicts?.length)
+                info(chalk.dim(`Fix the marked places, then commit and push them.`));
+        });
+        if (r.conflicts?.length)
+            process.exitCode = 1;
     });
     git
         .command("switch")

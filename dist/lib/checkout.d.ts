@@ -52,6 +52,11 @@ export interface Checkout {
     sparse: string[] | null;
     files: Record<string, FileState>;
     pending?: Pending;
+    conflicts?: Conflict[];
+}
+export interface Conflict {
+    path: string;
+    reason: string;
 }
 interface WireEntry {
     name: string;
@@ -102,11 +107,14 @@ export interface SyncResult {
     to: string;
     updated: string[];
     removed: string[];
+    merged?: string[];
+    conflicts?: Conflict[];
 }
 /**
- * Bring the files to the branch's tip (or another branch: switching). Local changes are kept;
- * if the tip changed the same files, nothing is touched and the conflict comes back: commit
- * first, and the server merges.
+ * Bring the files to the branch's tip (or another branch: switching). Local changes are kept.
+ * A file changed here and on the branch is merged here line by line, as the server merges:
+ * what both changed differently is written between conflict markers for a person to choose,
+ * and listed in the result (and in status until the next commit).
  */
 export declare function sync(root: string, c: Checkout, toBranch?: string): Promise<SyncResult>;
 /** Refuse what would move this checkout's base while commits wait to be pushed. */
@@ -117,15 +125,17 @@ export interface LocalCommitResult {
     pending: number;
 }
 /** Record a commit of the changed files (all, or those under paths) here; push sends it. */
-export declare function commitLocal(root: string, c: Checkout, message: string, paths: string[], newBranch?: string): LocalCommitResult;
+export declare function commitLocal(root: string, c: Checkout, message: string, paths: string[], newBranch?: string, force?: boolean): LocalCommitResult;
 /** Turn the commits not pushed back into changes in the files (their messages are dropped). */
 export declare function uncommit(root: string, c: Checkout): number;
 export interface PushResult {
+    pushed: boolean;
     shas: string[];
     sha: string;
     branch: string;
     uploaded: number;
     sync: SyncResult;
+    messages?: string[];
 }
 /** Send the commits not pushed: one branch move; then bring in others' commits if there were any. */
 export declare function push(root: string, c: Checkout): Promise<PushResult>;

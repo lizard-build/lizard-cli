@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { APIError } from "./api.js";
 import { gitURL, lg, repoPath, sendRaw } from "./lizard-git.js";
+import { hasConflictMarkers, merge3 } from "./merge3.js";
 
 /**
  * A Lizard Git working copy (after Scion: lizard.build/git keeps no repositories as files and
@@ -58,6 +59,12 @@ export interface Checkout {
   sparse: string[] | null; // folders (or files) checked out; null: everything
   files: Record<string, FileState>;
   pending?: Pending; // commits made here, not pushed
+  conflicts?: Conflict[]; // left by the last sync for a person to fix (cleared by a commit)
+}
+
+export interface Conflict {
+  path: string;
+  reason: string;
 }
 
 interface WireEntry {
@@ -402,12 +409,17 @@ export interface SyncResult {
   to: string;
   updated: string[];
   removed: string[];
+  merged?: string[]; // changed here and on the branch: merged line by line
+  conflicts?: Conflict[]; // changed here and on the branch the same lines: marked in the file
 }
 
+const isBinaryBuf = (b: Buffer) => b.subarray(0, 8000).includes(0);
+
 /**
- * Bring the files to the branch's tip (or another branch: switching). Local changes are kept;
- * if the tip changed the same files, nothing is touched and the conflict comes back: commit
- * first, and the server merges.
+ * Bring the files to the branch's tip (or another branch: switching). Local changes are kept.
+ * A file changed here and on the branch is merged here line by line, as the server merges:
+ * what both changed differently is written between conflict markers for a person to choose,
+ * and listed in the result (and in status until the next commit).
  */
 export async function sync(root: string, c: Checkout, toBranch?: string): Promise<SyncResult> {
   needNoPending(c);
@@ -432,11 +444,57 @@ export async function sync(root: string, c: Checkout, toBranch?: string): Promis
     const w = want.get(p);
     return !(l && w && l.h === w.h && l.m === w.m); // the same change on both sides is fine
   });
+  const clashSet = new Set(clash);
+  const merged: string[] = [];
+  const conflicts: Conflict[] = [];
   if (clash.length) {
-    throw new APIError(409, `${branch} changed files you changed too: ${clash.slice(0, 10).join(", ")}${clash.length > 10 ? ", ..." : ""}. Commit and push them (lizard git commit --push -m "..."): the server merges them line by line.`);
+    const need = new Set<string>();
+    for (const p of clash) {
+      if (c.files[p]) need.add(c.files[p].h);
+      const w = want.get(p);
+      if (w) need.add(w.h);
+    }
+    const got = await getBlobs(c.repo, [...need]);
+    for (const p of clash) {
+      const baseF = c.files[p];
+      const w = want.get(p);
+      const l = local.get(p);
+      if (!l && !w) {
+        delete c.files[p]; // deleted on both sides
+        continue;
+      }
+      if (!l) {
+        // Deleted here, changed on the branch: theirs comes back; deleting it again is one rm away.
+        c.files[p] = writeFile(root, p, got.get(w!.h)!, w!.m);
+        conflicts.push({ path: p, reason: `you deleted it, ${branch} changed it: their version is back (delete it again if you meant to)` });
+        continue;
+      }
+      if (!w) {
+        // Deleted on the branch, changed here: yours stays (it is new to the branch now).
+        delete c.files[p];
+        conflicts.push({ path: p, reason: `${branch} deleted it, you changed it: your version is kept` });
+        continue;
+      }
+      const full = safeJoin(root, p);
+      const ours = l.m === "120000" ? Buffer.from(readlinkSync(full)) : readFileSync(full);
+      const base = baseF ? got.get(baseF.h)! : Buffer.alloc(0);
+      const theirs = got.get(w.h)!;
+      c.files[p] = { h: w.h, m: w.m }; // the branch's version is what yours now differs from
+      if (l.m === "120000" || w.m === "120000" || isBinaryBuf(base) || isBinaryBuf(ours) || isBinaryBuf(theirs)) {
+        writeFileSync(full + ".theirs", theirs);
+        conflicts.push({ path: p, reason: `binary, changed on both sides: yours kept, theirs saved as ${p}.theirs` });
+        continue;
+      }
+      const r = merge3(base.toString("utf8"), ours.toString("utf8"), theirs.toString("utf8"), branch);
+      // Yours kept its mode unless only the branch changed it.
+      writeFile(root, p, Buffer.from(r.text, "utf8"), baseF && l.m === baseF.m ? w.m : l.m);
+      if (r.conflicts) conflicts.push({ path: p, reason: `${r.conflicts} place${r.conflicts === 1 ? "" : "s"} both changed: marked <<<<<<< yours / ======= / >>>>>>> ${branch}` });
+      else merged.push(p);
+    }
   }
   const blobs = await getBlobs(c.repo, toWrite.filter(([p]) => !dirty.has(p)).map(([, f]) => f.h));
   for (const [p, f] of toWrite) {
+    if (clashSet.has(p)) continue;
     if (dirty.has(p)) {
       c.files[p] = { ...local.get(p)!, h: f.h, m: f.m }; // already identical locally
       continue;
@@ -445,6 +503,7 @@ export async function sync(root: string, c: Checkout, toBranch?: string): Promis
     res.updated.push(p);
   }
   for (const p of toRemove) {
+    if (clashSet.has(p)) continue;
     if (!dirty.has(p)) removeFile(root, p);
     delete c.files[p];
     res.removed.push(p);
@@ -452,7 +511,10 @@ export async function sync(root: string, c: Checkout, toBranch?: string): Promis
   c.base = r.id;
   c.root = r.root;
   c.branch = branch;
+  if (conflicts.length) c.conflicts = [...(c.conflicts ?? []).filter((x) => !conflicts.some((y) => y.path === x.path)), ...conflicts];
   saveCheckout(root, c);
+  if (merged.length) res.merged = merged;
+  if (conflicts.length) res.conflicts = conflicts;
   return res;
 }
 
@@ -473,7 +535,7 @@ export interface LocalCommitResult {
 }
 
 /** Record a commit of the changed files (all, or those under paths) here; push sends it. */
-export function commitLocal(root: string, c: Checkout, message: string, paths: string[], newBranch?: string): LocalCommitResult {
+export function commitLocal(root: string, c: Checkout, message: string, paths: string[], newBranch?: string, force = false): LocalCommitResult {
   const local = scanWorking(root, c);
   const ch = changesOf(c, local);
   const pick = (p: string) => !paths.length || paths.some((x) => p === x || p.startsWith(x.replace(/\/+$/, "") + "/"));
@@ -481,6 +543,15 @@ export function commitLocal(root: string, c: Checkout, message: string, paths: s
   const deleted = ch.deleted.filter(pick);
   if (!changed.length && !deleted.length) throw new APIError(400, "nothing to commit: no changes");
   if (newBranch && c.pending?.commits.length) throw new APIError(409, "push the commits on this branch before starting another (lizard git push)");
+  if (!force) {
+    const marked = changed.filter((p) => {
+      const f = local.get(p)!;
+      if (f.m === "120000" || f.s > 8 << 20) return false;
+      const b = readFileSync(safeJoin(root, p));
+      return !isBinaryBuf(b) && hasConflictMarkers(b.toString("utf8"));
+    });
+    if (marked.length) throw new APIError(409, `conflict markers left in ${marked.join(", ")}: choose between yours and theirs there first (or commit --force)`);
+  }
   // Keep the contents as they are now: later edits don't change a commit.
   for (const p of changed) {
     const f = local.get(p)!;
@@ -506,6 +577,10 @@ export function commitLocal(root: string, c: Checkout, message: string, paths: s
   for (const p of changed) c.files[p] = { ...local.get(p)! };
   for (const p of deleted) delete c.files[p];
   if (newBranch) c.branch = newBranch;
+  if (c.conflicts) {
+    c.conflicts = c.conflicts.filter((x) => !changed.includes(x.path) && !deleted.includes(x.path));
+    if (!c.conflicts.length) delete c.conflicts;
+  }
   saveCheckout(root, c);
   return { branch: c.branch, files: changed.length + deleted.length, pending: c.pending.commits.length };
 }
@@ -527,11 +602,13 @@ export function uncommit(root: string, c: Checkout): number {
 }
 
 export interface PushResult {
+  pushed: boolean; // false: conflicts; the commits are changes in the files again, merged with the branch
   shas: string[];
   sha: string;
   branch: string;
   uploaded: number;
   sync: SyncResult;
+  messages?: string[]; // when not pushed: the commits' messages, to commit again
 }
 
 /** Send the commits not pushed: one branch move; then bring in others' commits if there were any. */
@@ -558,7 +635,19 @@ export async function push(root: string, c: Checkout): Promise<PushResult> {
   const body: Record<string, unknown> = { branch: c.branch, commits: pend.commits };
   if (pend.newBranch && pend.base) body.createFrom = pend.base;
   else if (pend.base) body.expect = pend.base;
-  const r = await lg.post<{ shas: string[]; sha: string; parent?: string; root?: string }>(`${repoPath(c.repo)}/push`, body);
+  let r: { shas: string[]; sha: string; parent?: string; root?: string };
+  try {
+    r = await lg.post<{ shas: string[]; sha: string; parent?: string; root?: string }>(`${repoPath(c.repo)}/push`, body);
+  } catch (e) {
+    const conflicts = e instanceof APIError && e.status === 409 ? (e.body as { conflicts?: string[] } | null)?.conflicts : undefined;
+    if (!conflicts?.length) throw e;
+    // Someone changed the same lines: bring their commits here and merge in the files, so the
+    // person sees exactly what to choose; then commit and push again.
+    const messages = pend.commits.map((x) => x.message.trim());
+    uncommit(root, c);
+    const s = await sync(root, c);
+    return { pushed: false, shas: [], sha: "", branch: c.branch, uploaded: missing.size, sync: s, messages };
+  }
   const from = pend.base;
   c.pending = undefined;
   rmSync(join(root, STATE_DIR, "objects"), { recursive: true, force: true });
@@ -567,11 +656,11 @@ export async function push(root: string, c: Checkout): Promise<PushResult> {
     c.base = r.sha;
     c.root = r.root;
     saveCheckout(root, c);
-    return { shas: r.shas, sha: r.sha, branch: c.branch, uploaded: missing.size, sync: { from, to: r.sha, updated: [], removed: [] } };
+    return { pushed: true, shas: r.shas, sha: r.sha, branch: c.branch, uploaded: missing.size, sync: { from, to: r.sha, updated: [], removed: [] } };
   }
   saveCheckout(root, c);
   const s = await sync(root, c);
-  return { shas: r.shas, sha: r.sha, branch: c.branch, uploaded: missing.size, sync: s };
+  return { pushed: true, shas: r.shas, sha: r.sha, branch: c.branch, uploaded: missing.size, sync: s };
 }
 
 export interface CommitResult {
