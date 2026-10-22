@@ -9,10 +9,11 @@
  * checkout on this machine (~/.cache/lizard/git; immutable, so it never needs invalidating),
  * and a sparse checkout only ever fetches the folders it covers.
  *
- * `commit` sends what changed: the server is asked which contents it lacks, those are
- * uploaded, then one request makes the commit on the branch. If the branch moved since base,
- * the server places the change on the new tip (merging the same files line by line); only a
- * real conflict comes back.
+ * `commit` records a commit here (pending, with copies of its contents under
+ * .lizard-git/objects/); `push` sends every pending commit: the server is asked which contents
+ * it lacks, those are uploaded, then one request makes the commits on the branch and moves it
+ * once (one CI run, one deploy). If the branch moved since they were made, the server places
+ * them on the new tip (merging the same files line by line); only a real conflict comes back.
  */
 export declare const STATE_DIR = ".lizard-git";
 export interface FileState {
@@ -20,6 +21,26 @@ export interface FileState {
     m: string;
     s?: number;
     t?: number;
+}
+/** A commit made here and not pushed yet: its files' states (full contents, by hash). */
+export interface PendingCommit {
+    message: string;
+    time: number;
+    files: ({
+        path: string;
+        hash: string;
+        mode: string;
+    } | {
+        path: string;
+        delete: true;
+    })[];
+}
+export interface Pending {
+    base: string;
+    newBranch?: boolean;
+    fromBranch?: string;
+    commits: PendingCommit[];
+    orig: Record<string, FileState | null>;
 }
 export interface Checkout {
     version: 1;
@@ -30,6 +51,7 @@ export interface Checkout {
     root: string;
     sparse: string[] | null;
     files: Record<string, FileState>;
+    pending?: Pending;
 }
 interface WireEntry {
     name: string;
@@ -87,6 +109,26 @@ export interface SyncResult {
  * first, and the server merges.
  */
 export declare function sync(root: string, c: Checkout, toBranch?: string): Promise<SyncResult>;
+/** Refuse what would move this checkout's base while commits wait to be pushed. */
+export declare function needNoPending(c: Checkout): void;
+export interface LocalCommitResult {
+    branch: string;
+    files: number;
+    pending: number;
+}
+/** Record a commit of the changed files (all, or those under paths) here; push sends it. */
+export declare function commitLocal(root: string, c: Checkout, message: string, paths: string[], newBranch?: string): LocalCommitResult;
+/** Turn the commits not pushed back into changes in the files (their messages are dropped). */
+export declare function uncommit(root: string, c: Checkout): number;
+export interface PushResult {
+    shas: string[];
+    sha: string;
+    branch: string;
+    uploaded: number;
+    sync: SyncResult;
+}
+/** Send the commits not pushed: one branch move; then bring in others' commits if there were any. */
+export declare function push(root: string, c: Checkout): Promise<PushResult>;
 export interface CommitResult {
     sha: string;
     branch: string;

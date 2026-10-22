@@ -269,7 +269,7 @@ function getUploadFiles(cwd: string, useGitignore: boolean): string[] {
         .toString("utf8")
         .split("\0")
         .filter(Boolean);
-      return [...new Set([...tracked, ...untracked])];
+      return [...new Set([...tracked, ...untracked])].filter((f) => f !== ".lizard-git" && !f.startsWith(".lizard-git/"));
     } catch {
       // fall through to manual collection
     }
@@ -280,6 +280,7 @@ function getUploadFiles(cwd: string, useGitignore: boolean): string[] {
 const EXCLUDE_DIRS = new Set([
   "node_modules",
   ".git",
+  ".lizard-git", // a Lizard Git checkout's own state (and unpushed commits' contents)
   "dist",
   ".next",
   "build",

@@ -15,10 +15,11 @@ import { gitURL, lg, repoPath, sendRaw } from "./lizard-git.js";
  * checkout on this machine (~/.cache/lizard/git; immutable, so it never needs invalidating),
  * and a sparse checkout only ever fetches the folders it covers.
  *
- * `commit` sends what changed: the server is asked which contents it lacks, those are
- * uploaded, then one request makes the commit on the branch. If the branch moved since base,
- * the server places the change on the new tip (merging the same files line by line); only a
- * real conflict comes back.
+ * `commit` records a commit here (pending, with copies of its contents under
+ * .lizard-git/objects/); `push` sends every pending commit: the server is asked which contents
+ * it lacks, those are uploaded, then one request makes the commits on the branch and moves it
+ * once (one CI run, one deploy). If the branch moved since they were made, the server places
+ * them on the new tip (merging the same files line by line); only a real conflict comes back.
  */
 export const STATE_DIR = ".lizard-git";
 const STATE_FILE = "checkout.json";
@@ -364,6 +365,7 @@ export async function clone(repo, dir, branch, sparse, onProgress) {
  * first, and the server merges.
  */
 export async function sync(root, c, toBranch) {
+    needNoPending(c);
     const branch = toBranch ?? c.branch;
     const r = await lg.get(`${repoPath(c.repo)}/resolve?rev=${encodeURIComponent(branch)}`);
     const res = { from: c.base, to: r.id, updated: [], removed: [] };
@@ -391,7 +393,7 @@ export async function sync(root, c, toBranch) {
         return !(l && w && l.h === w.h && l.m === w.m); // the same change on both sides is fine
     });
     if (clash.length) {
-        throw new APIError(409, `${branch} changed files you changed too: ${clash.slice(0, 10).join(", ")}${clash.length > 10 ? ", ..." : ""}. Commit first (lizard git commit): the server merges them line by line.`);
+        throw new APIError(409, `${branch} changed files you changed too: ${clash.slice(0, 10).join(", ")}${clash.length > 10 ? ", ..." : ""}. Commit and push them (lizard git commit --push -m "..."): the server merges them line by line.`);
     }
     const blobs = await getBlobs(c.repo, toWrite.filter(([p]) => !dirty.has(p)).map(([, f]) => f.h));
     for (const [p, f] of toWrite) {
@@ -413,6 +415,125 @@ export async function sync(root, c, toBranch) {
     c.branch = branch;
     saveCheckout(root, c);
     return res;
+}
+/** Refuse what would move this checkout's base while commits wait to be pushed. */
+export function needNoPending(c) {
+    const n = c.pending?.commits.length ?? 0;
+    if (n)
+        throw new APIError(409, `${n} commit${n === 1 ? "" : "s"} not pushed yet: lizard git push first (the server puts them on top of others' commits), or lizard git uncommit`);
+}
+function objectPath(root, h) {
+    return join(root, STATE_DIR, "objects", h.slice(0, 2), h);
+}
+/** Record a commit of the changed files (all, or those under paths) here; push sends it. */
+export function commitLocal(root, c, message, paths, newBranch) {
+    const local = scanWorking(root, c);
+    const ch = changesOf(c, local);
+    const pick = (p) => !paths.length || paths.some((x) => p === x || p.startsWith(x.replace(/\/+$/, "") + "/"));
+    const changed = [...ch.added, ...ch.modified].filter(pick);
+    const deleted = ch.deleted.filter(pick);
+    if (!changed.length && !deleted.length)
+        throw new APIError(400, "nothing to commit: no changes");
+    if (newBranch && c.pending?.commits.length)
+        throw new APIError(409, "push the commits on this branch before starting another (lizard git push)");
+    // Keep the contents as they are now: later edits don't change a commit.
+    for (const p of changed) {
+        const f = local.get(p);
+        const dst = objectPath(root, f.h);
+        if (existsSync(dst))
+            continue;
+        const full = safeJoin(root, p);
+        const content = f.m === "120000" ? Buffer.from(readlinkSync(full)) : readFileSync(full);
+        if (sha256(content) !== f.h)
+            throw new APIError(409, `${p} changed while committing; try again`);
+        mkdirSync(dirname(dst), { recursive: true });
+        writeFileSync(dst + ".tmp", content);
+        renameSync(dst + ".tmp", dst);
+    }
+    if (!c.pending)
+        c.pending = { base: c.base, commits: [], orig: {}, ...(newBranch ? { newBranch: true, fromBranch: c.branch } : {}) };
+    for (const p of [...changed, ...deleted])
+        if (!(p in c.pending.orig))
+            c.pending.orig[p] = c.files[p] ?? null;
+    c.pending.commits.push({
+        message,
+        time: Math.floor(Date.now() / 1000),
+        files: [
+            ...changed.map((p) => ({ path: p, hash: local.get(p).h, mode: local.get(p).m })),
+            ...deleted.map((p) => ({ path: p, delete: true })),
+        ],
+    });
+    for (const p of changed)
+        c.files[p] = { ...local.get(p) };
+    for (const p of deleted)
+        delete c.files[p];
+    if (newBranch)
+        c.branch = newBranch;
+    saveCheckout(root, c);
+    return { branch: c.branch, files: changed.length + deleted.length, pending: c.pending.commits.length };
+}
+/** Turn the commits not pushed back into changes in the files (their messages are dropped). */
+export function uncommit(root, c) {
+    const n = c.pending?.commits.length ?? 0;
+    if (!c.pending)
+        return 0;
+    for (const [p, f] of Object.entries(c.pending.orig)) {
+        if (f)
+            c.files[p] = f;
+        else
+            delete c.files[p];
+    }
+    // A branch that never reached the server: back on the one it started from.
+    if (c.pending.newBranch && c.pending.fromBranch)
+        c.branch = c.pending.fromBranch;
+    c.pending = undefined;
+    rmSync(join(root, STATE_DIR, "objects"), { recursive: true, force: true });
+    saveCheckout(root, c);
+    return n;
+}
+/** Send the commits not pushed: one branch move; then bring in others' commits if there were any. */
+export async function push(root, c) {
+    const pend = c.pending;
+    if (!pend?.commits.length)
+        throw new APIError(400, "nothing to push: no commits waiting (lizard git commit -m \"...\")");
+    const hashes = [...new Set(pend.commits.flatMap((x) => x.files.flatMap((f) => ("hash" in f ? [f.hash] : []))))];
+    const missing = new Set();
+    for (let i = 0; i < hashes.length; i += 5000) {
+        const r = await lg.post(`${repoPath(c.repo)}/blobs/missing`, { hashes: hashes.slice(i, i + 5000) });
+        for (const h of r.missing)
+            missing.add(h);
+    }
+    const list = [...missing];
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(6, list.length) }, async () => {
+        while (next < list.length) {
+            const h = list[next++];
+            const content = readFileSync(objectPath(root, h));
+            if (sha256(content) !== h)
+                throw new APIError(409, `.lizard-git/objects/${h.slice(0, 12)} is damaged`);
+            await sendRaw("PUT", `${repoPath(c.repo)}/blobs/${h}`, content, { "Content-Type": "application/octet-stream" });
+            cachePut("b", h, content);
+        }
+    }));
+    const body = { branch: c.branch, commits: pend.commits };
+    if (pend.newBranch && pend.base)
+        body.createFrom = pend.base;
+    else if (pend.base)
+        body.expect = pend.base;
+    const r = await lg.post(`${repoPath(c.repo)}/push`, body);
+    const from = pend.base;
+    c.pending = undefined;
+    rmSync(join(root, STATE_DIR, "objects"), { recursive: true, force: true });
+    // Nobody else committed meanwhile: the files here are exactly the last commit's.
+    if (r.root && (r.parent ?? "") === from) {
+        c.base = r.sha;
+        c.root = r.root;
+        saveCheckout(root, c);
+        return { shas: r.shas, sha: r.sha, branch: c.branch, uploaded: missing.size, sync: { from, to: r.sha, updated: [], removed: [] } };
+    }
+    saveCheckout(root, c);
+    const s = await sync(root, c);
+    return { shas: r.shas, sha: r.sha, branch: c.branch, uploaded: missing.size, sync: s };
 }
 /**
  * Commit the changed files (all, or those under paths) on the server, then sync to the result:

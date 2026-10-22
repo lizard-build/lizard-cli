@@ -70,8 +70,13 @@ export function checkoutStatus(): boolean {
   if (!root) return false;
   const c = wc.loadCheckout(root);
   const ch = wc.changesOf(c, wc.scanWorking(root, c));
-  out({ repo: c.repo, branch: c.branch, commit: c.base, sparse: c.sparse, ...ch }, () => {
+  const unpushed = (c.pending?.commits ?? []).map((x) => ({ message: x.message.trim(), time: x.time, files: x.files.length }));
+  out({ repo: c.repo, branch: c.branch, commit: c.base, sparse: c.sparse, ...ch, unpushed }, () => {
     info(`${chalk.bold(c.repo)} on ${chalk.cyan(c.branch)} at ${c.base.slice(0, 12)}${c.sparse ? chalk.dim(` (sparse: ${c.sparse.join(", ")})`) : ""}`);
+    if (unpushed.length) {
+      info(`${chalk.yellow(`${unpushed.length} commit${unpushed.length === 1 ? "" : "s"} not pushed`)} ${chalk.dim("(lizard git push)")}`);
+      for (const u of unpushed) info(`  ${chalk.dim("•")} ${u.message.split("\n")[0]}`);
+    }
     const n = ch.added.length + ch.modified.length + ch.deleted.length;
     if (!n) return info(chalk.dim("no changes"));
     for (const p of ch.modified) info(`  ${chalk.yellow("modified")}  ${p}`);
@@ -109,12 +114,12 @@ export function registerLizardGit(git: Command) {
 
   git
     .command("init")
-    .description("Make this folder the checkout of an empty repository (then lizard git commit)")
+    .description("Make this folder the checkout of an empty repository (then lizard git commit --push)")
     .argument("<repo>", "owner/name, or name for one of yours")
     .action(async (repoArg: string) => {
       const repo = await resolveRepo(repoArg);
       const c = await wc.initHere(repo, process.cwd());
-      done({ repo, branch: c.branch }, `This folder is now ${repo} (${c.branch}); commit with lizard git commit -m "..."`);
+      done({ repo, branch: c.branch }, `This folder is now ${repo} (${c.branch}); commit and push with lizard git commit --push -m "..."`);
     });
 
   git
@@ -151,18 +156,47 @@ export function registerLizardGit(git: Command) {
       }
     });
 
+  const pushed = (r: wc.PushResult) => {
+    const extra = r.sync.updated.length + r.sync.removed.length;
+    return `Pushed ${r.shas.length} commit${r.shas.length === 1 ? "" : "s"} to ${r.branch}: ${r.sha.slice(0, 12)}${r.uploaded ? chalk.dim(` (${r.uploaded} file(s) uploaded)`) : ""}${extra ? chalk.dim(` · ${extra} file(s) from others' commits updated`) : ""}`;
+  };
+
   git
     .command("commit")
-    .description("Commit your changes on the server (nothing to push): if the branch moved, the server puts them on top")
+    .description("Commit your changes here (lizard git push sends them); --push sends at once")
     .argument("[paths...]", "Only these files or folders (default: every change)")
     .requiredOption("-m, --message <text>", "Commit message")
     .option("-b, --branch <name>", "Commit to a new branch, starting at this checkout's commit (and switch to it)")
-    .action(async (paths: string[], opts: { message: string; branch?: string }) => {
+    .option("--push", "Push right after committing")
+    .action(async (paths: string[], opts: { message: string; branch?: string; push?: boolean }) => {
       const root = needCheckout();
       const c = wc.loadCheckout(root);
-      const r = await wc.commit(root, c, opts.message.endsWith("\n") ? opts.message : opts.message + "\n", paths, opts.branch);
-      const extra = r.sync.updated.length + r.sync.removed.length;
-      done(r, `Committed ${r.files} file(s) to ${r.branch}: ${r.sha.slice(0, 12)}${r.uploaded ? chalk.dim(` (${r.uploaded} uploaded)`) : ""}${extra ? chalk.dim(` · ${extra} file(s) from others' commits updated`) : ""}`);
+      const r = wc.commitLocal(root, c, opts.message.endsWith("\n") ? opts.message : opts.message + "\n", paths, opts.branch);
+      if (opts.push) {
+        const p = await wc.push(root, c);
+        return done(p, pushed(p));
+      }
+      done(r, `Committed ${r.files} file(s) on ${r.branch} ${chalk.dim(`(${r.pending} not pushed: lizard git push)`)}`);
+    });
+
+  git
+    .command("push")
+    .description("Send the commits made here: the branch moves once (one CI run, one deploy); if it moved meanwhile, the server puts them on top")
+    .action(async () => {
+      const root = needCheckout();
+      const c = wc.loadCheckout(root);
+      const r = await wc.push(root, c);
+      done(r, pushed(r));
+    });
+
+  git
+    .command("uncommit")
+    .description("Turn the commits not pushed yet back into changes in your files (e.g. to resolve a conflict)")
+    .action(async () => {
+      const root = needCheckout();
+      const c = wc.loadCheckout(root);
+      const n = wc.uncommit(root, c);
+      done({ uncommitted: n, branch: c.branch }, n ? `${n} commit${n === 1 ? "" : "s"} undone; the changes are in your files (lizard git status)` : "No commits waiting to be pushed");
     });
 
   git
@@ -185,6 +219,7 @@ export function registerLizardGit(git: Command) {
     .action(async (branch: string, opts: { create?: boolean }) => {
       const root = needCheckout();
       const c = wc.loadCheckout(root);
+      wc.needNoPending(c);
       if (opts.create) await lg.post(`${repoPath(c.repo)}/branches`, { name: branch, from: c.base });
       const r = await wc.sync(root, c, branch);
       done({ ...r, branch }, `On ${branch} at ${r.to.slice(0, 12)} (${r.updated.length} updated, ${r.removed.length} removed)`);
@@ -197,9 +232,10 @@ export function registerLizardGit(git: Command) {
     .action(async (paths: string) => {
       const root = needCheckout();
       const c = wc.loadCheckout(root);
+      wc.needNoPending(c);
       const local = wc.scanWorking(root, c);
       const ch = wc.changesOf(c, local);
-      if (ch.added.length + ch.modified.length + ch.deleted.length) throw new APIError(409, "commit your changes first (lizard git commit)");
+      if (ch.added.length + ch.modified.length + ch.deleted.length) throw new APIError(409, "commit and push your changes first (lizard git commit --push)");
       const next = paths === "all" ? null : list(paths)!.map((x) => x.replace(/^\/+|\/+$/g, ""));
       // Drop what leaves the set, then sync with the new set (fetches what joins it).
       const keep = (p: string) => !next || next.some((x) => p === x || p.startsWith(x + "/"));
