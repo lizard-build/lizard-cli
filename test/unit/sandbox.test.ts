@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Command } from "commander";
 import { registerSandbox, lifetimeLine, sandboxNextSteps } from "../../src/commands/sandbox.js";
 import { api, APIError } from "../../src/lib/api.js";
@@ -84,7 +84,7 @@ describe("sandbox create without a project", () => {
 });
 
 describe("unsupported sandbox commands", () => {
-  it.each(["fork", "snapshot-fork", "logs"])(
+  it.each(["snapshot-fork", "logs"])(
     "rejects %s without making an API request", async (name) => {
       vi.clearAllMocks();
       const program = new Command().exitOverride().configureOutput({ writeErr: () => {} });
@@ -96,6 +96,61 @@ describe("unsupported sandbox commands", () => {
       expect(api.post).not.toHaveBeenCalled();
     }
   );
+});
+
+function sandboxCmd(args: string[]) {
+  const program = new Command().exitOverride().configureOutput({ writeErr: () => {} });
+  registerSandbox(program);
+  return program.parseAsync(["sandbox", ...args], { from: "user" });
+}
+
+describe("sandbox rm aliases", () => {
+  beforeEach(() => { vi.clearAllMocks(); vi.mocked(api.delete).mockResolvedValue(undefined); });
+
+  it.each(["rm", "delete", "kill"])("%s deletes the sandbox", async (name) => {
+    await sandboxCmd([name, "brave-otter-1234", "-y"]);
+    expect(api.delete).toHaveBeenCalledWith("/api/sandboxes/brave-otter-1234");
+    expect(printJSON).toHaveBeenCalledWith({ id: "brave-otter-1234", status: "deleted" });
+  });
+});
+
+describe("sandbox fork", () => {
+  const copy = (id: string) => ({ sandbox: { sandboxId: id, id, status: "running", forkedFrom: "src-1234" } });
+  beforeEach(() => { vi.clearAllMocks(); process.exitCode = undefined; });
+  afterEach(() => { process.exitCode = undefined; });
+
+  it("asks for one copy with the source's lifetime by default", async () => {
+    vi.mocked(api.post).mockResolvedValue([copy("a-1")]);
+    await sandboxCmd(["fork", "src-1234"]);
+    expect(api.post).toHaveBeenCalledWith("/api/sandboxes/src-1234/fork", { count: 1, timeoutMs: undefined });
+    expect(printJSON).toHaveBeenCalledWith([copy("a-1")]);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("sends --count and --timeout", async () => {
+    vi.mocked(api.post).mockResolvedValue([copy("a-1"), copy("a-2"), copy("a-3")]);
+    await sandboxCmd(["fork", "src-1234", "-n", "3", "--timeout", "900000"]);
+    expect(api.post).toHaveBeenCalledWith("/api/sandboxes/src-1234/fork", { count: 3, timeoutMs: 900_000 });
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("prints a partial result and exits 1 when some copies could not start", async () => {
+    const results = [copy("a-1"), { error: "Sandbox limit reached" }];
+    vi.mocked(api.post).mockResolvedValue(results);
+    await sandboxCmd(["fork", "src-1234", "--count", "2"]);
+    expect(printJSON).toHaveBeenCalledWith(results);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it.each(["0", "101", "1.5", "two"])("rejects --count %s before making a request", async (n) => {
+    await expect(sandboxCmd(["fork", "src-1234", "--count", n])).rejects.toThrow(/Count must be/);
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it.each(["0", "999", "2147483648", "1h"])("rejects --timeout %s, since 0 would mean the source's lifetime", async (ms) => {
+    await expect(sandboxCmd(["fork", "src-1234", "--timeout", ms])).rejects.toThrow(/Timeout must be/);
+    expect(api.post).not.toHaveBeenCalled();
+  });
 });
 
 describe("private sandbox snapshots", () => {

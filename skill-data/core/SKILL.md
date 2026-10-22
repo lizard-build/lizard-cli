@@ -11,7 +11,7 @@ Lizard runs sandboxes and hosts apps, services, agents and managed databases. Al
 
 This guide covers the whole platform. Three references go deeper; read one only when the task needs that depth:
 
-- `lizard skills get core --ref sandboxes --json`: templates, commands, files and ports in depth, lifetime, sizes, shell, coding agents in a sandbox, desktop (computer use), volumes, snapshots and pause/resume.
+- `lizard skills get core --ref sandboxes --json`: templates, commands, files and ports in depth, lifetime, sizes, shell, coding agents in a sandbox, desktop (computer use), volumes, snapshots, fork and pause/resume.
 - `lizard skills get core --ref deploys --json`: how builds are chosen, git and upload deploys, service fields, worker mode, secret precedence and scoping, addon variables, multi-step recipes.
 - `lizard skills get core --ref sdk --json`: building with Lizard from code through Lizard SDK (TypeScript, Python): sandboxes inside your own product, per-user workspaces and scoped keys, platform APIs.
 
@@ -102,7 +102,7 @@ lizard sandbox files put <id> ./app.py /workspace/app.py
 lizard sandbox exec <id> -- python3 /workspace/app.py
 lizard sandbox expose <id> 8000 --json                    # an HTTPS URL for a port in the sandbox
 lizard sandbox timeout <id> 3600000                       # keep it for an hour from now
-lizard sandbox rm <id>                                    # delete it now: no prompt without a terminal
+lizard sandbox rm <id>                                    # delete it now (alias kill): no prompt without a terminal
 ```
 
 `lizard sandbox list --json` shows the project's sandboxes; `--all` shows every one you have.
@@ -113,6 +113,7 @@ lizard sandbox rm <id>                                    # delete it now: no pr
 - **Commands:** `exec <id> -- <cmd> [args…]` passes each argument as one word, so a whole shell line in one quoted string fails with `not found`: wrap it, `-- sh -c 'cd /workspace && npm test'`. Each call is a new process that starts in `/root`, gives up after 150 seconds (exit `4`, `EXEC_TIMEOUT`; the command may still be running) and keeps at most 512 KB of output. Run longer jobs in the background and poll a log: `-- sh -c 'cd /workspace && nohup npm run build > build.log 2>&1 &'`, then `-- tail -n 50 /workspace/build.log`. `ssh` needs a real terminal: from an agent, use `exec`.
 - **Ports:** `lizard sandbox expose <id> <port> --json` gives `url` with `?lizard_token=…`, which works in a browser: it swaps the token for a cookie and redirects. `curl -L` without a cookie jar gets `401`; from a script send the token as a header instead: `curl -H "X-Lizard-Access-Token: <accessToken>" https://<hostname>/`. The token opens every port of that sandbox: treat the URL like a password. Start the server in the background (as above) so `exec` returns.
 - **Keeping work:** files outlive a sandbox on a volume (`--volume <name>`) or in a snapshot; `pause` keeps memory and processes and stops billing.
+- **Copies:** `lizard sandbox fork <id> -n 8 --json` starts live copies of a running sandbox (memory, processes, files) from one capture, e.g. a worker that has its tools installed and its app loaded. Each copy is a sandbox start: it counts toward the limits and bills at the source's size. The JSON has one entry per copy, `sandbox` or `error`; the command exits `1` if any copy failed, so delete the ones that started.
 - **Network:** outbound internet works (mail ports are blocked), but Lizard's own hosts answer only on ports 80 and 443, so a managed Postgres or Redis URL cannot be reached from a sandbox. Work with those databases from a deployed service, or from the user's machine with `lizard run --service postgres -- <cmd>`.
 - **Agents in a sandbox:** `lizard sandbox create -t codex --timeout 3600000`, then `lizard sandbox prompt <id> "task" --json`. Give it a real lifetime: at 5 minutes the sandbox and the agent are deleted mid-task.
 

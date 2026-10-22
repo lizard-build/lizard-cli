@@ -32,6 +32,23 @@ function parseIntOption(v) {
     }
     return n;
 }
+const MAX_FORK_COUNT = 100;
+function parseForkCount(value) {
+    const count = Number(value);
+    if (!/^\d+$/.test(value) || count < 1 || count > MAX_FORK_COUNT) {
+        throw new Error(`Count must be an integer from 1 to ${MAX_FORK_COUNT}`);
+    }
+    return count;
+}
+// The platform reads 0 (or nothing) as "the source's lifetime", so 0 can't mean "no limit" here
+// the way it does at create: refuse it rather than quietly give the copies something else.
+function parseForkTimeout(value) {
+    const timeout = Number(value);
+    if (!/^\d+$/.test(value) || !Number.isSafeInteger(timeout) || timeout < 1000 || timeout > 2_147_483_647) {
+        throw new Error("Timeout must be an integer from 1000 to 2147483647 milliseconds; leave it out to keep the source's lifetime");
+    }
+    return timeout;
+}
 function parseTimeoutOption(value) {
     const timeout = Number(value);
     if (!/^\d+$/.test(value) || !Number.isSafeInteger(timeout) || timeout > 2_147_483_647) {
@@ -231,8 +248,10 @@ export function registerSandbox(program) {
         const sandboxes = await api.get(withScope(`/api/projects/${projectId}/sandboxes`, scope));
         printSandboxList(sandboxes);
     });
+    // `kill` is what the SDK calls it (`sandbox.kill()`), so agents that know the SDK reach for
+    // it first; an unknown-command error there once left 20 sandboxes running.
     sb.command("rm")
-        .alias("delete")
+        .aliases(["delete", "kill"])
         .argument("<id>", "Sandbox ID")
         .description("Delete a sandbox")
         .option("-y, --yes", "Skip confirmation")
@@ -512,6 +531,43 @@ Examples:
             printJSON(sandbox);
         else
             success(`Sandbox ${chalk.bold(sandbox.id)} created from ${snapshot.name}`);
+    });
+    sb.command("fork")
+        .argument("<id>", "Running sandbox ID")
+        .option("-n, --count <n>", `Copies to start (1-${MAX_FORK_COUNT})`, parseForkCount, 1)
+        .option("--timeout <ms>", "Lifetime of each copy in milliseconds; default: the source's", parseForkTimeout)
+        .description("Start live copies of a running sandbox: memory, processes and files")
+        .action(async (id, opts) => {
+        // The platform pauses the source for a moment, captures it and boots every copy from that
+        // one capture. Each copy is a sandbox start and counts toward the account's limits, so a
+        // partial result is normal near a limit: one entry per copy, `sandbox` or `error`.
+        const spinner = isJSONMode() ? null : ora(`Forking ${id}...`).start();
+        let results;
+        try {
+            results = await api.post(`/api/sandboxes/${id}/fork`, { count: opts.count, timeoutMs: opts.timeout });
+        }
+        finally {
+            spinner?.stop();
+        }
+        if (!Array.isArray(results))
+            results = [];
+        const started = results.flatMap((r) => (r.sandbox ? [r.sandbox] : []));
+        const failed = results.length - started.length;
+        // Copies that did start are running and billed: print them, but don't exit 0 on a short count.
+        if (failed > 0 || started.length === 0)
+            process.exitCode = 1;
+        if (isJSONMode()) {
+            printJSON(results);
+            return;
+        }
+        if (started.length) {
+            const copies = (n) => `${n} ${n === 1 ? "copy" : "copies"}`;
+            success(`Forked ${chalk.bold(id)}: ${failed ? `${started.length} of ${copies(results.length)}` : copies(started.length)} running`);
+            printSandboxList(started);
+            info(chalk.dim(lifetimeLine(started[0].expiresAt ?? started[0].endAt)));
+        }
+        results.forEach((r, i) => { if (!r.sandbox)
+            error(`Copy ${i + 1}: ${r.error ?? "fork failed"}`); });
     });
     // Warm pools exist only for CRIU snapshots of runc pod sandboxes, which are no longer
     // created. These stay, out of the help, for the few such snapshots still around.
