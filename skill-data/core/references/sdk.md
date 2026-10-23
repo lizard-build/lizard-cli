@@ -36,11 +36,11 @@ Options for `create()` (TypeScript / Python):
 
 | Option | Purpose |
 |---|---|
-| `size` | `small` (2 vCPU / 4 GB, $0.0162/h), `medium` (4 vCPU / 8 GB, $0.0324/h, default), `large` (8 vCPU / 16 GB, $0.0648/h) |
+| `size` | `small` (2 vCPU / 4 GB, $0.0162/h), `medium` (4 vCPU / 8 GB, $0.0324/h, default), `large` (8 vCPU / 16 GB, $0.0648/h). The Pro trial runs only `small` (also the default there); a bigger size answers 403 `TRIAL_SANDBOX_SIZE` |
 | `timeoutMs` / `timeout_ms` | Lifetime; default 300,000 ms (5 minutes); `0` means no deadline (the VM still stops after 596 hours) |
 | `envs` | Environment variables for every command in the sandbox (up to 256) |
 | `metadata` | Your own string labels, returned by `getInfo()` / `get_info()` (up to 64) |
-| `region` | Region ID; omit to use the platform default |
+| `region` | Region ID; omit to use the platform default. The Pro trial runs only US regions (403 `TRIAL_SANDBOX_REGION`) |
 | `volumeName` / `volume_name`, `volumeId` / `volume_id` | Attach a persistent volume at `/workspace` |
 | `snapshotId` / `snapshot_id` | Start from a saved snapshot |
 | `lizardToken` / `lizard_token` | One of your own keys: the sandbox's `lizard` gets a new key limited to its project, deleted with it. Someone else's key is skipped without an error |

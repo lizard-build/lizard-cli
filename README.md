@@ -82,7 +82,7 @@ lizard redeploy   # rebuild and redeploy from the current source
 lizard run        # run a command locally with project and service secrets injected
 lizard ssh        # disabled for services (403); use `lizard sandbox ssh` for sandboxes
 lizard sandbox    # create and manage Sandboxes
-lizard sandbox create --size large # 8 vCPU / 16 GB; small, medium (default), large
+lizard sandbox create --size large # 8 vCPU / 16 GB; small, medium (default; small on the Pro trial), large
 lizard sandbox desktop <id> --open # graphical desktop in the browser (sandbox create -t desktop)
 lizard sandbox vnc <id>            # the same desktop in a native VNC app (localhost:5900)
 lizard sandbox ssh <id>            # interactive shell in any running sandbox (no keys to set up)

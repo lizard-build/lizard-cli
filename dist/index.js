@@ -3,7 +3,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
 import { requireAuth } from "./lib/auth.js";
-import { setBaseURL, setAccessToken, APIError, isProjectDeletedError, isAccountScopeError } from "./lib/api.js";
+import { setBaseURL, setAccessToken, APIError, isAuthError, isProjectDeletedError, isAccountScopeError } from "./lib/api.js";
 import { checkForUpdateInBackground, runBackgroundUpdate, CURRENT_VERSION } from "./lib/updater.js";
 const BANNER = chalk.rgb(16, 185, 129)([
     "╔═══════════════════════════════════════════════════╗",
@@ -183,7 +183,7 @@ addAgentsPointerToSubcommands(program);
 const EXIT_CODES = {
     "0": "success",
     "1": "generic error",
-    "2": "auth (401/403)",
+    "2": "auth (401/403; not plan rules such as TRIAL_SANDBOX_SIZE, which exit 1)",
     "3": "not found (404)",
     "4": "timeout (408/504)",
     "5": "cancelled by user",
@@ -417,8 +417,9 @@ async function main() {
         const apiErr = err instanceof APIError ? err : undefined;
         const status = apiErr?.status;
         const code = projectDeleted ? "PROJECT_DELETED" : apiErr?.code || err.code || err?.cause?.code || "ERROR";
-        // Exit codes derived from APIError.status (or tagged error codes), not message text
-        const isAuth = status === 401 || status === 403 || code === "NOT_AUTHENTICATED";
+        // Exit codes derived from APIError.status (or tagged error codes), not message text.
+        // A 403 for a plan rule (the Pro trial's sandbox size or region) is not auth: exit 1.
+        const isAuth = isAuthError(err) || code === "NOT_AUTHENTICATED";
         const isNotFound = status === 404;
         // undici wraps the socket error, so the real code lives on err.cause.
         const netCode = err.code || err?.cause?.code;

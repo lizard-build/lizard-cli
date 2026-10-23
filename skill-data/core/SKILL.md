@@ -108,7 +108,7 @@ lizard sandbox rm <id>                                    # delete it now (alias
 `lizard sandbox list --json` shows the project's sandboxes; `--all` shows every one you have.
 
 - **Templates:** `base` (default, Python 3.11 on Alpine Linux), `interpreter` (Python with numpy, pandas, matplotlib and scipy, plus Node 22), `codex`, `claude`, `opencode`, `pi`, `prime` (one coding agent each), `desktop` (graphical desktop with Chromium).
-- **Sizes:** `-s small|medium|large`, $0.0162 / $0.0324 (default) / $0.0648 per hour, billed per second while it runs. A paused sandbox costs nothing.
+- **Sizes:** `-s small|medium|large`, $0.0162 / $0.0324 (default) / $0.0648 per hour, billed per second while it runs. A paused sandbox costs nothing. On the Pro trial only `small` starts, in a US region, and no `-s` means `small` (see Billing).
 - **Lifetime:** 5 minutes by default, then the sandbox is deleted with its files. `--timeout 0` at create means no limit; `lizard sandbox timeout <id> <ms>` sets a new lifetime from now. Commands do not reset it.
 - **Commands:** `exec <id> -- <cmd> [args…]` passes each argument as one word, so a whole shell line in one quoted string fails with `not found`: wrap it, `-- sh -c 'cd /workspace && npm test'`. Each call is a new process that starts in `/root`, gives up after 150 seconds (exit `4`, `EXEC_TIMEOUT`; the command may still be running) and keeps at most 512 KB of output. Run longer jobs in the background and poll a log: `-- sh -c 'cd /workspace && nohup npm run build > build.log 2>&1 &'`, then `-- tail -n 50 /workspace/build.log`. `ssh` needs a real terminal: from an agent, use `exec`.
 - **Ports:** `lizard sandbox expose <id> <port> --json` gives `url` with `?lizard_token=…`, which works in a browser: it swaps the token for a cookie and redirects. `curl -L` without a cookie jar gets `401`; from a script send the token as a header instead: `curl -H "X-Lizard-Access-Token: <accessToken>" https://<hostname>/`. The token opens every port of that sandbox: treat the URL like a password. Start the server in the background (as above) so `exec` returns.
@@ -288,9 +288,9 @@ accounts run a longer trial without a card: read `trial.endsAt` and
 `trial.creditCents` from `lizard billing --json` instead of assuming. When
 the trial usage runs out, running resources pause and nothing new can be created
 until Pro starts. Data is kept. Promo codes work only before the first payment.
-Trial accounts run 1 replica per app and 5 sandboxes at once; after the first
-paid invoice, 5 replicas per app and 100 sandboxes (paused sandboxes don't
-count). Pro cards are changed or removed on the Billing page;
+Trial accounts run 1 replica per app and 5 sandboxes at once, Small only and in
+US regions; after the first paid invoice, 5 replicas per app and 100 sandboxes of
+any size in any region (paused sandboxes don't count). Pro cards are changed or removed on the Billing page;
 `lizard billing payment-methods remove` works only for Enterprise accounts (Pro: 409 `CREDITS_NOT_AVAILABLE`).
 Enterprise accounts pay as you go, invoiced monthly. There are no top-ups, no
 auto top-up and no crypto or x402 payments.
@@ -324,6 +324,13 @@ or its databases and volumes hold as much SSD as allowed: new volumes, volume gr
 databases and template deploys are refused until data is deleted).
 Retrying the same call does not help; only the owner raises them. `billing start` can also answer 402 `UNPAID_INVOICE` (pay
 `body.invoiceUrl` first) or 409 `ALREADY_SUBSCRIBED`.
+
+On the Pro trial, `sandbox create`, `restore` and `fork` start only Small sandboxes
+in US regions. Medium, Large or another region fails with 403 `TRIAL_SANDBOX_SIZE` or
+`TRIAL_SANDBOX_REGION`, exit `1`, and so does a snapshot or source sandbox at a bigger
+size, or a snapshot, source sandbox or volume in another region. The `message` names
+both rules when both apply. Offer `-s small` in `us-east-1`, or Start Pro now
+(`lizard billing start-now` or `body.billingUrl`), which unlocks both.
 
 Checkout and invoice pages open in the user's browser; you cannot finish them.
 Give the user the link, never ask for card details in chat, and retry the

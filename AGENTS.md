@@ -95,7 +95,7 @@ allowed-tools: Bash(lizard:*)
 Defined in `src/index.ts`:
 - `0` success
 - `1` generic error
-- `2` auth (401/403)
+- `2` auth (401/403; a 403 for a plan rule, `TRIAL_SANDBOX_SIZE` or `TRIAL_SANDBOX_REGION`, exits `1`)
 - `3` not found (404)
 - `4` timeout (408/504)
 - `5` cancelled by user

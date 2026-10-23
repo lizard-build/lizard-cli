@@ -67,7 +67,7 @@ lizard sandbox files rm <id> <path>
 
 ## Size and pricing
 
-`lizard sandbox create -s/--size small|medium|large` picks the machine; the default is `medium`. There are exactly three sizes:
+`lizard sandbox create -s/--size small|medium|large` picks the machine; the default is `medium`. There are exactly three sizes. Until the first Pro payment, the Pro trial runs only `small`, in US regions: no `--size` means `small`, and Medium, Large or another region answers 403 `TRIAL_SANDBOX_SIZE` or `TRIAL_SANDBOX_REGION`.
 
 | Size | vCPU | RAM | Disk | Price |
 |---|---|---|---|---|
