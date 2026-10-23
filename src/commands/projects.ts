@@ -103,10 +103,12 @@ export function registerProjects(program: Command) {
   proj
     .command("delete")
     .alias("rm")
-    .description("Delete a project — moves it to trash, permanently purged after 3 days")
-    .argument("[project]", "Project name, slug, or ID (defaults to the project linked in this directory)")
+    .description("Delete a project — services and databases go to trash for 3 days; sandboxes, their volumes and snapshots are deleted at once")
+    // Always named: no fallback to the linked folder or the default project, so a delete
+    // run in the wrong folder can't take a project nobody meant.
+    .argument("<project>", "Project name, slug, or ID")
     .option("-y, --yes", "Skip confirmation")
-    .action(async (projectArg: string | undefined, opts) => {
+    .action(async (projectArg: string, opts) => {
       const projectId = await resolveProjectId(projectArg);
       const projects = await api.get<Project[]>("/api/projects");
       const name = projects.find((proj) => proj.id === projectId)?.name ?? projectId;
@@ -114,7 +116,7 @@ export function registerProjects(program: Command) {
       if (!opts.yes) {
         if (!isTTY()) throw new Error("Use -y to confirm in non-interactive mode");
         const confirm = await p.confirm({
-          message: `Delete project ${chalk.bold(name)}? All its services will stop; the project is recoverable for 3 days, then permanently removed.`,
+          message: `Delete project ${chalk.bold(name)}? Its services and databases stop and stay in trash for 3 days; its sandboxes, their volumes and snapshots are deleted now.`,
         });
         if (p.isCancel(confirm) || !confirm) process.exit(5);
       }
