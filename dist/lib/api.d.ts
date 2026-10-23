@@ -55,6 +55,7 @@ export declare function errorLink(body: unknown): {
     hint?: string;
 } | null;
 export declare function isNotFound(err: unknown): boolean;
+export declare function isPlanRuleError(err: unknown): boolean;
 export declare function isAuthError(err: unknown): boolean;
 /**
  * True when the error is the platform's write-guard rejection for a project

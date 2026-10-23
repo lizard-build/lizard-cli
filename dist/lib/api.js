@@ -131,8 +131,17 @@ export function errorLink(body) {
 export function isNotFound(err) {
     return err instanceof APIError && err.status === 404;
 }
+/**
+ * 403s that are a plan's rule, not a refused login or key: the Pro trial runs Small sandboxes
+ * in US regions only (platform lib/sandbox-trial.ts). They exit 1, not 2: a script or agent
+ * reading exit 2 as "sign in again" was sent the wrong way.
+ */
+const PLAN_RULE_CODES = new Set(["TRIAL_SANDBOX_SIZE", "TRIAL_SANDBOX_REGION"]);
+export function isPlanRuleError(err) {
+    return err instanceof APIError && PLAN_RULE_CODES.has(err.code);
+}
 export function isAuthError(err) {
-    return err instanceof APIError && (err.status === 401 || err.status === 403);
+    return err instanceof APIError && (err.status === 401 || err.status === 403) && !isPlanRuleError(err);
 }
 /**
  * True when the error is the platform's write-guard rejection for a project

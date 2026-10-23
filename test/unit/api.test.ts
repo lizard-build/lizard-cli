@@ -3,6 +3,9 @@ import {
   withQuery,
   withScope,
   APIError,
+  apiErrorFrom,
+  isAuthError,
+  isPlanRuleError,
   isProjectDeletedError,
 } from "../../src/lib/api.js";
 
@@ -103,5 +106,41 @@ describe("isProjectDeletedError", () => {
       false,
     );
     expect(isProjectDeletedError(null)).toBe(false);
+  });
+});
+
+describe("Pro trial sandbox refusals", () => {
+  const billingUrl = "https://lizard.build/profile/account-billing";
+  const sizeBody = {
+    error: "The Pro trial includes Small sandboxes only. Large unlocks after the first Pro payment. Start Pro now in Billing, or run `lizard billing start-now`, to unlock it.",
+    code: "TRIAL_SANDBOX_SIZE",
+    size: "large",
+    allowedSizes: ["small"],
+    billingUrl,
+  };
+
+  test("print the Billing link under the message", () => {
+    const err = apiErrorFrom(403, "Forbidden", sizeBody);
+    expect(err.code).toBe("TRIAL_SANDBOX_SIZE");
+    expect(err.message).toBe(`${sizeBody.error}\n  Billing: ${billingUrl}`);
+  });
+
+  test("print the message alone to a scoped key, which gets no link", () => {
+    const { billingUrl: _, ...scoped } = sizeBody;
+    expect(apiErrorFrom(403, "Forbidden", scoped).message).toBe(sizeBody.error);
+  });
+
+  test("are a plan rule, not an auth error, so they exit 1 rather than 2", () => {
+    for (const code of ["TRIAL_SANDBOX_SIZE", "TRIAL_SANDBOX_REGION"]) {
+      const err = apiErrorFrom(403, "Forbidden", { ...sizeBody, code });
+      expect(isPlanRuleError(err)).toBe(true);
+      expect(isAuthError(err)).toBe(false);
+    }
+  });
+
+  test("leave every other 401 and 403 an auth error", () => {
+    expect(isAuthError(apiErrorFrom(403, "Forbidden", { error: "Forbidden" }))).toBe(true);
+    expect(isAuthError(apiErrorFrom(401, "Unauthorized", { error: "Unauthorized" }))).toBe(true);
+    expect(isPlanRuleError(apiErrorFrom(403, "Forbidden", { error: "Forbidden" }))).toBe(false);
   });
 });
