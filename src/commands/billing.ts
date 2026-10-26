@@ -6,7 +6,7 @@ import { api, withQuery, getBaseURL, isNotFound } from "../lib/api.js";
 import { success, isJSONMode, printJSON, table, isTTY, timeAgo, info, warn } from "../lib/format.js";
 
 // `lizard billing` — the account's plan (docs/pro-billing-api.md on the platform
-// repo). Pro is $19/month, taxes included, with $19 of monthly credits; usage above
+// repo). Pro is $19/month, with $19 of monthly credits; usage above
 // that is pay as you go. Unlike most commands this never takes --project/--service:
 // billing belongs to the account, not a workspace. `lizard credits` is the old name.
 
@@ -168,11 +168,11 @@ export function describeSubscription(sub: Subscription, now = Date.now()): strin
         `Start a ${sub.trial.days}-day Pro trial with ${usd(sub.trial.creditCents ?? 0)} in credits: ` +
           chalk.cyan("lizard billing start"),
       );
-      lines.push(chalk.dim(`No charge today, then ${usd(sub.priceCents)}/month, taxes included.`));
+      lines.push(chalk.dim(`No charge today, then ${usd(sub.priceCents)}/month.`));
       if (sub.trial.promoCode) lines.push(label("Promo code: ") + `${sub.trial.promoCode} (saved for the trial)`);
     } else {
       lines.push(
-        `Start Pro: ${usd(sub.priceCents)}/month, taxes included, with ${usd(sub.includedCents)} in credits each month: ` +
+        `Start Pro: ${usd(sub.priceCents)}/month, with ${usd(sub.includedCents)} in credits each month: ` +
           chalk.cyan("lizard billing start"),
       );
     }
@@ -181,7 +181,7 @@ export function describeSubscription(sub: Subscription, now = Date.now()): strin
 
   lines.push(
     `${chalk.bold("Pro")}  ${statusLabel(sub.status)}${owner}  ` +
-      chalk.dim(`${usd(sub.priceCents)}/month, taxes included`),
+      chalk.dim(`${usd(sub.priceCents)}/month`),
   );
 
   const period = sub.period;
@@ -402,10 +402,10 @@ export function registerBilling(program: Command) {
       if (out.trialDays) {
         console.log(
           `Your ${out.trialDays}-day trial includes ${usd(out.trialCreditCents ?? 0)} in credits. ` +
-            "No charge today, then $19/month, taxes included.",
+            "No charge today, then $19/month.",
         );
       } else {
-        console.log("Pro starts today: $19/month, taxes included, with $19 in credits each month.");
+        console.log("Pro starts today: $19/month, with $19 in credits each month.");
       }
       console.log(`Finish in Stripe Checkout:\n${chalk.cyan(out.url)}`);
       await openInBrowser(out.url, opts.open !== false);
