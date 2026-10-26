@@ -117,7 +117,7 @@ describe("lizard billing (status)", () => {
     await run(["billing"]);
     const text = out();
     expect(text).toContain("Pro  trial");
-    expect(text).toContain("$19/month, taxes included");
+    expect(text).toContain("$19/month");
     expect(text).toContain("Trial: 5 days left");
     expect(text).toContain("Trial credits: $1.20 of $5 used, $3.80 left");
     expect(text).toMatch(/Next charge: \$19 on \w{3} \d+, \d{4}/);
@@ -159,7 +159,7 @@ describe("lizard billing (status)", () => {
     const text = out();
     expect(text).toContain("No plan");
     expect(text).toContain("Start a 31-day Pro trial with $100 in credits: lizard billing start");
-    expect(text).toContain("No charge today, then $19/month, taxes included.");
+    expect(text).toContain("No charge today, then $19/month.");
     expect(text).toContain("Promo code: ROST");
   });
 
@@ -167,7 +167,7 @@ describe("lizard billing (status)", () => {
     routes({ "GET /api/billing/subscription": () => reply(200, { ...none, status: "canceled", trial: { ...none.trial, eligible: false } }) });
     await run(["billing"]);
     expect(out()).toContain("Pro has ended.");
-    expect(out()).toContain("Start Pro: $19/month, taxes included, with $19 in credits each month: lizard billing start");
+    expect(out()).toContain("Start Pro: $19/month, with $19 in credits each month: lizard billing start");
   });
 
   test("enterprise is invoiced monthly", async () => {
@@ -249,7 +249,7 @@ describe("lizard billing actions", () => {
     });
     await run(["billing", "start", "--return-url", "/projects/abc", "--no-open"]);
     expect(calls()).toEqual([{ key: "POST /api/billing/subscription/checkout", body: { returnUrl: "/projects/abc" } }]);
-    expect(out()).toContain("Your 7-day trial includes $5 in credits. No charge today, then $19/month, taxes included.");
+    expect(out()).toContain("Your 7-day trial includes $5 in credits. No charge today, then $19/month.");
     expect(out()).toContain("https://checkout.stripe.com/c/pay/cs_1");
   });
 
@@ -257,7 +257,7 @@ describe("lizard billing actions", () => {
     const session = { url: "https://checkout.stripe.com/c/pay/cs_2", sessionId: "cs_2", trialDays: null, trialCreditCents: null };
     routes({ "POST /api/billing/subscription/checkout": () => reply(200, session) });
     await run(["billing", "start", "--no-open"]);
-    expect(out()).toContain("Pro starts today: $19/month, taxes included, with $19 in credits each month.");
+    expect(out()).toContain("Pro starts today: $19/month, with $19 in credits each month.");
     setJSONMode(true);
     stdout = [];
     await run(["billing", "start"]);

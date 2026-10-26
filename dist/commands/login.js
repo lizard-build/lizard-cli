@@ -51,10 +51,10 @@ export function accountInstruction(state, sub, now = Date.now()) {
             return "Pro is active. Do NOT open billing or start a subscription.";
         case "trial_available":
             return (`No plan yet, and sandboxes and deploys need one. Offer the user the ${sub?.trial.days}-day Pro trial with ${usd(sub?.trial.creditCents ?? 0)} in credits: ` +
-                `no charge today, then ${price}/month, taxes included. ${start}`);
+                `no charge today, then ${price}/month. ${start}`);
         case "subscription_required":
             return ("No plan yet, and sandboxes and deploys need one. This account has had its trial, so do NOT promise one. " +
-                `Pro is ${price}/month, taxes included, with ${usd(sub?.includedCents ?? 1900)} in credits each month. ${start}`);
+                `Pro is ${price}/month, with ${usd(sub?.includedCents ?? 1900)} in credits each month. ${start}`);
         case "checkout_unavailable":
             return "No plan, and Pro is not open for this account yet. Do NOT try to start billing.";
     }
@@ -157,8 +157,8 @@ async function offerPlan(canAsk) {
     }
     const trial = state === "trial_available";
     const offer = trial
-        ? `Pro trial: ${sub.trial.days} days with ${usd(sub.trial.creditCents ?? 0)} in credits. No charge today, then ${usd(sub.priceCents)}/month, taxes included.`
-        : `Pro: ${usd(sub.priceCents)}/month, taxes included, with ${usd(sub.includedCents)} in credits each month.`;
+        ? `Pro trial: ${sub.trial.days} days with ${usd(sub.trial.creditCents ?? 0)} in credits. No charge today, then ${usd(sub.priceCents)}/month.`
+        : `Pro: ${usd(sub.priceCents)}/month, with ${usd(sub.includedCents)} in credits each month.`;
     p.log.info(`No plan yet. Sandboxes and deploys need one.\n${offer}`);
     const go = canAsk ? await p.confirm({ message: trial ? "Start the trial now?" : "Start Pro now?" }) : false;
     if (p.isCancel(go) || !go) {
