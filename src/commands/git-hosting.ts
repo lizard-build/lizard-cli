@@ -6,7 +6,7 @@ import { basename } from "node:path";
 import { APIError } from "../lib/api.js";
 import { isJSONMode, printJSON, table, success, info, warn, link } from "../lib/format.js";
 import {
-  lg, qs, seg, segs, resolveRepo, repoPath, myLogin, gitURL, ago, ACTIVE_RUN,
+  lg, qs, seg, segs, resolveRepo, repoPath, myLogin, gitURL, ago, ACTIVE_RUN, checksState,
 } from "../lib/lizard-git.js";
 import * as wc from "../lib/checkout.js";
 
@@ -662,8 +662,9 @@ export function registerLizardGit(git: Command) {
             await sleep(5000);
             continue;
           }
-          out({ sha, state: st.state, statuses: st.statuses, runs: runs.runs }, () => {
-            info(`${chalk.yellow(sha.slice(0, 7))} ${state(st.state)}`);
+          const overall = checksState(st.statuses, runs.runs);
+          out({ sha, state: overall, statuses: st.statuses, runs: runs.runs }, () => {
+            info(`${chalk.yellow(sha.slice(0, 7))} ${state(overall)}`);
             const rows = [
               ...runs.runs.map((x: any) => [state(x.status), x.name, `run #${x.number}`, ago(x.finishedAt ?? x.startedAt ?? x.createdAt)]),
               ...st.statuses.map((s: any) => [state(s.state), s.context, s.description ?? "", ago(s.createdAt)]),
@@ -949,10 +950,12 @@ export function registerLizardGit(git: Command) {
         const l = await lg.get<any>(`${base(r, withEnv ? args[0] : undefined)}/variables`);
         out(l, () => l.variables.length ? table(["NAME", "VALUE", "UPDATED"], l.variables.map((v: any) => [v.name, v.value, ago(v.updatedAt)])) : info("No variables."));
       });
-    repoOpt(a(grp.command("set").description("Set a variable")).argument("<name>").argument("<value>"))
+    repoOpt(a(grp.command("set").description("Set a variable")).argument("<name>").argument("[value]", "The value (or -b, or stdin, as secret set)"))
+      .option("-b, --body <value>", "The value (default: the argument, else read from stdin)")
       .action(async (...args: any[]) => {
         const opts = args[args.length - 2];
-        const [env, name, value] = withEnv ? args : [undefined, args[0], args[1]];
+        const [env, name, arg] = withEnv ? args : [undefined, args[0], args[1]];
+        const value = arg ?? opts.body ?? readFileSync(0, "utf8").replace(/\n$/, "");
         const r = await resolveRepo(opts.repo);
         await lg.put(`${base(r, env)}/variables/${seg(name)}`, { value });
         done({ ok: true, name }, `Set ${name}`);

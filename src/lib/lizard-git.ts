@@ -148,3 +148,11 @@ export function ago(sec: number | null | undefined): string {
 }
 
 export const ACTIVE_RUN = new Set(["queued", "running", "waiting", "pending"]);
+
+/** A commit's checks in one word: its commit statuses and its CI runs together. (The status
+ *  API alone says "pending" for a commit with no statuses, even when every run passed.) */
+export function checksState(statuses: { state: string }[], runs: { status: string }[]): string {
+  if (statuses.some((s) => s.state === "failure" || s.state === "error") || runs.some((r) => r.status === "failure" || r.status === "cancelled")) return "failure";
+  if (statuses.some((s) => s.state === "pending") || runs.some((r) => ACTIVE_RUN.has(r.status))) return "pending";
+  return statuses.length || runs.length ? "success" : "none";
+}
