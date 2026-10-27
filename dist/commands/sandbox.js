@@ -110,7 +110,7 @@ export function registerSandbox(program) {
     sb.command("create")
         .description("Create a sandbox")
         .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
-        .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium`).choices(SANDBOX_SIZES))
+        .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small during the Pro trial (Small in US regions only)`).choices(SANDBOX_SIZES))
         .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
         .option("--region <code>", "Region to create the sandbox in")
         .option("--snapshot <id>", "Create from a private saved snapshot, at the size it was taken at")
@@ -497,19 +497,29 @@ Examples:
             success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}`);
     });
     for (const operation of ["pause", "resume"]) {
-        sb.command(operation)
+        const cmd = sb.command(operation)
             .argument("<id>", "Sandbox ID")
-            .option("--no-wait", "Return once the operation is queued")
+            .option("--no-wait", "Return once the operation is queued");
+        // --fast: no memory saved, so the pause takes about a second whatever the RAM; the resume boots fresh.
+        if (operation === "pause")
+            cmd.option("--fast", "Pause instantly: keep files only, end processes (no memory saved)");
+        cmd
             .description(operation === "pause" ? "Save running state (memory and files) and stop the sandbox" : "Restore a paused sandbox with its saved memory and files")
             .action(async (id, opts) => {
-            const queued = await api.post(`/api/sandboxes/${id}/${operation}`, {});
+            const fast = operation === "pause" && !!opts.fast;
+            const queued = await api.post(`/api/sandboxes/${id}/${operation}`, fast ? { memory: false } : {});
             if (opts.wait && operation === 'pause' && queued.snapshotId)
                 await waitForSnapshot(queued.snapshotId);
             const result = opts.wait ? await waitForSandbox(id, operation === "pause" ? "paused" : "running") : queued;
             if (isJSONMode())
-                printJSON(result);
-            else
-                success(`Sandbox ${chalk.bold(id)}: ${result.status}`);
+                printJSON(operation === "resume" && queued.memoryRestored !== undefined ? { ...result, memoryRestored: queued.memoryRestored } : result);
+            else {
+                success(`Sandbox ${chalk.bold(id)}: ${result.status}${fast ? " (files only)" : ""}`);
+                if (fast)
+                    info("Processes ended. Resume boots it fresh with your files intact.");
+                if (operation === "resume" && queued.memoryRestored === false)
+                    info("It was paused without memory: booted fresh with its files; start your processes again.");
+            }
         });
     }
     sb.command("restore")
