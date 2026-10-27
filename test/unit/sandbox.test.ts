@@ -16,6 +16,7 @@ vi.mock("../../src/lib/config.js", () => ({
   resolveProjectId: vi.fn().mockResolvedValue("project-test"),
   getProjectLink: vi.fn(() => ({ projectId: "project-test" })),
   looksLikeId: (v: string) => /^[A-Za-z0-9_-]{21}$/.test(v) && /[A-Z]/.test(v),
+  DEFAULT_REGION: "us-east-1",
 }));
 vi.mock("../../src/lib/format.js", () => ({ isJSONMode: () => true, printJSON: vi.fn() }));
 
@@ -80,6 +81,44 @@ describe("sandbox create without a project", () => {
     vi.mocked(getProjectLink).mockReturnValueOnce(null);
     vi.mocked(api.post).mockRejectedValueOnce(new APIError(400, "A project is required", "PROJECT_REQUIRED"));
     await expect(create([])).rejects.toThrow("No project linked. Run `lizard init` or pass --project <id>.");
+  });
+});
+
+describe("sandbox create region", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.post).mockResolvedValue({ id: "sandbox-test" });
+  });
+
+  const regionSent = (call = 0) => (vi.mocked(api.post).mock.calls[call][1] as { region?: string }).region;
+  const paused = () => new APIError(503, "New sandboxes are not available in US East (Virginia).", "region_unavailable");
+
+  it("defaults to us-east-1", async () => {
+    await create([]);
+    expect(regionSent()).toBe("us-east-1");
+  });
+
+  it("sends --region as given", async () => {
+    await create(["--region", "eu-west-lim-a"]);
+    expect(regionSent()).toBe("eu-west-lim-a");
+  });
+
+  it.each([["--volume", "data"], ["--snapshot", "snap-1"]])("leaves the region to the platform with %s", async (...flag) => {
+    await create(flag);
+    expect(regionSent()).toBeUndefined();
+  });
+
+  it("asks again without a region when the default one is paused", async () => {
+    vi.mocked(api.post).mockRejectedValueOnce(paused()).mockResolvedValueOnce({ id: "sandbox-test" });
+    await create([]);
+    expect(api.post).toHaveBeenCalledTimes(2);
+    expect(regionSent(1)).toBeUndefined();
+  });
+
+  it("does not move a region the user named", async () => {
+    vi.mocked(api.post).mockRejectedValueOnce(paused());
+    await expect(create(["--region", "us-east-1"])).rejects.toThrow(/not available/);
+    expect(api.post).toHaveBeenCalledTimes(1);
   });
 });
 
