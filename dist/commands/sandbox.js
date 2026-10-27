@@ -9,7 +9,7 @@ import open from "open";
 import { api, APIError, getBaseURL, getRawBytes, apiErrorFrom, clientHeaders, getRequestToken, withQuery, withScope } from "../lib/api.js";
 import { getToken } from "../lib/auth.js";
 import { resolveProjectScope } from "../lib/resolve.js";
-import { getProjectLink, resolveProjectId, looksLikeId } from "../lib/config.js";
+import { getProjectLink, resolveProjectId, looksLikeId, DEFAULT_REGION } from "../lib/config.js";
 import { resolveVolume } from "../lib/volume.js";
 import { sandboxShell } from "./sandbox-ssh.js";
 import { startVncTunnel, vncTarget } from "./sandbox-vnc.js";
@@ -102,6 +102,22 @@ function printSandboxList(sandboxes) {
         timeAgo(s.startedAt),
     ]));
 }
+/**
+ * POST /api/sandboxes. When the CLI filled in the region itself and the platform has paused
+ * new sandboxes there (503 region_unavailable), asks once more without one: the platform then
+ * picks an open region, as it would for a create that never named one. A region the user
+ * named is never swapped for another.
+ */
+async function createInDefaultRegion(body, defaultRegion) {
+    try {
+        return await api.post("/api/sandboxes", body);
+    }
+    catch (e) {
+        if (!defaultRegion || !(e instanceof APIError) || e.code !== "region_unavailable")
+            throw e;
+        return api.post("/api/sandboxes", { ...body, region: undefined });
+    }
+}
 export function registerSandbox(program) {
     const sb = program
         .command("sandbox")
@@ -112,7 +128,7 @@ export function registerSandbox(program) {
         .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
         .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small during the Pro trial (Small in US regions only)`).choices(SANDBOX_SIZES))
         .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
-        .option("--region <code>", "Region to create the sandbox in")
+        .option("--region <code>", `Region to create the sandbox in (default ${DEFAULT_REGION}; with --volume or --snapshot, theirs)`)
         .option("--snapshot <id>", "Create from a private saved snapshot, at the size it was taken at")
         .option("--volume <name-or-id>", "Attach a persistent volume")
         .option("--with-token [key]", "Sign in `lizard` inside the sandbox with a new key limited to the sandbox's project and deleted with it (this liz_ key, or the one you use, only authorizes the request)")
@@ -178,19 +194,22 @@ export function registerSandbox(program) {
                     throw new Error("--with-token expects a liz_ API key. Create a workspace-scoped one with `lizard keys create`.");
                 }
             }
+            // No --region: us-east-1. A volume or a snapshot exists in one region only, so with
+            // either the server places the sandbox there instead.
+            const defaultRegion = !opts.region && !opts.volume && !opts.snapshot;
             const body = {
                 template: opts.template,
                 size: opts.size,
                 snapshotId: opts.snapshot,
                 timeoutMs: opts.timeout,
-                region: opts.region,
+                region: opts.region || (defaultRegion ? DEFAULT_REGION : undefined),
                 volumeId,
                 volumeName,
                 lizardToken,
                 projectId,
             };
             try {
-                sandbox = await api.post("/api/sandboxes", body);
+                sandbox = await createInDefaultRegion(body, defaultRegion);
             }
             catch (e) {
                 // Only an id-shaped guess can be wrong this way, and only by 404. Anything

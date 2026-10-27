@@ -25,7 +25,7 @@ The details behind the Sandboxes section of the core guide. Read the part the ta
 | `codex`, `claude`, `opencode`, `pi`, `prime` | One coding agent each (Codex, Claude Code, OpenCode, pi, Prime Agent) on Node 22, with git, python3, ripgrep, curl, jq and `lizard`: see [Coding agents](#coding-agents) |
 | `desktop` | A graphical desktop with Chromium, plus Codex and `lizard`: see [Desktop](#desktop-computer-use) |
 
-An unknown name fails and lists the region's `availableTemplates`. `--with-token` on `sandbox create` signs in the sandbox's own `lizard` with a new key limited to the sandbox's project, deleted with the sandbox (only useful on templates that ship `lizard`).
+A sandbox starts in `us-east-1` unless `--region` names another; with `--volume` or `--snapshot` it starts in their region. An unknown name fails and lists the region's `availableTemplates`. `--with-token` on `sandbox create` signs in the sandbox's own `lizard` with a new key limited to the sandbox's project, deleted with the sandbox (only useful on templates that ship `lizard`).
 
 ## Running commands
 
