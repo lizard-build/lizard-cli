@@ -166,7 +166,8 @@ Names are unique within a project: `getOrCreate` returns the existing volume, `c
 | New lifetime from now (1000–2147483647 ms) | `sandbox.setTimeout(ms)` | `sandbox.set_timeout(ms)` |
 | List a project's sandboxes | `Sandbox.list({ projectId })` | `Sandbox.list(project_id=...)` |
 | Kill | `sandbox.kill()` | `sandbox.kill()` |
-| Pause and resume (memory and processes kept, billing stops) | `pause()`, `resume()`, `waitForStatus(s)` | `pause()`, `resume()`, `wait_for_status(s)` |
+| Pause, preferred (files only, ~1 s at any RAM, processes end; resume boots fresh) | `pause({ fast: true })` | `pause(fast=True)` |
+| Pause keeping memory and processes (slower the more RAM is in use; only when processes must survive) and resume | `pause()`, `resume()`, `waitForStatus(s)` | `pause()`, `resume()`, `wait_for_status(s)` |
 | Snapshot (about 2 s, the source keeps running) | `snapshot(name)` | `snapshot(name)` |
 | Start a sandbox from a snapshot (about 0.4 s) | `Sandbox.restore(id)` | `Sandbox.restore(id)` |
 | Live copies of a running sandbox (each counts toward the running limit) | `fork({ count })` | `fork(count=...)` |
