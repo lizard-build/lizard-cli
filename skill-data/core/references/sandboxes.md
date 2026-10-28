@@ -29,6 +29,8 @@ A sandbox starts in `us-east-1` unless `--region` names another; with `--volume`
 
 `--no-internet` on `sandbox create` starts a sandbox with no internet at all (no outbound TCP, UDP, DNS or ping) for its whole life, its resumes and forks included, and none of its ports can be made public (`sandbox expose` and the desktop are refused); commands and files still work. It is set at create only and cannot be changed later. Not available with a container volume or snapshot. Use it to run untrusted code that must not reach the network.
 
+`--allow-host <host>` (repeatable, implies `--no-internet`) keeps a few destinations reachable: a host name such as `pypi.org`, or `*.pythonhosted.org` for its subdomains, on ports 80 and 443; or an IPv4 address or range such as `140.82.112.0/20` on every port. Up to 50; private ranges, IPv6 and ports are refused. With a host name in the list, DNS (8.8.8.8) is open too so names resolve, which means code can still send data out inside DNS lookups; a list of addresses only keeps DNS closed.
+
 ## Running commands
 
 `lizard sandbox exec <id> -- <cmd> [args...]` runs the command in the sandbox, streams stdout and stderr, and exits with the command's exit code. Each argument stays one word: `exec <id> 'cd /workspace && npm test'` fails with `not found`, so put a shell line in `-- sh -c '…'`. Without a terminal it prints the raw output without the `$ <cmd>` header. Each call is a new process that starts in `/root`, so `cd` and exported variables don't carry over: chain steps in one call, e.g. `lizard sandbox exec <id> -- sh -c 'cd /workspace && npm test'`, and keep results in files.

@@ -42,6 +42,8 @@ interface SandboxRecord {
   pricePerHour?: number | null;
   /** false: created with no internet (--no-internet). Absent from older platforms. */
   internetAccess?: boolean;
+  /** With no internet: what is still reachable (--allow-host). */
+  allowedHosts?: string[];
   guestIp?: string;
   startedAt: number | string;
   endAt?: number | string;
@@ -175,6 +177,7 @@ export function registerSandbox(program: Command) {
     .option("--volume <name-or-id>", "Attach a persistent volume")
     .option("--with-token [key]", "Sign in `lizard` inside the sandbox with a new key limited to the sandbox's project and deleted with it (this liz_ key, or the one you use, only authorizes the request)")
     .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
+    .option("--allow-host <host>", "With no internet, still allow this host name (pypi.org, *.pythonhosted.org: ports 80/443) or IPv4 address/range (every port); repeat for more. Implies --no-internet", (v: string, all: string[] = []) => [...all, v])
     .option("--no-internet", "Fully closed sandbox, for its whole life (its resumes and forks too): no internet and no public ports; commands and files still work")
     .action(async (opts) => {
       // A snapshot restores at its source's size (a Firecracker VM's memory is part of it; a
@@ -252,7 +255,8 @@ export function registerSandbox(program: Command) {
           lizardToken,
           projectId,
           // Sent only when asked: every other create stays byte-for-byte what it was.
-          ...(opts.internet === false ? { internetAccess: false } : {}),
+          ...(opts.internet === false || opts.allowHost?.length ? { internetAccess: false } : {}),
+          ...(opts.allowHost?.length ? { allowedHosts: opts.allowHost } : {}),
         };
         try {
           sandbox = await createInDefaultRegion(body, defaultRegion);
@@ -277,9 +281,14 @@ export function registerSandbox(program: Command) {
 
       // A platform that predates the option ignores it and starts a sandbox WITH internet.
       // Asked for none: anything but an explicit false is deleted, never handed over.
-      if (opts.internet === false && sandbox.internetAccess !== false) {
+      if ((opts.internet === false || opts.allowHost?.length) && sandbox.internetAccess !== false) {
         await api.delete(`/api/sandboxes/${sandbox.id}`).catch(() => {});
         throw new Error("This region's platform does not support --no-internet yet; the sandbox it started had internet and was deleted.");
+      }
+      // An older platform ignores the list: the sandbox would have no internet at all, not what was asked.
+      if (opts.allowHost?.length && !Array.isArray(sandbox.allowedHosts)) {
+        await api.delete(`/api/sandboxes/${sandbox.id}`).catch(() => {});
+        throw new Error("This region's platform does not support --allow-host yet; the sandbox was deleted.");
       }
 
       if (isJSONMode()) {
@@ -296,7 +305,9 @@ export function registerSandbox(program: Command) {
         ? `  Size: ${sandbox.size} (${machine})${sandbox.pricePerHour != null ? `, $${sandbox.pricePerHour}/h` : ""}`
         : `  Machine: ${machine}`));
       info(chalk.dim(`  ${lifetimeLine(sandbox.expiresAt ?? sandbox.endAt)}`));
-      if (sandbox.internetAccess === false) info(chalk.dim("  Internet: off"));
+      if (sandbox.internetAccess === false) {
+        info(chalk.dim(sandbox.allowedHosts?.length ? `  Internet: only ${sandbox.allowedHosts.join(", ")}` : "  Internet: off"));
+      }
       info("");
       info(sandboxNextSteps(sandbox.id));
     });
