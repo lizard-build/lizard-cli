@@ -27,7 +27,7 @@ The details behind the Sandboxes section of the core guide. Read the part the ta
 
 A sandbox starts in `us-east-1` unless `--region` names another; with `--volume` or `--snapshot` it starts in their region. An unknown name fails and lists the region's `availableTemplates`. `--with-token` on `sandbox create` signs in the sandbox's own `lizard` with a new key limited to the sandbox's project, deleted with the sandbox (only useful on templates that ship `lizard`).
 
-`--no-internet` on `sandbox create` starts a sandbox with no internet at all (no outbound TCP, UDP, DNS or ping) for its whole life, its resumes and forks included; commands, files and exposed ports still work. It is set at create only and cannot be changed later. Not available with a container volume or snapshot. Use it to run untrusted code that must not reach the network.
+`--no-internet` on `sandbox create` starts a sandbox with no internet at all (no outbound TCP, UDP, DNS or ping) for its whole life, its resumes and forks included, and none of its ports can be made public (`sandbox expose` and the desktop are refused); commands and files still work. It is set at create only and cannot be changed later. Not available with a container volume or snapshot. Use it to run untrusted code that must not reach the network.
 
 ## Running commands
 

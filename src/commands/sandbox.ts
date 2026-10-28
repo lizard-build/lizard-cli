@@ -175,7 +175,7 @@ export function registerSandbox(program: Command) {
     .option("--volume <name-or-id>", "Attach a persistent volume")
     .option("--with-token [key]", "Sign in `lizard` inside the sandbox with a new key limited to the sandbox's project and deleted with it (this liz_ key, or the one you use, only authorizes the request)")
     .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
-    .option("--no-internet", "No internet for this sandbox, ever (its resumes and forks too): commands, files and exposed ports still work")
+    .option("--no-internet", "Fully closed sandbox, for its whole life (its resumes and forks too): no internet and no public ports; commands and files still work")
     .action(async (opts) => {
       // A snapshot restores at its source's size (a Firecracker VM's memory is part of it; a
       // pod snapshot goes back onto the machine it was captured on), so the server ignores a
