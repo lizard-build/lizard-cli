@@ -531,14 +531,14 @@ Examples:
                 await waitForSnapshot(queued.snapshotId);
             const result = opts.wait ? await waitForSandbox(id, operation === "pause" ? "paused" : "running") : queued;
             if (isJSONMode())
-                printJSON(operation === "resume" && queued.memoryRestored !== undefined ? { ...result, memoryRestored: queued.memoryRestored } : result);
+                printJSON({ ...result, ...(operation === "resume" && queued.memoryRestored !== undefined ? { memoryRestored: queued.memoryRestored } : {}), ...(queued.tip ? { tip: queued.tip } : {}) });
             else {
                 success(`Sandbox ${chalk.bold(id)}: ${result.status}${fast ? " (files only)" : ""}`);
                 if (fast)
                     info("Processes ended. Resume boots it fresh with your files intact.");
-                else if (operation === "pause" && isLargeSandbox(result)) {
-                    info(`Tip: ${chalk.bold(`lizard sandbox pause ${id} --fast`)} pauses a large sandbox in about a second: it keeps files only and ends processes.`);
-                }
+                // The server says when a faster option fits (a large sandbox paused with its memory).
+                if (queued.tip)
+                    info(`Tip: ${queued.tip.replace('{"fast": true} (CLI: pause --fast)', chalk.bold(`lizard sandbox pause ${id} --fast`))}`);
                 if (operation === "resume" && queued.memoryRestored === false)
                     info("It was paused without memory: booted fresh with its files; start your processes again.");
             }
@@ -917,11 +917,6 @@ async function waitForSnapshot(id) {
         await new Promise(resolve => setTimeout(resolve, 1000));
     }
     throw new Error(`Snapshot is still processing. Check it with lizard sandbox snapshots.`);
-}
-/** A memory pause of this one takes long (its RAM is saved), so plain `pause` suggests `--fast`.
- *  Only the waited-for result carries size/memoryMb; with --no-wait there is no tip. */
-function isLargeSandbox(sandbox) {
-    return sandbox.size === "large" || (sandbox.memoryMb ?? 0) >= 16384;
 }
 async function waitForSandbox(id, target) {
     const deadline = Date.now() + 5 * 60_000;
