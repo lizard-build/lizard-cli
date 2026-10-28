@@ -27,6 +27,8 @@ The details behind the Sandboxes section of the core guide. Read the part the ta
 
 A sandbox starts in `us-east-1` unless `--region` names another; with `--volume` or `--snapshot` it starts in their region. An unknown name fails and lists the region's `availableTemplates`. `--with-token` on `sandbox create` signs in the sandbox's own `lizard` with a new key limited to the sandbox's project, deleted with the sandbox (only useful on templates that ship `lizard`).
 
+`--no-internet` on `sandbox create` starts a sandbox with no internet at all (no outbound TCP, UDP, DNS or ping) for its whole life, its resumes and forks included; commands, files and exposed ports still work. It is set at create only and cannot be changed later. Not available with a container volume or snapshot. Use it to run untrusted code that must not reach the network.
+
 ## Running commands
 
 `lizard sandbox exec <id> -- <cmd> [args...]` runs the command in the sandbox, streams stdout and stderr, and exits with the command's exit code. Each argument stays one word: `exec <id> 'cd /workspace && npm test'` fails with `not found`, so put a shell line in `-- sh -c '…'`. Without a terminal it prints the raw output without the `$ <cmd>` header. Each call is a new process that starts in `/root`, so `cd` and exported variables don't carry over: chain steps in one call, e.g. `lizard sandbox exec <id> -- sh -c 'cd /workspace && npm test'`, and keep results in files.

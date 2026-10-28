@@ -40,6 +40,8 @@ interface SandboxRecord {
   size?: string | null;
   /** Flat USD/hour; null when the sandbox is billed by measured usage. */
   pricePerHour?: number | null;
+  /** false: created with no internet (--no-internet). Absent from older platforms. */
+  internetAccess?: boolean;
   guestIp?: string;
   startedAt: number | string;
   endAt?: number | string;
@@ -173,6 +175,7 @@ export function registerSandbox(program: Command) {
     .option("--volume <name-or-id>", "Attach a persistent volume")
     .option("--with-token [key]", "Sign in `lizard` inside the sandbox with a new key limited to the sandbox's project and deleted with it (this liz_ key, or the one you use, only authorizes the request)")
     .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
+    .option("--no-internet", "No internet for this sandbox, ever (its resumes and forks too): commands, files and exposed ports still work")
     .action(async (opts) => {
       // A snapshot restores at its source's size (a Firecracker VM's memory is part of it; a
       // pod snapshot goes back onto the machine it was captured on), so the server ignores a
@@ -248,6 +251,8 @@ export function registerSandbox(program: Command) {
           volumeName,
           lizardToken,
           projectId,
+          // Sent only when asked: every other create stays byte-for-byte what it was.
+          ...(opts.internet === false ? { internetAccess: false } : {}),
         };
         try {
           sandbox = await createInDefaultRegion(body, defaultRegion);
@@ -270,6 +275,13 @@ export function registerSandbox(program: Command) {
       }
       spinner?.stop();
 
+      // A platform that predates the option ignores it and starts a sandbox WITH internet.
+      // Asked for none: anything but an explicit false is deleted, never handed over.
+      if (opts.internet === false && sandbox.internetAccess !== false) {
+        await api.delete(`/api/sandboxes/${sandbox.id}`).catch(() => {});
+        throw new Error("This region's platform does not support --no-internet yet; the sandbox it started had internet and was deleted.");
+      }
+
       if (isJSONMode()) {
         printJSON(sandbox);
         return;
@@ -284,6 +296,7 @@ export function registerSandbox(program: Command) {
         ? `  Size: ${sandbox.size} (${machine})${sandbox.pricePerHour != null ? `, $${sandbox.pricePerHour}/h` : ""}`
         : `  Machine: ${machine}`));
       info(chalk.dim(`  ${lifetimeLine(sandbox.expiresAt ?? sandbox.endAt)}`));
+      if (sandbox.internetAccess === false) info(chalk.dim("  Internet: off"));
       info("");
       info(sandboxNextSteps(sandbox.id));
     });
