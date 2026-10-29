@@ -331,16 +331,16 @@ describe("metrics --cost", () => {
     mockCost({ plan: "pro", status: "active", period: { kind: "paid", ...period } });
     await run(["--cost"]);
     expect(api.get).toHaveBeenCalledWith("/api/billing/subscription?workspaceId=workspace-test");
-    expect(lines.join("\n").replace(/\x1b\[[0-9;]*m/g, "")).toContain("Pro       $31.40 of $19 in monthly credits used, overage $12.40");
+    expect(lines.join("\n").replace(/\x1b\[[0-9;]*m/g, "")).toContain("Pro       $31.40 used of $19 included, overage $12.40");
   });
 
-  it("shows trial credits left during the trial", async () => {
+  it("shows trial usage left during the trial", async () => {
     vi.mocked(isJSONMode).mockReturnValue(false);
     const lines: string[] = [];
     vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => { lines.push(a.join(" ")); });
     mockCost({ plan: "pro", status: "trialing", period: { ...period, kind: "trial", includedCents: 500, usedCents: 120, overageCents: 0 } });
     await run(["--cost"]);
-    expect(lines.join("\n").replace(/\x1b\[[0-9;]*m/g, "")).toContain("Pro trial $1.20 of $5 in trial credits used, $3.80 left");
+    expect(lines.join("\n").replace(/\x1b\[[0-9;]*m/g, "")).toContain("Pro trial $1.20 used of $5 included, $3.80 left");
   });
 
   it("adds proCredits to JSON for Pro, and nothing for prepaid credits or older servers", async () => {

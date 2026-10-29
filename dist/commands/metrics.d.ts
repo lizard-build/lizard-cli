@@ -10,6 +10,6 @@ interface ProCredits {
     usedCents: number;
     overageCents: number;
 }
-/** "$4.10 of $19 in monthly credits used, overage $0" — the account-wide line for Pro. */
+/** "$4.10 used of $19 included, overage $0" — the account-wide line for Pro. */
 export declare function proCreditsLine(pro: ProCredits): string;
 export {};

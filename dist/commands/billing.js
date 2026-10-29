@@ -264,7 +264,7 @@ export function describePromo(out) {
         return `${code}a ${out.trialDays}-day Pro trial with ${credits} of usage. Start it with \`lizard billing start\`.`;
     }
     if (out.status === "pending_payment_method") {
-        return `Code saved: ${fmtCents(out.creditCents)} in credits. They unlock when you start your trial in Billing.`;
+        return `Code saved: ${fmtCents(out.creditCents)} of trial usage. It unlocks when you start your trial in Billing.`;
     }
     return `Redeemed ${fmtCents(out.creditCents)}. New balance: ${fmtCents(out.balanceCents)}.`;
 }
