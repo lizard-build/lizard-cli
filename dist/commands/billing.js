@@ -4,14 +4,31 @@ import * as p from "@clack/prompts";
 import { api, withQuery, getBaseURL, isNotFound } from "../lib/api.js";
 import { success, isJSONMode, printJSON, table, isTTY, timeAgo, info, warn } from "../lib/format.js";
 // `lizard billing` — the account's plan (docs/pro-billing-api.md on the platform
-// repo). Pro is $19/month, with $19 of monthly credits; usage above
-// that is pay as you go. Unlike most commands this never takes --project/--service:
+// repo). Pro is $19/month with $19 of usage included each month (Pro 5x $99, Pro 20x
+// $499, on the same terms); usage above that is pay as you go. Unlike most commands this never takes --project/--service:
 // billing belongs to the account, not a workspace. `lizard credits` is the old name.
 /** Old prepaid credits (`plan: "payg"`) keep working until this date. */
 export const CREDITS_END = "November 1, 2026";
 const BILLING_PATH = "/profile/account-billing";
 export function billingUrl() {
     return `${getBaseURL()}${BILLING_PATH}`;
+}
+/** Pro's tiers: what the API calls them, what people call them, and what `lizard billing tier` takes. */
+const TIERS = [
+    { tier: "pro", label: "Pro", arg: "pro", aliases: ["pro", "1x", "19"] },
+    { tier: "pro_99", label: "Pro 5x", arg: "5x", aliases: ["5x", "pro-5x", "pro5x", "pro_99", "99"] },
+    { tier: "pro_499", label: "Pro 20x", arg: "20x", aliases: ["20x", "pro-20x", "pro20x", "pro_499", "499"] },
+];
+export function tierLabel(tier) {
+    return TIERS.find((t) => t.tier === tier)?.label ?? "Pro";
+}
+/** `5x`, `pro-5x`, `pro_99` → `pro_99`. */
+export function parseTier(input) {
+    const key = input.trim().toLowerCase().replace(/\s+/g, "-");
+    const found = TIERS.find((t) => t.aliases.includes(key));
+    if (!found)
+        throw new Error(`Unknown tier "${input}". Use pro, 5x or 20x.`);
+    return found.tier;
 }
 function fmtCents(cents) {
     const sign = cents < 0 ? "-" : "";
@@ -66,19 +83,19 @@ export function describeSubscription(sub, now = Date.now()) {
             lines.push("Pro is not open for this account yet.");
         }
         else if (sub.trial.eligible && sub.trial.days) {
-            lines.push(`Start a ${sub.trial.days}-day Pro trial with ${usd(sub.trial.creditCents ?? 0)} in credits: ` +
+            lines.push(`Start a ${sub.trial.days}-day Pro trial with ${usd(sub.trial.creditCents ?? 0)} of usage: ` +
                 chalk.cyan("lizard billing start"));
             lines.push(chalk.dim(`No charge today, then ${usd(sub.priceCents)}/month.`));
             if (sub.trial.promoCode)
                 lines.push(label("Promo code: ") + `${sub.trial.promoCode} (saved for the trial)`);
         }
         else {
-            lines.push(`Start Pro: ${usd(sub.priceCents)}/month, with ${usd(sub.includedCents)} in credits each month: ` +
+            lines.push(`Start Pro: ${usd(sub.priceCents)}/month, with ${usd(sub.includedCents)} of usage included each month: ` +
                 chalk.cyan("lizard billing start"));
         }
         return lines;
     }
-    lines.push(`${chalk.bold("Pro")}  ${statusLabel(sub.status)}${owner}  ` +
+    lines.push(`${chalk.bold(tierLabel(sub.tier))}  ${statusLabel(sub.status)}${owner}  ` +
         chalk.dim(`${usd(sub.priceCents)}/month`));
     const period = sub.period;
     if (sub.status === "trialing") {
@@ -87,7 +104,7 @@ export function describeSubscription(sub, now = Date.now()) {
         const credit = sub.trial.creditCents ?? period?.includedCents ?? 0;
         const used = sub.trial.usedCents ?? period?.usedCents ?? 0;
         const left = sub.trial.remainingCents ?? Math.max(0, credit - used);
-        lines.push(label("Trial credits: ") + `${usd(used)} of ${usd(credit)} used, ${usd(left)} left`);
+        lines.push(label("Trial usage: ") + `${usd(used)} of ${usd(credit)} used, ${usd(left)} left`);
     }
     else if (period) {
         lines.push(label("This month: ") +
@@ -107,6 +124,12 @@ export function describeSubscription(sub, now = Date.now()) {
     if (sub.nextCharge?.at) {
         lines.push(label("Next charge: ") + `${usd(sub.nextCharge.amountCents)} on ${fmtDate(sub.nextCharge.at)}`);
     }
+    if (sub.pendingTier && sub.pendingTier !== sub.tier) {
+        const when = period ? ` on ${fmtDate(period.end)}` : " with the next period";
+        const stay = TIERS.find((t) => t.tier === sub.tier)?.arg ?? "pro";
+        lines.push(label("Next period: ") + `moves to ${tierLabel(sub.pendingTier)}${when}. Run ` +
+            chalk.cyan(`lizard billing tier ${stay}`) + ` to stay on ${tierLabel(sub.tier)}.`);
+    }
     if (sub.cancelAt) {
         lines.push(chalk.yellow(`Ends on ${fmtDate(sub.cancelAt)}.`) + " Run " + chalk.cyan("lizard billing resume") + " to keep Pro.");
     }
@@ -118,6 +141,9 @@ export function describeSubscription(sub, now = Date.now()) {
     if (sub.limits) {
         const n = sub.limits.replicasPerApp;
         lines.push(label("Replicas: ") + `up to ${n} per service`);
+        if (sub.limits.sandboxVcpu) {
+            lines.push(label("Sandboxes: ") + `up to ${sub.limits.sandboxVcpu.toLocaleString("en-US")} vCPU at once`);
+        }
     }
     if (sub.paymentMethod) {
         const pm = sub.paymentMethod;
@@ -232,10 +258,10 @@ export function describePromo(out) {
         const credits = usd(out.trialCreditCents ?? out.creditCents);
         if (out.appliesTo === "current_trial") {
             const until = out.expiresAt ? `, until ${fmtDate(out.expiresAt)}` : "";
-            return `Your trial now runs ${out.trialDays} days with ${credits} in credits${until}.`;
+            return `Your trial now runs ${out.trialDays} days with ${credits} of usage${until}.`;
         }
         const code = out.code ? `Code ${out.code} saved: ` : "Code saved: ";
-        return `${code}a ${out.trialDays}-day Pro trial with ${credits} in credits. Start it with \`lizard billing start\`.`;
+        return `${code}a ${out.trialDays}-day Pro trial with ${credits} of usage. Start it with \`lizard billing start\`.`;
     }
     if (out.status === "pending_payment_method") {
         return `Code saved: ${fmtCents(out.creditCents)} in credits. They unlock when you start your trial in Billing.`;
@@ -246,7 +272,7 @@ export function registerBilling(program) {
     const cmd = program
         .command("billing")
         .alias("credits")
-        .description("Your plan: Pro trial, this month's credits, next charge, cancel or resume (`credits` is the old name)")
+        .description("Your plan: Pro tier, trial, this month's usage, next charge, cancel or resume (`credits` is the old name)")
         .option("-w, --workspace <id>", "Show the plan of this workspace's owner")
         .action(async () => {
         await showStatus(cmd.opts());
@@ -258,7 +284,7 @@ export function registerBilling(program) {
     });
     cmd
         .command("status")
-        .description("Show the plan, trial, this month's credits and the next charge")
+        .description("Show the plan, trial, this month's usage and the next charge")
         .option("-w, --workspace <id>", "Show the plan of this workspace's owner")
         .action(async (opts) => {
         // `billing` takes -w too and claims it wherever it appears on the line.
@@ -281,19 +307,24 @@ export function registerBilling(program) {
         .command("start")
         .description("Start Pro in Stripe Checkout: the trial if the account can have one, otherwise Pro at once")
         .option("--return-url <path>", "Dashboard path to come back to after Checkout, e.g. /projects/abc")
+        .option("--tier <tier>", "pro (default), 5x ($99/month) or 20x ($499/month); 5x and 20x have no trial")
         .option("--no-open", "Print the Checkout link instead of opening a browser")
         .action(async (opts) => {
-        const out = await api.post("/api/billing/subscription/checkout", { returnUrl: opts.returnUrl });
+        const tier = opts.tier ? parseTier(opts.tier) : undefined;
+        const out = await api.post("/api/billing/subscription/checkout", { returnUrl: opts.returnUrl, tier });
         if (isJSONMode()) {
             printJSON(out);
             return;
         }
         if (out.trialDays) {
-            console.log(`Your ${out.trialDays}-day trial includes ${usd(out.trialCreditCents ?? 0)} in credits. ` +
+            console.log(`Your ${out.trialDays}-day trial includes ${usd(out.trialCreditCents ?? 0)} of usage. ` +
                 "No charge today, then $19/month.");
         }
+        else if (tier && tier !== "pro") {
+            console.log(`${tierLabel(tier)} starts today and is charged from day one.`);
+        }
         else {
-            console.log("Pro starts today: $19/month, with $19 in credits each month.");
+            console.log("Pro starts today: $19/month, with $19 of usage included each month.");
         }
         console.log(`Finish in Stripe Checkout:\n${chalk.cyan(out.url)}`);
         await openInBrowser(out.url, opts.open !== false);
@@ -301,7 +332,7 @@ export function registerBilling(program) {
     });
     cmd
         .command("start-now")
-        .description("End the trial now: charge $19 and start the first paid month with $19 in credits")
+        .description("End the trial now: charge $19 and start the first paid month with $19 of usage included")
         .option("-y, --yes", "Skip confirmation")
         .option("--no-open", "Print the payment link instead of opening a browser")
         .action(async (opts) => {
@@ -319,7 +350,48 @@ export function registerBilling(program) {
             await openInBrowser(out.invoiceUrl, opts.open !== false);
             return;
         }
-        success("Pro is active. We charged $19 and added $19 in credits for this month.");
+        success("Pro is active. We charged $19, and this month includes $19 of usage.");
+    });
+    cmd
+        .command("tier <tier>")
+        .description("Move a paid Pro subscription to pro, 5x ($99/month) or 20x ($499/month): up is charged now, prorated; down starts with the next period")
+        .option("-y, --yes", "Skip confirmation")
+        .option("--no-open", "Print the payment link instead of opening a browser")
+        .action(async (input, opts) => {
+        const tier = parseTier(input);
+        const sub = await api.get("/api/billing/subscription");
+        const name = tierLabel(tier);
+        const price = (t) => sub.tiers?.find((o) => o.tier === t)?.priceCents ?? 0;
+        if (tier !== sub.tier || sub.pendingTier) {
+            const question = tier === sub.tier
+                ? `Stay on ${name}? The move to ${tierLabel(sub.pendingTier)} is cancelled.`
+                : price(tier) > price(sub.tier)
+                    ? `Move to ${name} now? We charge the prorated difference today, and your included usage and limits rise at once.`
+                    : `Move to ${name} from the next period? Nothing is charged today.`;
+            await confirmOrExit(question, opts.yes);
+        }
+        const out = await api.post("/api/billing/subscription/tier", { tier });
+        if (isJSONMode()) {
+            printJSON(out);
+            return;
+        }
+        if (out.status === "requires_action" && out.invoiceUrl) {
+            console.log(`Your bank needs you to confirm the payment. You stay on ${tierLabel(sub.tier)} until you do:\n${chalk.cyan(out.invoiceUrl)}`);
+            await openInBrowser(out.invoiceUrl, opts.open !== false);
+        }
+        else if (out.status === "upgraded") {
+            success(`You are on ${name} now. We charged the prorated difference, and this month's included usage rose by the same amount.`);
+        }
+        else if (out.status === "scheduled") {
+            const when = out.effectiveAt ? `on ${fmtDate(out.effectiveAt)}` : "with the next period";
+            success(`${name} starts ${when}. Until then you keep ${tierLabel(sub.tier)}.`);
+        }
+        else if (sub.pendingTier && sub.pendingTier !== tier) {
+            success(`You stay on ${name}. The move to ${tierLabel(sub.pendingTier)} is cancelled.`);
+        }
+        else {
+            info(`You are already on ${name}.`);
+        }
     });
     cmd
         .command("cancel")
@@ -349,7 +421,7 @@ export function registerBilling(program) {
     });
     cmd
         .command("promo <code>")
-        .description("Redeem a promo code: a longer Pro trial with more trial credits")
+        .description("Redeem a promo code: a longer Pro trial with more trial usage")
         .action(async (code) => {
         const out = await api.post("/api/billing/promo/redeem", { code });
         if (isJSONMode()) {

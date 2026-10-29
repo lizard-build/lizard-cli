@@ -6,9 +6,15 @@ export interface Subscription {
     plan: "none" | "pro" | "payg" | "enterprise" | string;
     status: "none" | "trialing" | "active" | "past_due" | "canceled" | string;
     isOwner?: boolean;
+    /** "pro" | "pro_99" | "pro_499"; null without a live subscription. Older servers omit it. */
+    tier?: string | null;
+    /** A move to a lower tier that starts with the next period. */
+    pendingTier?: string | null;
+    /** Of the current tier. */
     priceCents: number;
     taxIncluded: boolean;
     includedCents: number;
+    tiers?: TierOption[];
     trial: {
         eligible: boolean;
         days: number | null;
@@ -45,9 +51,22 @@ export interface Subscription {
     limits: {
         tier: string;
         replicasPerApp: number;
+        sandboxVcpu?: number;
+        maxSandboxCpus?: number;
     } | null;
     checkoutAvailable: boolean;
 }
+export interface TierOption {
+    tier: string;
+    priceCents: number;
+    includedCents: number;
+    sandboxVcpu: number;
+    trial: boolean;
+    available: boolean;
+}
+export declare function tierLabel(tier: string | null | undefined): string;
+/** `5x`, `pro-5x`, `pro_99` → `pro_99`. */
+export declare function parseTier(input: string): string;
 /** New servers add the trial fields; older ones send only the first four. */
 export interface PromoResult {
     status: string;
