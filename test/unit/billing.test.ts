@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { Command } from "commander";
-import { registerBilling, describePromo, type Subscription } from "../../src/commands/billing.js";
+import { registerBilling, describePromo, parseTier, type Subscription, type TierOption } from "../../src/commands/billing.js";
 import { setAccessToken, setBaseURL } from "../../src/lib/api.js";
 import { setJSONMode } from "../../src/lib/format.js";
 
@@ -75,6 +75,12 @@ const paid: Subscription = {
   limits: { tier: "pro", replicasPerApp: 5 },
 };
 
+const tiers: TierOption[] = [
+  { tier: "pro", priceCents: 1900, includedCents: 1900, sandboxVcpu: 40, trial: true, available: true },
+  { tier: "pro_99", priceCents: 9900, includedCents: 9900, sandboxVcpu: 220, trial: false, available: true },
+  { tier: "pro_499", priceCents: 49900, includedCents: 49900, sandboxVcpu: 1200, trial: false, available: true },
+];
+
 const none: Subscription = {
   ...base,
   plan: "none",
@@ -112,14 +118,14 @@ afterEach(() => {
 });
 
 describe("lizard billing (status)", () => {
-  test("a trial shows days left, trial credits, the next charge and the Billing link", async () => {
+  test("a trial shows days left, trial usage, the next charge and the Billing link", async () => {
     routes({ "GET /api/billing/subscription": () => reply(200, base) });
     await run(["billing"]);
     const text = out();
     expect(text).toContain("Pro  trial");
     expect(text).toContain("$19/month");
     expect(text).toContain("Trial: 5 days left");
-    expect(text).toContain("Trial credits: $1.20 of $5 used, $3.80 left");
+    expect(text).toContain("Trial usage: $1.20 of $5 used, $3.80 left");
     expect(text).toMatch(/Next charge: \$19 on \w{3} \d+, \d{4}/);
     expect(text).toContain("Replicas: up to 1 per service");
     expect(text).toContain("Card: visa •••• 4242");
@@ -153,12 +159,27 @@ describe("lizard billing (status)", () => {
     expect(text).not.toContain("Next charge");
   });
 
+  test("a paid tier shows its name, a pending move down and the vCPU limit", async () => {
+    routes({
+      "GET /api/billing/subscription": () => reply(200, {
+        ...paid, tier: "pro_499", pendingTier: "pro_99", priceCents: 49900, includedCents: 49900, tiers,
+        limits: { tier: "pro_499", replicasPerApp: 5, sandboxVcpu: 1200, maxSandboxCpus: 8 },
+      }),
+    });
+    await run(["billing"]);
+    const text = out();
+    expect(text).toContain("Pro 20x  active");
+    expect(text).toContain("$499/month");
+    expect(text).toMatch(/Next period: moves to Pro 5x on \w{3} \d+, \d{4}\. Run lizard billing tier 20x to stay on Pro 20x\./);
+    expect(text).toContain("Sandboxes: up to 1,200 vCPU at once");
+  });
+
   test("no plan offers the trial", async () => {
     routes({ "GET /api/billing/subscription": () => reply(200, { ...none, trial: { ...none.trial, promoCode: "ROST", days: 31, creditCents: 10000 } }) });
     await run(["billing"]);
     const text = out();
     expect(text).toContain("No plan");
-    expect(text).toContain("Start a 31-day Pro trial with $100 in credits: lizard billing start");
+    expect(text).toContain("Start a 31-day Pro trial with $100 of usage: lizard billing start");
     expect(text).toContain("No charge today, then $19/month.");
     expect(text).toContain("Promo code: ROST");
   });
@@ -167,7 +188,7 @@ describe("lizard billing (status)", () => {
     routes({ "GET /api/billing/subscription": () => reply(200, { ...none, status: "canceled", trial: { ...none.trial, eligible: false } }) });
     await run(["billing"]);
     expect(out()).toContain("Pro has ended.");
-    expect(out()).toContain("Start Pro: $19/month, with $19 in credits each month: lizard billing start");
+    expect(out()).toContain("Start Pro: $19/month, with $19 of usage included each month: lizard billing start");
   });
 
   test("enterprise is invoiced monthly", async () => {
@@ -249,7 +270,7 @@ describe("lizard billing actions", () => {
     });
     await run(["billing", "start", "--return-url", "/projects/abc", "--no-open"]);
     expect(calls()).toEqual([{ key: "POST /api/billing/subscription/checkout", body: { returnUrl: "/projects/abc" } }]);
-    expect(out()).toContain("Your 7-day trial includes $5 in credits. No charge today, then $19/month.");
+    expect(out()).toContain("Your 7-day trial includes $5 of usage. No charge today, then $19/month.");
     expect(out()).toContain("https://checkout.stripe.com/c/pay/cs_1");
   });
 
@@ -257,11 +278,71 @@ describe("lizard billing actions", () => {
     const session = { url: "https://checkout.stripe.com/c/pay/cs_2", sessionId: "cs_2", trialDays: null, trialCreditCents: null };
     routes({ "POST /api/billing/subscription/checkout": () => reply(200, session) });
     await run(["billing", "start", "--no-open"]);
-    expect(out()).toContain("Pro starts today: $19/month, with $19 in credits each month.");
+    expect(out()).toContain("Pro starts today: $19/month, with $19 of usage included each month.");
     setJSONMode(true);
     stdout = [];
     await run(["billing", "start"]);
     expect(JSON.parse(stdout.join("\n"))).toEqual(session);
+  });
+
+  test("start --tier opens Checkout for Pro 5x, charged from day one", async () => {
+    routes({ "POST /api/billing/subscription/checkout": () => reply(200, { url: "https://checkout.stripe.com/c/pay/cs_5", sessionId: "cs_5", trialDays: null, trialCreditCents: null }) });
+    await run(["billing", "start", "--tier", "5x", "--no-open"]);
+    expect(calls()).toEqual([{ key: "POST /api/billing/subscription/checkout", body: { tier: "pro_99" } }]);
+    expect(out()).toContain("Pro 5x starts today and is charged from day one.");
+    await expect(run(["billing", "start", "--tier", "10x"])).rejects.toThrow('Unknown tier "10x". Use pro, 5x or 20x.');
+  });
+
+  test("tier moves up now, down next period, and cancels a pending move", async () => {
+    const at = Date.UTC(2026, 10, 20, 12);
+    const onPro = { ...paid, tier: "pro", pendingTier: null, tiers };
+    routes({
+      "GET /api/billing/subscription": () => reply(200, onPro),
+      "POST /api/billing/subscription/tier": () => reply(200, { status: "upgraded", tier: "pro_99", pendingTier: null, effectiveAt: now, invoiceUrl: null }),
+    });
+    await expect(run(["billing", "tier", "5x"])).rejects.toThrow("Use -y to confirm");
+    await run(["billing", "tier", "5x", "-y"]);
+    expect(calls().at(-1)).toEqual({ key: "POST /api/billing/subscription/tier", body: { tier: "pro_99" } });
+    expect(err()).toContain("You are on Pro 5x now.");
+
+    routes({
+      "GET /api/billing/subscription": () => reply(200, { ...onPro, tier: "pro_99" }),
+      "POST /api/billing/subscription/tier": () => reply(200, { status: "scheduled", tier: "pro_99", pendingTier: "pro", effectiveAt: at, invoiceUrl: null }),
+    });
+    await run(["billing", "tier", "pro", "-y"]);
+    expect(err()).toContain("Pro starts on Nov 20, 2026. Until then you keep Pro 5x.");
+
+    routes({
+      "GET /api/billing/subscription": () => reply(200, { ...onPro, tier: "pro_99", pendingTier: "pro" }),
+      "POST /api/billing/subscription/tier": () => reply(200, { status: "unchanged", tier: "pro_99", pendingTier: null, effectiveAt: null, invoiceUrl: null }),
+    });
+    await run(["billing", "tier", "pro-5x", "-y"]);
+    expect(err()).toContain("You stay on Pro 5x. The move to Pro is cancelled.");
+
+    routes({
+      "GET /api/billing/subscription": () => reply(200, onPro),
+      "POST /api/billing/subscription/tier": () => reply(200, { status: "requires_action", tier: "pro", pendingTier: null, effectiveAt: null, invoiceUrl: "https://invoice.stripe.com/i/up" }),
+    });
+    await run(["billing", "tier", "20x", "-y", "--no-open"]);
+    expect(out()).toContain("Your bank needs you to confirm the payment. You stay on Pro until you do:");
+    expect(out()).toContain("https://invoice.stripe.com/i/up");
+  });
+
+  test("tier on the current tier asks nothing and says so", async () => {
+    routes({
+      "GET /api/billing/subscription": () => reply(200, { ...paid, tier: "pro", pendingTier: null, tiers }),
+      "POST /api/billing/subscription/tier": () => reply(200, { status: "unchanged", tier: "pro", pendingTier: null, effectiveAt: null, invoiceUrl: null }),
+    });
+    await run(["billing", "tier", "pro"]);
+    expect(err()).toContain("You are already on Pro.");
+  });
+
+  test("tier passes the platform's refusal through", async () => {
+    routes({
+      "GET /api/billing/subscription": () => reply(200, { ...base, tier: "pro", tiers }),
+      "POST /api/billing/subscription/tier": () => reply(409, { error: "TRIAL_ACTIVE", message: "Start Pro now to change tiers." }),
+    });
+    await expect(run(["billing", "tier", "5x", "-y"])).rejects.toMatchObject({ status: 409, code: "TRIAL_ACTIVE" });
   });
 
   test("start passes the platform's refusal through", async () => {
@@ -279,7 +360,7 @@ describe("lizard billing actions", () => {
   test("start-now charges and reports each outcome", async () => {
     routes({ "POST /api/billing/subscription/start-now": () => reply(200, { status: "active" }) });
     await run(["billing", "start-now", "-y"]);
-    expect(err()).toContain("Pro is active. We charged $19 and added $19 in credits for this month.");
+    expect(err()).toContain("Pro is active. We charged $19, and this month includes $19 of usage.");
 
     routes({ "POST /api/billing/subscription/start-now": () => reply(200, { status: "requires_action", invoiceUrl: "https://invoice.stripe.com/i/3ds" }) });
     await run(["billing", "start-now", "-y", "--no-open"]);
@@ -313,7 +394,7 @@ describe("lizard billing actions", () => {
     });
     await run(["billing", "promo", "ROST"]);
     expect(calls()).toEqual([{ key: "POST /api/billing/promo/redeem", body: { code: "ROST" } }]);
-    expect(err()).toContain("Code ROST saved: a 31-day Pro trial with $100 in credits. Start it with `lizard billing start`.");
+    expect(err()).toContain("Code ROST saved: a 31-day Pro trial with $100 of usage. Start it with `lizard billing start`.");
   });
 
   test("promo errors keep their code", async () => {
@@ -330,12 +411,20 @@ describe("lizard billing actions", () => {
   });
 });
 
+describe("parseTier", () => {
+  test("takes the names people type", () => {
+    expect(["pro", "1x", "Pro"].map(parseTier)).toEqual(["pro", "pro", "pro"]);
+    expect(["5x", "pro-5x", "Pro 5x", "pro_99", "99"].map(parseTier)).toEqual(Array(5).fill("pro_99"));
+    expect(["20x", "pro-20x", "pro_499", "499"].map(parseTier)).toEqual(Array(4).fill("pro_499"));
+  });
+});
+
 describe("describePromo", () => {
   test("a code applied to the running trial", () => {
     expect(describePromo({
       status: "applied", code: "ROST", creditCents: 10000, expiresAt: Date.UTC(2026, 10, 7, 12), balanceCents: 0,
       trialDays: 31, trialCreditCents: 10000, appliesTo: "current_trial",
-    })).toBe("Your trial now runs 31 days with $100 in credits, until Nov 7, 2026.");
+    })).toBe("Your trial now runs 31 days with $100 of usage, until Nov 7, 2026.");
   });
 
   test("an older server's answers", () => {

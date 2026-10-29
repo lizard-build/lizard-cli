@@ -68,7 +68,7 @@ lizard ps         # list services
 lizard status     # show the linked workspace, project and service
 lizard logs       # stream runtime logs
 lizard metrics    # resource metrics (CPU, memory, network, disk); --cost for spend
-lizard billing    # plan, trial, usage this month; start, cancel or resume Pro
+lizard billing    # plan, tier, trial, usage this month; start, change tier, cancel or resume Pro
 lizard metrics --all # all services in the project, even with a linked service
 lizard scale      # scale replicas / CPU / memory / storage
 lizard pause      # stop a service (app or database) without deleting it; `lizard resume` starts it again
@@ -110,6 +110,7 @@ Run `lizard --help` for the full list.
 ```bash
 lizard billing          # plan, trial, usage this month, next charge
 lizard billing start    # start the Pro trial in Stripe Checkout
+lizard billing tier 5x  # move a paid subscription to pro, 5x or 20x
 lizard billing promo X  # redeem a promo code for a longer trial
 ```
 

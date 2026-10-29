@@ -277,6 +277,7 @@ Billing belongs to the account owner. `lizard billing --workspace <id> --json` s
 ```sh
 lizard billing --json              # plan, trial, this month's usage, next charge, billingUrl
 lizard billing start --json        # Stripe Checkout link: the Pro trial, or Pro at once
+lizard billing tier 5x -y --json   # move a paid Pro subscription to pro, 5x or 20x
 lizard billing promo <code> --json # a longer trial with more trial usage
 lizard billing open                # the Billing page
 lizard metrics --cost --json       # one project's cost per hour and this period's usage (owner only; a key limited to projects can't read costs); proCredits on Pro
@@ -291,9 +292,15 @@ accounts run a longer trial without a card: read `trial.endsAt` and
 `trial.creditCents` from `lizard billing --json` instead of assuming. When
 the trial usage runs out, running resources pause and nothing new can be created
 until Pro starts. Data is kept. Promo codes work only before the first payment.
-Trial accounts run 1 replica per app and 5 sandboxes at once; after the first
-paid invoice, 5 replicas per app and 100 sandboxes (paused sandboxes don't
-count). Pro cards are changed or removed on the Billing page;
+Pro 5x ($99/month, $99 of usage) and Pro 20x ($499/month, $499) work the same
+way and run more Sandboxes at once. They have no trial: `lizard billing start
+--tier 5x` charges today. A paid subscription changes tier with `lizard billing
+tier <pro|5x|20x>`: up is charged now, prorated, and the new limits apply at once;
+down starts with the next period. `lizard billing --json` shows `tier` and
+`pendingTier`. Sandbox limits count vCPU of running sandboxes (Small 2, Medium 4,
+Large 8; paused ones don't count), across all of the owner's workspaces: the trial
+runs up to 4 Small (8 vCPU), Pro 40 vCPU, Pro 5x 220, Pro 20x 1,200. Trial
+accounts run 1 replica per app; after the first paid invoice, 5. Pro cards are changed or removed on the Billing page;
 `lizard billing payment-methods remove` works only for Enterprise accounts (Pro: 409 `CREDITS_NOT_AVAILABLE`).
 Enterprise accounts pay as you go, invoiced monthly. There are no top-ups, no
 auto top-up and no crypto or x402 payments.
@@ -316,9 +323,11 @@ and `body.status` with the links:
 | anything else | Show `message` and `body.billingUrl` |
 
 `sandbox resume` on an account on hold fails with 403 instead (exit `2`). Too many
-sandboxes at once, or too many starts per minute, is HTTP 429 (`SANDBOX_LIMIT_REACHED`,
-`SANDBOX_RATE_LIMITED` with `retryAfterS`), not a billing problem: wait or delete
-idle sandboxes. A workspace can also have its own limits, set by its owner
+vCPU of sandboxes at once, or too many starts per minute, is HTTP 429, not a billing
+problem. `SANDBOX_LIMIT_REACHED` has `unit: "vcpu"`, `limit`, `running` (vCPU in use)
+and `needed` (vCPU the new sandbox needs): pause or delete idle sandboxes, pick a
+smaller size, or ask the user about a higher Pro tier. `SANDBOX_RATE_LIMITED` has
+`retryAfterS`: wait that long. A workspace can also have its own limits, set by its owner
 (`lizard workspace limits <ws>` shows them with current use): `WORKSPACE_SANDBOX_LIMIT`
 (sandboxes running at once: pause or delete one) and `WORKSPACE_USAGE_LIMIT` (its apps
 and databases use as much CPU or memory as allowed: deploys, restarts, scale-ups, new
@@ -331,5 +340,5 @@ Retrying the same call does not help; only the owner raises them. `billing start
 Checkout and invoice pages open in the user's browser; you cannot finish them.
 Give the user the link, never ask for card details in chat, and retry the
 failed command after they say they are done. `start-now` (charges $19 now),
-`cancel` and `resume` change what the user pays: run them only when the user
-asks. Without a terminal, `start-now` and `cancel` need `-y`.
+`tier`, `cancel` and `resume` change what the user pays: run them only when the
+user asks. Without a terminal, `start-now`, `tier` and `cancel` need `-y`.

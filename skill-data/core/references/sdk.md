@@ -47,7 +47,7 @@ Options for `create()` (TypeScript / Python):
 
 Templates: `base` (default), `interpreter` (Python with data libraries, plus Node 22), `codex`, `claude`, `opencode`, `pi`, `prime` (one coding agent each), `desktop`. The SDK and CLI give a sandbox 5 minutes by default; the raw API and the dashboard give none. Commands do not reset the deadline. Pricing is flat by size, billed per second while the sandbox runs; a sandbox restored from a snapshot runs at the source's size and is billed at that size; volumes bill separately.
 
-An account runs at most 5 sandboxes at once on a trial and 100 after its first paid invoice, with limits on starts per minute, hour and day: over a limit, a `LizardError` with status 429 and `code` `SANDBOX_LIMIT_REACHED` or `SANDBOX_RATE_LIMITED`. More than 32 commands at once in one sandbox gives `EXEC_LIMIT_REACHED`.
+An account's limit counts vCPU of running sandboxes (Small 2, Medium 4, Large 8): up to 4 Small on the trial, 40 vCPU on Pro, 220 on Pro 5x and 1,200 on Pro 20x, with limits on starts per minute, hour and day. Over a limit, a `LimitExceededError` (status 429) with `code` `SANDBOX_LIMIT_REACHED` (`unit` `vcpu`, `limit`, `running`, `needed`) or `SANDBOX_RATE_LIMITED` (`retryAfterS`). More than 32 commands at once in one sandbox gives `EXEC_LIMIT_REACHED`.
 
 ## Quickstart
 
