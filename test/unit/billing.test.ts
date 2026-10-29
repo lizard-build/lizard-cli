@@ -431,6 +431,6 @@ describe("describePromo", () => {
     expect(describePromo({ status: "applied", creditCents: 2500, expiresAt: null, balanceCents: 3000 }))
       .toBe("Redeemed $25.00. New balance: $30.00.");
     expect(describePromo({ status: "pending_payment_method", creditCents: 2500, expiresAt: null, balanceCents: 0 }))
-      .toBe("Code saved: $25.00 in credits. They unlock when you start your trial in Billing.");
+      .toBe("Code saved: $25.00 of trial usage. It unlocks when you start your trial in Billing.");
   });
 });

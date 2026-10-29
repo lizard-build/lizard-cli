@@ -172,7 +172,7 @@ describe("account state", () => {
   });
 
   test("instructions say when not to touch billing", () => {
-    expect(accountInstruction("trial_available", none)).toContain("7-day Pro trial with $5 in credits");
+    expect(accountInstruction("trial_available", none)).toContain("7-day Pro trial with $5 of usage");
     expect(accountInstruction("trial_available", none)).toContain("lizard billing start --json");
     expect(accountInstruction("subscription_required", none)).toContain("do NOT promise one");
     expect(accountInstruction("active", null)).toContain("Do NOT open billing");
@@ -180,7 +180,7 @@ describe("account state", () => {
     const now = Date.now();
     const trialing = { ...none, plan: "pro", status: "trialing", trial: { ...none.trial, endsAt: now + 3 * DAY, remainingCents: 380 } };
     expect(accountInstruction("trialing", trialing, now)).toBe(
-      "The Pro trial is on (3 days left, $3.80 of trial credits left). Do NOT open billing or start a subscription.",
+      "The Pro trial is on (3 days left, $3.80 of trial usage left). Do NOT open billing or start a subscription.",
     );
   });
 

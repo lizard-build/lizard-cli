@@ -392,13 +392,13 @@ async function fetchProCredits(workspaceId) {
     };
 }
 const dollars = (cents) => (cents % 100 === 0 ? `$${cents / 100}` : `$${(cents / 100).toFixed(2)}`);
-/** "$4.10 of $19 in monthly credits used, overage $0" — the account-wide line for Pro. */
+/** "$4.10 used of $19 included, overage $0" — the account-wide line for Pro. */
 export function proCreditsLine(pro) {
     if (pro.kind === "trial") {
         const left = Math.max(0, pro.includedCents - pro.usedCents);
-        return `${dollars(pro.usedCents)} of ${dollars(pro.includedCents)} in trial credits used, ${dollars(left)} left`;
+        return `${dollars(pro.usedCents)} used of ${dollars(pro.includedCents)} included, ${dollars(left)} left`;
     }
-    return `${dollars(pro.usedCents)} of ${dollars(pro.includedCents)} in monthly credits used, overage ${dollars(pro.overageCents)}`;
+    return `${dollars(pro.usedCents)} used of ${dollars(pro.includedCents)} included, overage ${dollars(pro.overageCents)}`;
 }
 function fmtPeriodDate(ms) {
     return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
