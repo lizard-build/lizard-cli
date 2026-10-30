@@ -299,7 +299,9 @@ tier <pro|5x|20x>`: up is charged now, prorated, and the new limits apply at onc
 down starts with the next period. `lizard billing --json` shows `tier` and
 `pendingTier`. Sandbox limits count vCPU of running sandboxes (Small 2, Medium 4,
 Large 8; paused ones don't count), across all of the owner's workspaces: the trial
-runs up to 4 Small (8 vCPU), Pro 40 vCPU, Pro 5x 220, Pro 20x 1,200. Trial
+runs up to 4 Small (8 vCPU), Pro 40 vCPU, Pro 5x 220, Pro 20x 1,200. Sandbox
+starts are limited per day: 100 on the trial, 400 on Pro, 1,000 on Pro 5x, 3,000
+on Pro 20x (per minute 6, 24, 60, 120; per hour 30, 120, 300, 600). Trial
 accounts run 1 replica per app; after the first paid invoice, 5. Pro cards are changed or removed on the Billing page;
 `lizard billing payment-methods remove` works only for Enterprise accounts (Pro: 409 `CREDITS_NOT_AVAILABLE`).
 Enterprise accounts pay as you go, invoiced monthly. There are no top-ups, no
@@ -323,11 +325,12 @@ and `body.status` with the links:
 | anything else | Show `message` and `body.billingUrl` |
 
 `sandbox resume` on an account on hold fails with 403 instead (exit `2`). Too many
-vCPU of sandboxes at once, or too many starts per minute, is HTTP 429, not a billing
-problem. `SANDBOX_LIMIT_REACHED` has `unit: "vcpu"`, `limit`, `running` (vCPU in use)
+vCPU of sandboxes at once, or too many starts per minute, hour or day, is HTTP 429,
+not a billing problem. `SANDBOX_LIMIT_REACHED` has `unit: "vcpu"`, `limit`, `running` (vCPU in use)
 and `needed` (vCPU the new sandbox needs): pause or delete idle sandboxes, pick a
 smaller size, or ask the user about a higher Pro tier. `SANDBOX_RATE_LIMITED` has
-`retryAfterS`: wait that long. A workspace can also have its own limits, set by its owner
+`retryAfterS`: wait that long; on the trial, the first paid invoice raises the day's
+100 starts to 400. A workspace can also have its own limits, set by its owner
 (`lizard workspace limits <ws>` shows them with current use): `WORKSPACE_SANDBOX_LIMIT`
 (sandboxes running at once: pause or delete one) and `WORKSPACE_USAGE_LIMIT` (its apps
 and databases use as much CPU or memory as allowed: deploys, restarts, scale-ups, new
