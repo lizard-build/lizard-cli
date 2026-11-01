@@ -98,9 +98,9 @@ exit code.
 Run a coding agent in a sandbox made from its template (`-t codex`, `-t claude`, `-t opencode`, `-t pi`, `-t prime`) on the user's own credentials. Give the sandbox a real lifetime (`--timeout 3600000`): at five minutes it is deleted with the agent mid-task. Another template with Node installs the agent at the first prompt, which is slow; one without Node can't run agents.
 
 - `lizard agents` — the credentials of the linked project (or `-p <project>`) and which agents can run.
-  Connect them per project (here or in the dashboard: the project's Sandboxes › Agents). Everyone on
-  the project shares them, and they sign in every sandbox in it, for every agent that accepts them.
-  A new project starts empty.
+  Connect them per project (here or in the dashboard: the project's Sandboxes › Agents). A login you
+  connect also signs in your teammates' sandboxes in that project (members of its workspace); your
+  own login of a kind wins over a teammate's. A new project starts empty.
 - `lizard agents login chatgpt` — ChatGPT subscription via device code.
   `lizard agents add claude` (token from `claude setup-token`), `add anthropic|openai|openrouter|llmgateway|deepseek` for API keys.
 - `lizard agents use <agent> --credential … --model … --effort …` — per-agent defaults.
