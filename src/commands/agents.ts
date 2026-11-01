@@ -16,8 +16,8 @@ import { success, info, isJSONMode, printJSON, table, timeAgo } from "../lib/for
 //   lizard sandbox conversations <id>
 //   lizard sandbox interrupt <id>
 //
-// Credentials belong to a project, per user: what you connect signs in your sandboxes in that
-// project only (the linked one, or -p). The platform keeps the refresh token and hands a
+// Credentials belong to a project and are shared by everyone on it: what anyone connects
+// signs in every sandbox of that project (the linked one, or -p). The platform keeps the refresh token and hands a
 // sandbox only a short-lived access token per run.
 
 // Agents that can run today; the platform lists the rest as coming (GET /agents).
@@ -73,7 +73,7 @@ async function showPool(project?: string) {
 
 export function registerAgents(program: Command) {
   const ag = program.command("agents")
-    .description("Coding agents in sandboxes: your credentials in this project (ChatGPT, Claude, API keys) and per-agent defaults")
+    .description("Coding agents in sandboxes: the project's credentials (ChatGPT, Claude, API keys), shared by everyone on it, and per-agent defaults")
     .option("-p, --project <id>", "Project (name, slug or ID). Defaults to the linked project")
     .action(async (opts) => showPool(opts.project));
 
