@@ -14,8 +14,9 @@ import { success, info, isJSONMode, printJSON, table, timeAgo } from "../lib/for
 //   lizard sandbox conversations <id>
 //   lizard sandbox interrupt <id>
 //
-// Credentials belong to a project, per user: what you connect signs in your sandboxes in that
-// project only (the linked one, or -p). The platform keeps the refresh token and hands a
+// Credentials belong to a project (the linked one, or -p). A login one member connects also
+// signs in their teammates' runs and terminals there (members of the project's workspace);
+// your own login of a kind wins over a teammate's, and only its owner can remove a shared one. The platform keeps the refresh token and hands a
 // sandbox only a short-lived access token per run.
 // Agents that can run today; the platform lists the rest as coming (GET /agents).
 const PROVIDERS = ["codex", "claude", "pi", "opencode", "prime"];
@@ -45,7 +46,7 @@ async function showPool(project) {
     info(chalk.bold("Credentials") + chalk.dim("  — connect once, every agent that accepts it can use it"));
     table(["Credential", "Status", "Account"], r.credentials.map((c) => [
         c.label, c.connected ? chalk.green("connected") : c.status === "reauth_required" ? chalk.yellow("sign in again") : chalk.dim("—"),
-        c.connected ? [c.account, c.plan].filter(Boolean).join(" · ") || "" : "",
+        c.connected ? [c.account, c.plan, c.sharedBy && `shared by ${c.sharedBy}`].filter(Boolean).join(" · ") || "" : "",
     ]));
     info("");
     info(chalk.bold("Agents"));
@@ -58,7 +59,7 @@ async function showPool(project) {
 }
 export function registerAgents(program) {
     const ag = program.command("agents")
-        .description("Coding agents in sandboxes: your credentials in this project (ChatGPT, Claude, API keys) and per-agent defaults")
+        .description("Coding agents in sandboxes: the project's credentials (ChatGPT, Claude, API keys), shared with your teammates, and per-agent defaults")
         .option("-p, --project <id>", "Project (name, slug or ID). Defaults to the linked project")
         .action(async (opts) => showPool(opts.project));
     ag.command("status")
