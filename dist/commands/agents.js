@@ -3,6 +3,7 @@ import ora from "ora";
 import open from "open";
 import * as p from "@clack/prompts";
 import { api, APIError } from "../lib/api.js";
+import { resolveProjectId } from "../lib/config.js";
 import { success, info, isJSONMode, printJSON, table, timeAgo } from "../lib/format.js";
 // Built-in coding agents (platform: server/src/routes/agents.ts), Boat-style.
 //
@@ -13,8 +14,9 @@ import { success, info, isJSONMode, printJSON, table, timeAgo } from "../lib/for
 //   lizard sandbox conversations <id>
 //   lizard sandbox interrupt <id>
 //
-// Credentials belong to your account: connect once, every sandbox can run agents on them. The platform keeps the refresh token and hands a sandbox only a short-lived access
-// token per run.
+// Credentials belong to a project, per user: what you connect signs in your sandboxes in that
+// project only (the linked one, or -p). The platform keeps the refresh token and hands a
+// sandbox only a short-lived access token per run.
 // Agents that can run today; the platform lists the rest as coming (GET /agents).
 const PROVIDERS = ["codex", "claude", "pi", "opencode", "prime"];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -34,8 +36,9 @@ function checkProvider(p) {
     if (!PROVIDERS.includes(p))
         throw new Error(`Unknown agent '${p}'. Available: ${PROVIDERS.join(", ")}.`);
 }
-async function showPool() {
-    const r = await api.get("/api/agents");
+const agentsPath = (projectId) => `/api/projects/${encodeURIComponent(projectId)}/agents`;
+async function showPool(project) {
+    const r = await api.get(agentsPath(await resolveProjectId(project)));
     if (isJSONMode())
         return printJSON(r);
     const label = (k) => r.credentials.find((c) => c.kind === k)?.label ?? k;
@@ -55,16 +58,16 @@ async function showPool() {
 }
 export function registerAgents(program) {
     const ag = program.command("agents")
-        .description("Coding agents in sandboxes: your account's credentials (ChatGPT, Claude, API keys) and per-agent defaults")
-        .option("-p, --project <id>", "Ignored: agent credentials belong to your account")
-        .action(async (opts) => showPool());
+        .description("Coding agents in sandboxes: your credentials in this project (ChatGPT, Claude, API keys) and per-agent defaults")
+        .option("-p, --project <id>", "Project (name, slug or ID). Defaults to the linked project")
+        .action(async (opts) => showPool(opts.project));
     ag.command("status")
-        .option("-p, --project <id>", "Ignored: agent credentials belong to your account")
+        .option("-p, --project <id>", "Project (name, slug or ID). Defaults to the linked project")
         .description("Show connected credentials and which agents can run")
-        .action(async (opts) => showPool());
+        .action(async (opts) => showPool(opts.project));
     ag.command("login")
         .argument("[credential]", "Subscription to sign in to (chatgpt)", "chatgpt")
-        .option("-p, --project <id>", "Ignored: agent credentials belong to your account")
+        .option("-p, --project <id>", "Project (name, slug or ID). Defaults to the linked project")
         .option("--open", "Open the sign-in page in your browser")
         .description("Sign in to your ChatGPT subscription with a device code (used by Codex)")
         .action(async (name, opts) => {
@@ -73,7 +76,8 @@ export function registerAgents(program) {
             throw new Error("Claude subscriptions are added with a token: run `claude setup-token`, then `lizard agents add claude`.");
         if (kind !== "chatgpt")
             throw new Error(`'${name}' is added with \`lizard agents add ${name}\`.`);
-        const start = await api.post(`/api/agents/credentials/chatgpt/login`, {});
+        const base = agentsPath(await resolveProjectId(opts.project));
+        const start = await api.post(`${base}/credentials/chatgpt/login`, {});
         if (isJSONMode())
             printJSON(start);
         else {
@@ -86,7 +90,7 @@ export function registerAgents(program) {
         const spinner = isJSONMode() ? null : ora("Waiting for you to approve…").start();
         for (;;) {
             await sleep(Math.max(2, start.interval) * 1000);
-            const r = await api.get(`/api/agents/credentials/chatgpt/login/${start.loginId}`).catch((e) => { spinner?.stop(); throw e; });
+            const r = await api.get(`${base}/credentials/chatgpt/login/${start.loginId}`).catch((e) => { spinner?.stop(); throw e; });
             if (r.status === "pending")
                 continue;
             spinner?.stop();
@@ -102,13 +106,14 @@ export function registerAgents(program) {
     });
     ag.command("add")
         .argument("<credential>", "claude | anthropic | openai | openrouter | llmgateway | deepseek | moonshot")
-        .option("-p, --project <id>", "Ignored: agent credentials belong to your account")
+        .option("-p, --project <id>", "Project (name, slug or ID). Defaults to the linked project")
         .option("--key <value>", "The key or token (otherwise read from stdin, or asked for)")
         .description("Add an API key, or a Claude subscription token from `claude setup-token`")
         .action(async (name, opts) => {
         const kind = kindOf(name);
         if (kind === "chatgpt")
             throw new Error("ChatGPT is added by signing in: `lizard agents login chatgpt`.");
+        const base = agentsPath(await resolveProjectId(opts.project));
         let key = opts.key;
         if (!key && !process.stdin.isTTY)
             key = (await new Promise((res) => { let d = ""; process.stdin.on("data", (c) => (d += c)); process.stdin.on("end", () => res(d)); })).trim();
@@ -120,7 +125,7 @@ export function registerAgents(program) {
                 return;
             key = String(v).trim();
         }
-        const r = await api.put(`/api/agents/credentials/${kind}`, { apiKey: key });
+        const r = await api.put(`${base}/credentials/${kind}`, { apiKey: key });
         if (isJSONMode())
             printJSON(r);
         else
@@ -129,11 +134,11 @@ export function registerAgents(program) {
     ag.command("remove")
         .alias("logout")
         .argument("<credential>", "chatgpt | claude | anthropic | openai | openrouter | llmgateway | deepseek | moonshot")
-        .option("-p, --project <id>", "Ignored: agent credentials belong to your account")
+        .option("-p, --project <id>", "Project (name, slug or ID). Defaults to the linked project")
         .description("Remove a credential from this project")
         .action(async (name, opts) => {
         const kind = kindOf(name);
-        await api.delete(`/api/agents/credentials/${kind}`);
+        await api.delete(`${agentsPath(await resolveProjectId(opts.project))}/credentials/${kind}`);
         if (isJSONMode())
             printJSON({ kind, disconnected: true });
         else
@@ -141,7 +146,7 @@ export function registerAgents(program) {
     });
     ag.command("use")
         .argument("<agent>", "codex | claude | pi | opencode | prime | kimi")
-        .option("-p, --project <id>", "Ignored: agent credentials belong to your account")
+        .option("-p, --project <id>", "Project (name, slug or ID). Defaults to the linked project")
         .option("--credential <name>", "For Codex / Claude Code: which credential to use")
         .option("-m, --model <model>", "Default model (\"none\" to clear)")
         .option("--effort <level>", "Default reasoning effort (\"none\" to clear)")
@@ -156,7 +161,7 @@ export function registerAgents(program) {
             body.defaultEffort = opts.effort === "none" ? null : opts.effort;
         if (!Object.keys(body).length)
             throw new Error("Nothing to set: pass --credential, --model or --effort.");
-        const r = await api.put(`/api/agents/harnesses/${agent}`, body);
+        const r = await api.put(`${agentsPath(await resolveProjectId(opts.project))}/harnesses/${agent}`, body);
         if (isJSONMode())
             printJSON(r);
         else
