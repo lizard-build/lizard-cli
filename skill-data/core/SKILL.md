@@ -300,8 +300,8 @@ down starts with the next period. `lizard billing --json` shows `tier` and
 `pendingTier`. Sandbox limits count vCPU of running sandboxes (Small 2, Medium 4,
 Large 8; paused ones don't count), across all of the owner's workspaces: the trial
 runs up to 4 Small (8 vCPU), Pro 40 vCPU, Pro 5x 220, Pro 20x 1,200. Sandbox
-starts are limited per day: 100 on the trial, 400 on Pro, 1,000 on Pro 5x, 3,000
-on Pro 20x (per minute 6, 24, 60, 120; per hour 30, 120, 300, 600). Trial
+starts are limited per day: 100 on the trial, 400 on Pro (per minute 6, 24; per
+hour 30, 120); Pro 5x and Pro 20x have unlimited starts. Trial
 accounts run 1 replica per app; after the first paid invoice, 5. Pro cards are changed or removed on the Billing page;
 `lizard billing payment-methods remove` works only for Enterprise accounts (Pro: 409 `CREDITS_NOT_AVAILABLE`).
 Enterprise accounts pay as you go, invoiced monthly. There are no top-ups, no
