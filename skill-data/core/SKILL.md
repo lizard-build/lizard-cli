@@ -268,7 +268,12 @@ The loop: run `lizard gha --json` and act on `next`, then run it again. Repeat u
 - `next.actor: "agent"`: do it yourself: run `next.command` (or, with no command, what `next.say` says, e.g. commit and push). If `next.confirm` is true, ask the user first (show `next.say`); it connects billing or edits their files.
 - `verdict: "BLOCKED"`: tell the user `next.say` and stop; retrying won't help.
 
-Don't edit `runs-on` by hand before `lizard gha` says READY: jobs would wait for a runner that can't start. After `migrate`, commit and push the workflow changes the usual way. Exit code is 0 whenever the state is known (also when not ready); `--require-ready` exits 1 unless ready.
+Migrating is just a YAML edit in the user's checkout: the CLI never opens a pull request or merges anything. Two ways, both fine:
+
+- `lizard gha migrate` edits `runs-on` in `.github/workflows/*.yml` for you: it skips jobs that can't move (macOS, Windows, expressions, reusable workflows, runner groups), picks the size (`--size`, `--job build=large`) and keeps comments and formatting.
+- Or edit `runs-on` yourself: replace `ubuntu-latest` / `ubuntu-24.04` / `ubuntu-22.04` with `lizard-medium-ubuntu-2404` (or `-small-` / `-large-`). Leave macOS and Windows jobs alone. Then run `lizard gha --json`: it checks the labels (a wrong one like `lizard-med-ubuntu-2404` comes back as `UNKNOWN_LABEL`).
+
+Either way, show the user the diff, then commit and push the way the repository normally works (straight to the branch, or a pull request you open yourself). Don't change `runs-on` before `lizard gha` says READY: jobs would wait for a runner that can't start. Exit code is 0 whenever the state is known (also when not ready); `--require-ready` exits 1 unless ready.
 
 ## Response format
 
