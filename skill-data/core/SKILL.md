@@ -251,6 +251,25 @@ Lizard Git (lizard.build/git) hosts repositories with issues, pull requests, rev
 - **Admin**: `lizard git protect set main --require-pr --approvals 1 --checks ci/test --block-force-push [--enforce-admins]`, `protect list|delete`; `collaborator add <login> --role read|write|admin` (they accept with `lizard git invitation accept <id>`), `collaborator list|role|remove`; `webhook create <url> -e push,pull_request --secret s`, `webhook list|edit|ping|deliveries|redeliver|delete`; `label ...`; `release create v1.0.0 -t <title> -n <notes> -a <file>`, `release list|view|edit|upload|download|delete`; `commit-status set <sha> -s success -c <context>`; `notification list|read`; `token create <name> [--repo r] [--read-only]` (a limited lzg_ token; use it as `LIZARD_GIT_TOKEN` or the git password).
 - From code, the SDK has the same: `lizard.git.repos`, `.issues`, `.pulls`, `.actions`, `.releases`, ... (see the `sdk` reference).
 
+## GitHub Actions runners
+
+Run a repository's GitHub Actions jobs on Lizard runners (`lizard-small|medium|large-ubuntu-2404`: 2/4/8 vCPU, billed per second). GitHub organizations only; personal accounts can't use them.
+
+```
+lizard gha --json              # where setup stands + the ONE next step (run inside the repository, or --repo owner/name)
+lizard gha connect --json      # connect the organization to the user's Lizard account (their account pays)
+lizard gha migrate --dry-run --json   # which jobs would move; then `lizard gha migrate --json` edits .github/workflows
+lizard gha jobs --json         # recent jobs on Lizard runners
+```
+
+The loop: run `lizard gha --json` and act on `next`, then run it again. Repeat until `next.actor` is `none`.
+
+- `next.actor: "user"` or `"org_owner"`: a person has to do it in a browser. Show `next.say` and `next.url` exactly as written, wait until they say it's done, then run `next.command`. Never open the link or click through GitHub yourself.
+- `next.actor: "agent"`: do it yourself: run `next.command` (or, with no command, what `next.say` says, e.g. commit and push). If `next.confirm` is true, ask the user first (show `next.say`); it connects billing or edits their files.
+- `verdict: "BLOCKED"`: tell the user `next.say` and stop; retrying won't help.
+
+Don't edit `runs-on` by hand before `lizard gha` says READY: jobs would wait for a runner that can't start. After `migrate`, commit and push the workflow changes the usual way. Exit code is 0 whenever the state is known (also when not ready); `--require-ready` exits 1 unless ready.
+
 ## Response format
 
 After an operation, return:
