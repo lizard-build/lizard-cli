@@ -98,6 +98,28 @@ function readWorkflows(root: string): { path: string; text: string }[] {
     .map((f) => ({ path: `.github/workflows/${f}`, text: readFileSync(path.join(dir, f), "utf8") }));
 }
 
+/**
+ * Is this checkout behind GitHub with different workflow files there? Then the local files say
+ * nothing about what runs: GitHub runs what's on the branch. Fetches the branch's upstream first
+ * (10 s at most; offline just uses what was last fetched).
+ */
+function outOfDate(root: string): { behind: number; upstream: string } | null {
+  const upstream = git(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"], root);
+  if (!upstream) return null;
+  const [remote, ...rest] = upstream.split("/");
+  try {
+    execFileSync("git", ["fetch", "--quiet", remote, rest.join("/")], { cwd: root, stdio: "ignore", timeout: 10_000 });
+  } catch { /* offline: compare with what we have */ }
+  const behind = Number(git(["rev-list", "--count", `HEAD..${upstream}`], root) ?? "0");
+  if (!behind) return null;
+  try {
+    execFileSync("git", ["diff", "--quiet", "HEAD", upstream, "--", ".github/workflows"], { cwd: root, stdio: "ignore" });
+    return null; // same workflow files: the local ones are accurate
+  } catch {
+    return { behind, upstream };
+  }
+}
+
 function workflowsUncommitted(root: string): boolean {
   const out = git(["status", "--porcelain", "--", ".github/workflows"], root);
   return !!out && out.length > 0;
@@ -147,6 +169,14 @@ async function report(ctx: RepoContext): Promise<Report> {
     s.next = { actor: "agent", say: `${s.repo} is connected. Run this inside a checkout of ${s.repo} to move its workflows.`, command: "lizard gha migrate --dry-run" };
     return s;
   }
+  const stale = outOfDate(ctx.root);
+  if (stale) {
+    s.state = "CHECKOUT_OUT_OF_DATE";
+    s.verdict = "NOT_READY";
+    s.message = `${s.repo} is connected, but this checkout is ${stale.behind} commit${stale.behind === 1 ? "" : "s"} behind ${stale.upstream} and its workflow files differ, so they don't show what GitHub runs.`;
+    s.next = { actor: "agent", confirm: true, say: "Update this checkout first so its workflow files match GitHub (git pull), then check again.", command: `git pull && ${cmd("lizard gha", ctx)}` };
+    return s;
+  }
   const files = readWorkflows(ctx.root);
   if (!files.length) {
     s.state = "NO_WORKFLOWS";
@@ -178,7 +208,7 @@ async function report(ctx: RepoContext): Promise<Report> {
   } else if (w.onLizard.length && w.uncommitted) {
     s.state = "NOT_PUSHED";
     s.message = "The workflows here use Lizard runners, but the change isn't committed yet.";
-    s.next = { actor: "agent", say: "Commit and push the changes in .github/workflows (or open a pull request). The next run after that uses Lizard runners." };
+    s.next = { actor: "agent", say: `Commit and push the changes in .github/workflows (or open a pull request) the way you normally would: the next run uses Lizard runners. Afterwards, \`${cmd("lizard gha", ctx)}\` confirms the first job ran.` };
   } else if (w.onLizard.length && !s.recentJobs.length) {
     s.state = "WAITING_FOR_FIRST_RUN";
     s.message = "The workflows use Lizard runners. No job has run on Lizard yet.";
@@ -358,6 +388,10 @@ lizard-large-ubuntu-2404 (8 vCPU), billed per second. GitHub organizations only.
         }
         return;
       }
+      const stale = opts.force ? null : outOfDate(ctx.root!);
+      if (stale) {
+        fail(`This checkout is ${stale.behind} commit${stale.behind === 1 ? "" : "s"} behind ${stale.upstream} and its workflow files differ. Run \`git pull\` first, then \`lizard gha migrate\` again (or pass --force to edit these files anyway).`, 1, "CHECKOUT_OUT_OF_DATE");
+      }
       const files = readWorkflows(ctx.root!);
       if (!files.length) fail("No workflow files in .github/workflows.", 1, "NO_WORKFLOWS");
       const p = await getPreview(files, { size: opts.size, jobs: parseJobSizes(opts.job), cache: opts.cache, docker: opts.docker });
@@ -371,7 +405,7 @@ lizard-large-ubuntu-2404 (8 vCPU), billed per second. GitHub organizations only.
         ? { actor: "none", say: "Nothing needed changing.", command: cmd("lizard gha", ctx) }
         : opts.dryRun
           ? { actor: "agent", confirm: true, say: `This changes runs-on for ${moves.length} job${moves.length === 1 ? "" : "s"} (listed above) in your workflow files. Apply it?`, command: cmd(`lizard gha migrate${opts.size ? ` --size ${opts.size}` : ""}${(opts.job ?? []).map((j) => ` --job ${j}`).join("")}${opts.cache ? " --cache" : ""}${opts.docker ? " --docker" : ""}`, ctx) }
-          : { actor: "agent", say: `Updated ${changed.length} workflow file${changed.length === 1 ? "" : "s"}. Commit and push them (or open a pull request); the next run uses Lizard runners.`, command: cmd("lizard gha", ctx) };
+          : { actor: "agent", say: `Updated ${changed.length === 1 ? "1 workflow file" : `${changed.length} workflow files`}. Commit and push ${changed.length === 1 ? "it" : "them"} (or open a pull request) the way you normally would: the next run uses Lizard runners. Afterwards, \`${cmd("lizard gha", ctx)}\` confirms the first job ran.` };
 
       if (isJSONMode()) {
         printJSON({
