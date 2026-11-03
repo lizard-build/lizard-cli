@@ -54,7 +54,7 @@ lizard sandbox files get <id> <remote> <local>
 lizard sandbox files rm <id> <path>
 ```
 
-`ssh` starts in `/workspace` and volumes mount there; `exec` starts in `/root`, so use absolute paths. `files put` and `files get` keep binary files intact. `files get` and `files cat` stop at 15 MiB (HTTP 413); `files put` takes about 110 MB.
+`ssh` starts in `/workspace` and volumes mount there; `exec` starts in `/root`, so use absolute paths. `files put` and `files get` keep binary files intact. `files get` and `files cat` stop at 15 MiB (HTTP 413); `files put` takes files of any size: over 64 MB it sends 32 MB pieces and joins them in the sandbox, which needs free disk for the file plus one piece.
 
 ## Ports
 

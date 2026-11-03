@@ -778,11 +778,10 @@ function registerSandboxFiles(sb: Command) {
     .argument("<id>", "Sandbox ID")
     .argument("<local>", "Local file path")
     .argument("<remote>", "Destination path inside the sandbox")
-    .description("Upload a local file into a sandbox")
+    .description("Upload a local file into a sandbox (any size: big files go in pieces)")
     .action(async (id: string, local: string, remote: string) => {
-      const content = fs.readFileSync(local).toString("base64");
-      await api.post(`/api/sandboxes/${id}/files`, { path: remote, content, encoding: "base64" });
-      if (isJSONMode()) printJSON({ id, path: remote, status: "written" });
+      const size = await putSandboxFile(id, local, remote);
+      if (isJSONMode()) printJSON({ id, path: remote, size, status: "written" });
       else success(`Wrote ${chalk.bold(remote)} in sandbox ${id}`);
     });
 
@@ -809,6 +808,62 @@ function registerSandboxFiles(sb: Command) {
       if (isJSONMode()) printJSON({ id, path, status: "deleted" });
       else success(`Deleted ${chalk.bold(path)} in sandbox ${id}`);
     });
+}
+
+/** A file up to this size goes in one request. The server takes ~150 MB per request and the
+ *  content travels as base64 (4/3 of the bytes), so a single request stops at ~110 MB. */
+export const PUT_SINGLE_MAX = 64 * 1024 * 1024;
+/** A bigger file goes in pieces of this size, joined inside the sandbox. */
+export const PUT_CHUNK = 32 * 1024 * 1024;
+
+/**
+ * Write a local file into a sandbox; resolves with its size. Over PUT_SINGLE_MAX the file is
+ * read and sent one piece at a time (memory stays at one piece): each piece is written next to
+ * the destination, appended to a temporary file and removed, and the temporary file is renamed
+ * onto the destination at the end, so a failed upload never leaves a half-written file there
+ * and the sandbox's disk needs the file plus one piece.
+ */
+export async function putSandboxFile(id: string, local: string, remote: string, chunk = PUT_CHUNK,
+    singleMax = PUT_SINGLE_MAX): Promise<number> {
+  const size = fs.statSync(local).size;
+  const write = (path: string, buf: Buffer) =>
+    api.post(`/api/sandboxes/${id}/files`, { path, content: buf.toString("base64"), encoding: "base64" });
+  if (size <= singleMax) {
+    await write(remote, fs.readFileSync(local));
+    return size;
+  }
+  const sh = async (script: string, ...args: string[]) => {
+    const r = await api.post<{ exitCode?: number; stderr?: string }>(`/api/sandboxes/${id}/exec`,
+      { cmd: ["/bin/sh", "-c", script, "sh", ...args] });
+    if (r?.exitCode !== 0) throw new Error(`Upload failed inside the sandbox: ${r?.stderr?.trim() || `exit ${r?.exitCode}`}`);
+  };
+  const tag = `${process.pid}-${Date.now().toString(36)}`;
+  const tmp = `${remote}.lizard-upload-${tag}`;
+  const part = `${tmp}.part`;
+  const pieces = Math.ceil(size / chunk);
+  const spinner = !isJSONMode() && isTTY() ? ora(`Uploading ${local} (0/${pieces})`).start() : null;
+  const fd = fs.openSync(local, "r");
+  try {
+    await sh('mkdir -p -- "$(dirname -- "$1")" && : > "$1"', tmp);
+    const buf = Buffer.alloc(chunk);
+    for (let i = 0, off = 0; off < size; i++) {
+      const n = fs.readSync(fd, buf, 0, Math.min(chunk, size - off), off);
+      if (n <= 0) throw new Error(`Could not read ${local} at byte ${off}`);
+      await write(part, buf.subarray(0, n));
+      await sh('cat -- "$1" >> "$2" && rm -f -- "$1"', part, tmp);
+      off += n;
+      if (spinner) spinner.text = `Uploading ${local} (${i + 1}/${pieces})`;
+    }
+    await sh('[ "$(wc -c < "$1")" -eq "$2" ] && mv -f -- "$1" "$3"', tmp, String(size), remote);
+    spinner?.stop();
+    return size;
+  } catch (e) {
+    spinner?.fail();
+    await sh('rm -f -- "$1" "$2"', part, tmp).catch(() => {});
+    throw e;
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 /** Run a command inside a sandbox, streaming output. Resolves with the exit
