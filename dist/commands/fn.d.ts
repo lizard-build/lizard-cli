@@ -31,3 +31,10 @@ export declare function detectSource(p: string, opts?: {
 export declare function findHandler(lang: Lang, entry: string, text: string): string;
 export declare function zipFiles(files: Source["files"]): Buffer;
 export declare function registerFn(program: Command): void;
+export declare const EXIT: {
+    readonly OK: 0;
+    readonly FAILED: 1;
+    readonly AUTH: 2;
+    readonly INVALID: 3;
+    readonly TIMEOUT: 4;
+};

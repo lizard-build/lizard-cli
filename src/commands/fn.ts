@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import * as zlib from "node:zlib";
+import * as crypto from "node:crypto";
 import { createHash } from "node:crypto";
 import chalk from "chalk";
 import { Command } from "commander";
@@ -52,8 +53,8 @@ export function detectSource(p: string, opts: { runtime?: string; handler?: stri
   const names = files.map((f) => f.name);
   const lang: Lang = langOfRuntime(opts.runtime) ?? (names.includes("Cargo.toml") ? "rust" : names.includes("go.mod") || entry.endsWith(".go") ? "go"
     : /\.py$/.test(entry) ? "python" : /\.(m?js|cjs)$/.test(entry) ? "node" : /\.rb$/.test(entry) ? "ruby" : entry === "bootstrap" ? "shell"
-    : /\.ts$/.test(entry) ? (fail("TypeScript: compile it to .js first (e.g. npx esbuild index.ts --bundle --platform=node --outfile=index.mjs), then deploy the .js", 2), "node")
-    : (fail(`Can't tell the language of ${entry}: pass --runtime (e.g. python3.13, nodejs22.x, ruby3.3, provided.al2023)`, 2), "python"));
+    : /\.(ts|mts|cts)$/.test(entry) ? "node" // compiled on Lizard (esbuild)
+    : (() => { throw Object.assign(new Error(`Can't tell the language of ${entry}: pass --runtime (e.g. python3.13, nodejs22.x, ruby3.3, provided.al2023)`), { code: "INVALID_INPUT", remediation: `lizard fn deploy ${entry} --runtime python3.13 --json` }); })());
   const text = files.find((f) => f.name === entry)?.data.toString("utf8") ?? "";
   const handler = opts.handler ?? (lang === "go" || lang === "rust" || lang === "shell" ? "bootstrap" : findHandler(lang, entry, text));
   const deps = names.some((n) => ["requirements.txt", "Gemfile", "go.mod", "Cargo.toml"].includes(n))
@@ -83,7 +84,7 @@ function walk(root: string, rel = ""): Source["files"] {
     out.push({ name: r, data: fs.readFileSync(path.join(root, r)), mode: st.mode & 0o111 ? 0o100755 : undefined });
   }
   const size = out.reduce((n, f) => n + f.data.length, 0);
-  if (size > 50 * 1024 * 1024) fail(`${root} is ${Math.round(size / 1048576)} MB; a function's source is at most 50 MB (dependencies are installed by Lizard: don't ship node_modules or venv)`, 2);
+  if (size > 50 * 1024 * 1024) throw Object.assign(new Error(`${root} is ${Math.round(size / 1048576)} MB; a function's source is at most 50 MB (dependencies are installed by Lizard: don't ship node_modules or venv)`), { code: "SOURCE_TOO_LARGE", remediation: "lizard fn deploy <smaller directory> --json" });
   return out;
 }
 
@@ -91,15 +92,16 @@ function pickEntry(names: string[]): string {
   for (const n of ["Cargo.toml", "go.mod", "lambda_function.py", "handler.py", "app.py", "main.py", "index.mjs", "index.js", "handler.mjs", "handler.js", "app.js", "lambda_function.rb", "handler.rb", "bootstrap"]) {
     if (names.includes(n)) return n === "Cargo.toml" ? "src/main.rs" : n === "go.mod" ? (names.find((x) => !x.includes("/") && x.endsWith(".go")) ?? "main.go") : n;
   }
+  for (const n of ["index.ts", "handler.ts", "app.ts"]) if (names.includes(n)) return n;
   const top = names.filter((n) => !n.includes("/"));
-  const guess = top.find((n) => /\.(py|m?js|cjs|rb|go)$/.test(n));
-  if (!guess) fail("No function file found: name it handler.py, index.mjs, lambda_function.rb, main.go (or pass a file)", 2);
+  const guess = top.find((n) => /\.(py|m?js|cjs|rb|go|ts)$/.test(n) && !n.endsWith(".d.ts"));
+  if (!guess) throw Object.assign(new Error("No function file found: name it handler.py, index.mjs, index.ts, lambda_function.rb, main.go (or pass a file)"), { code: "INVALID_INPUT", remediation: "lizard fn deploy handler.py --json" });
   return guess!;
 }
 
 /** The handler (module.function) from the source, as Lambda names it. */
 export function findHandler(lang: Lang, entry: string, text: string): string {
-  const mod = entry.replace(/\.(py|m?js|cjs|rb)$/, "");
+  const mod = entry.replace(/\.(py|m?js|cjs|rb|ts|mts|cts)$/, "");
   if (lang === "python") {
     const names = [...text.matchAll(/^(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)/gm)].map((m) => m[1]);
     const fn = ["lambda_handler", "handler", "main"].find((n) => names.includes(n)) ?? names[0] ?? "lambda_handler";
@@ -157,7 +159,7 @@ async function resolveRegion(flag?: string): Promise<string> {
   const all = await regions();
   if (!flag) return all.includes("us-east-1") ? "us-east-1" : all[0] ?? "us-east-1";
   const r = REGION_ALIASES[flag] ?? flag;
-  if (all.length && !all.includes(r)) fail(`Lizard Functions runs in ${all.join(", ")} (aliases: us, eu); not in ${flag}`, 2);
+  if (all.length && !all.includes(r)) fail(`Lizard Functions runs in ${all.join(", ")} (aliases: us, eu); not in ${flag}`, 3, "INVALID_INPUT");
   return r;
 }
 async function accounts(projectId: string): Promise<Account[]> {
@@ -221,7 +223,7 @@ async function waitBuild(acct: Account, id: string, spinner: (s: string) => void
 function parseEnv(list: string[] | undefined): Record<string, string> | undefined {
   if (!list?.length) return undefined;
   const out: Record<string, string> = {};
-  for (const kv of list) { const i = kv.indexOf("="); if (i < 1) fail(`--env takes KEY=VALUE (got ${kv})`, 2); out[kv.slice(0, i)] = kv.slice(i + 1); }
+  for (const kv of list) { const i = kv.indexOf("="); if (i < 1) fail(`--env takes KEY=VALUE (got ${kv})`, 3, "INVALID_INPUT"); out[kv.slice(0, i)] = kv.slice(i + 1); }
   return out;
 }
 const splitList = (v?: string[] | string) => (Array.isArray(v) ? v : v ? [v] : []).flatMap((x) => x.split(/[,\s]+/)).map((x) => x.trim()).filter(Boolean);
@@ -248,120 +250,119 @@ Examples:
   eval "$(lizard fn env)"                                # AWS SDK / CLI credentials and endpoint`);
 
   fn.command("deploy")
-    .description("Create or update a function from a file, a directory or stdin (-); installs packages, waits until it is ready")
+    .description("Create or update a function from a file, a directory or stdin (-): packages, build, start check, URL, schedule; waits until it is ready")
     .argument("[path]", "file, directory or - for stdin", ".")
     .option("--name <name>", "function name (default: from the file or directory)")
     .option("--runtime <runtime>", "e.g. python3.13, nodejs22.x, ruby3.3, provided.al2023 (default: from the source)")
     .option("--handler <handler>", "e.g. app.handler (default: found in the source)")
-    .option("--packages <list...>", "libraries to preinstall, e.g. requests numpy==2.1.3 (comma or space separated)")
+    .option("--packages <list...>", "libraries, e.g. requests numpy==2.1.3 (comma or space separated; '' removes them). Default: a requirements.txt / package.json in the source, else what the imports need")
+    .option("--no-infer", "don't install packages from the imports when none are declared")
     .option("--env <KEY=VALUE...>", "environment variables")
     .option("--memory <mb>", "memory in MB", (v) => parseInt(v, 10))
     .option("--timeout <seconds>", "timeout in seconds", (v) => parseInt(v, 10))
-    .option("--url", "give it a public HTTPS URL")
-    .option("--schedule <expression>", 'run it on a schedule: "rate(5 minutes)" or "cron(0 9 * * ? *)"')
+    .option("--url", "give it a public HTTPS URL (default: on for handlers that read HTTP events)")
+    .option("--no-url", "no URL")
+    .option("--auth <mode>", "URL access: none (public, default) or key (requests must be signed with an access key)")
+    .option("--schedule <when>", 'run it on a schedule: "every hour", "daily at 09:00", "*/5 * * * *", rate(...) or cron(...); "off" removes it')
+    .option("--test [event]", "after deploying, call it with this event (default {} / GET / for URL functions) and fail if it errors")
+    .option("--no-check", "skip the start check (the new code takes traffic without being started first)")
     .option("--region <region>", "us-east-1 (us) or eu-west-lim-a (eu)")
     .option("--project <id>", "project (default: the linked one)")
     .action(async (p: string, o: any) => {
       const t0 = Date.now(); tStart = t0;
       const stdin = p === "-" ? fs.readFileSync(0, "utf8") : undefined;
-      if (p !== "-" && !fs.existsSync(p)) fail(`${p} does not exist`, 2);
-      if (stdin !== undefined && !o.name) fail("--name is required with stdin", 2);
-      const src = detectSource(p, { runtime: o.runtime, handler: o.handler, stdin });
-      const name: string = o.name ?? defaultName(p, src);
-      if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) fail(`Function name ${name}: letters, numbers, hyphens and underscores, up to 64 (pass --name)`, 2);
-      const runtime = o.runtime && !/^(go|rust)$/.test(o.runtime) ? o.runtime : DEFAULT_RUNTIME[src.lang];
-      const packages = splitList(o.packages);
+      if (p !== "-" && !fs.existsSync(p)) failEnv({ code: "INVALID_INPUT", error: `${p} does not exist`, remediation: "lizard fn deploy <file or directory> --json" }, 3);
+      if (stdin !== undefined && !o.name) failEnv({ code: "INVALID_INPUT", error: "--name is required with stdin", remediation: "echo '...' | lizard fn deploy - --name <name> --runtime python3.13 --json" }, 3);
+      let src: Source;
+      try { src = detectSource(p, { runtime: o.runtime, handler: o.handler, stdin }); }
+      catch (e: any) { failEnv({ code: e.code || "INVALID_INPUT", error: e.message, remediation: e.remediation || "lizard fn deploy <path> --runtime python3.13 --json" }, 3); }
+      const name: string = o.name ?? defaultName(p, src!);
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(name)) failEnv({ code: "INVALID_INPUT", error: `Function name ${name}: letters, numbers, hyphens and underscores, up to 64`, remediation: `lizard fn deploy ${p} --name my-function --json` }, 3);
+      const runtime = o.runtime && !/^(go|rust)$/.test(o.runtime) ? o.runtime : DEFAULT_RUNTIME[src!.lang];
       const { projectId } = await resolveProjectScope(o.project);
       const region = await resolveRegion(o.region);
       status(`account in ${region}…`);
       const acct = (await accountFor(projectId, region, true))!;
-      const zipBuf = zipFiles(src.files);
-      const zip = zipBuf.toString("base64");
-      const zipSha = createHash("sha256").update(zipBuf).digest("base64");
-      const config: Record<string, unknown> = { Runtime: runtime, Handler: src.handler };
-      if (o.memory) config.MemorySize = o.memory;
-      if (o.timeout) config.Timeout = o.timeout;
+      const body: Record<string, unknown> = { ZipFile: zipFiles(src!.files).toString("base64"), Runtime: runtime, Handler: src!.handler };
+      if (o.packages !== undefined) body.Packages = splitList(o.packages);
+      if (o.infer === false) body.Infer = false;
+      if (o.check === false) body.Check = false;
+      if (o.memory) body.MemorySize = o.memory;
+      if (o.timeout) body.Timeout = o.timeout;
       const env = parseEnv(o.env);
-      if (env) config.Environment = { Variables: env };
-      const existing = await getFn(acct, name);
-      const compiled = src.lang === "go" || src.lang === "rust";
-      let created = false;
-
-      // Code: built on Lizard when it has a dependency file (or is Go / Rust), else sent as is.
-      if (src.deps || compiled) {
-        status(existing ? "building…" : "creating (building)…");
-        if (existing) await waitReady(acct, name);
-        if (existing) await aws(acct, "PUT", `${fnPath(name)}/configuration`, config);
-        if (existing) await waitReady(acct, name);
-        const job = (await aws(acct, "POST", `lizard/functions/${encodeURIComponent(name)}/build`, {
-          ZipFile: zip, Runtime: runtime, ...(compiled && packages.length ? { Packages: packages } : {}),
-          ...(existing ? {} : { Create: { Role: "arn:aws:iam::000000000000:role/lizard-function", MemorySize: 512, Timeout: 30, ...config } }),
-        })).data;
-        const b = await waitBuild(acct, job.BuildId, status);
-        if (b.Status !== "Succeeded") { statusDone(); fail(`Build failed: ${b.Error}\n${String(b.Log || "").slice(-3000)}`, 1, "BUILD_FAILED"); }
-        created = !existing;
-      } else if (existing) {
-        // Only what changed is sent: the same code (by SHA-256) and the same settings are no-ops.
-        const c = existing.Configuration ?? {};
-        if (c.LastUpdateStatus === "InProgress") await waitReady(acct, name);
-        if (c.CodeSha256 !== zipSha) {
-          status("updating code…");
-          await aws(acct, "PUT", `${fnPath(name)}/code`, { ZipFile: zip });
-        }
-        const changed = Object.entries(config).some(([k, v]) => JSON.stringify(k === "Environment" ? { Variables: c.Environment?.Variables ?? {} } : c[k]) !== JSON.stringify(v));
-        if (changed) {
-          status("updating settings…");
-          await waitReady(acct, name);
-          await aws(acct, "PUT", `${fnPath(name)}/configuration`, config);
-        }
-      } else {
-        status("creating…");
-        await aws(acct, "POST", "2015-03-31/functions", { FunctionName: name, Role: "arn:aws:iam::000000000000:role/lizard-function", MemorySize: 512, Timeout: 30, ...config, Code: { ZipFile: zip } });
-        created = true;
+      if (env) body.Environment = { Variables: env };
+      // --url / --no-url / default: "auto" (the service decides from the handler).
+      if (process.argv.includes("--no-url")) body.Url = false; else if (process.argv.includes("--url")) body.Url = true;
+      if (o.auth) {
+        if (!["none", "key", "public", "iam"].includes(o.auth)) failEnv({ code: "INVALID_INPUT", error: "--auth is none or key", remediation: `lizard fn deploy ${p} --auth key --json` }, 3);
+        body.UrlAuth = ["key", "iam"].includes(o.auth) ? "AWS_IAM" : "NONE";
+        if (!body.Url) body.Url = true;
       }
+      if (o.schedule !== undefined) body.Schedule = /^(off|none|no)$/i.test(o.schedule) ? "" : o.schedule;
 
-      // Packages (Node.js / Python / Ruby): the function's own layer, rebuilt only when the list changes.
-      let installed: string[] | null = null;
-      if (!compiled) {
-        await waitReady(acct, name, 15 * 60_000, (c) => status(c.State === "Pending" ? "preparing the runtime (the first one in a region takes up to a minute)…" : "updating…"));
-        const cur = (await aws(acct, "GET", `lizard/functions/${encodeURIComponent(name)}/packages`)).data;
-        const same = JSON.stringify([...(cur.Packages ?? [])].sort()) === JSON.stringify([...packages].sort());
-        if (o.packages !== undefined && !same) {
-          status("installing packages…");
-          const job = (await aws(acct, "PUT", `lizard/functions/${encodeURIComponent(name)}/packages`, { Packages: packages })).data;
-          if (job.BuildId) {
-            const b = await waitBuild(acct, job.BuildId, status);
-            if (b.Status !== "Succeeded") { statusDone(); fail(`Installing packages failed: ${b.Error}\n${String(b.Log || "").slice(-3000)}`, 1, "BUILD_FAILED"); }
-          }
-        }
-        installed = o.packages !== undefined ? packages : cur.Packages ?? [];
+      status("deploying…");
+      let start;
+      try { start = (await aws(acct, "POST", `lizard/functions/${encodeURIComponent(name)}/deploy`, body)).data; }
+      catch (e) {
+        if (e instanceof APIError && e.status === 400) failEnv({ code: /schedule/i.test(e.message) ? "INVALID_SCHEDULE" : "INVALID_INPUT", error: e.message, remediation: /schedule/i.test(e.message) ? `lizard fn deploy ${p} --schedule "every hour" --json` : `lizard fn deploy ${p} --json` }, 3);
+        if (e instanceof APIError && e.status === 409) failEnv({ code: "BUSY", error: e.message, remediation: `lizard fn deploy ${p} --json` }, 1);
+        throw e;
       }
-      const cfg = await waitReady(acct, name, 15 * 60_000, (c) => status(c.State === "Pending" ? "preparing the runtime (the first one in a region takes up to a minute)…" : "starting…"));
-
-      // URL and schedule.
-      let url: string | null = null;
-      if (o.url) {
-        try { url = (await aws(acct, "GET", `2021-10-31/functions/${encodeURIComponent(name)}/url`)).data.FunctionUrl; }
-        catch (e) {
-          if (!(e instanceof APIError && e.status === 404)) throw e;
-          url = (await aws(acct, "POST", `2021-10-31/functions/${encodeURIComponent(name)}/url`, { AuthType: "NONE", Cors: { AllowOrigins: ["*"] } })).data.FunctionUrl;
-        }
-      }
-      if (o.schedule) {
-        const body = { ScheduleExpression: o.schedule, FlexibleTimeWindow: { Mode: "OFF" }, Target: { Arn: cfg.FunctionArn, RoleArn: "arn:aws:iam::000000000000:role/lizard-scheduler" }, State: "ENABLED" };
-        try { await aws(acct, "PUT", `schedules/${encodeURIComponent(name)}`, body); }
-        catch (e) { if (e instanceof APIError && e.status === 404) await aws(acct, "POST", `schedules/${encodeURIComponent(name)}`, body); else throw e; }
+      let d: any;
+      const end = Date.now() + 20 * 60_000;
+      for (;;) {
+        d = (await aws(acct, "GET", `lizard/deploys/${start.deployId}`)).data;
+        if (d.status !== "deploying") break;
+        status({ prepare: "preparing…", build: "building…", packages: "installing packages…", check: "starting the new code…" }[d.phase as string] ?? "deploying…");
+        if (Date.now() > end) failEnv({ code: "TIMEOUT", error: "The deploy did not finish in 20 minutes", remediation: `lizard fn deploy ${p} --json` }, 4);
+        await sleep(500);
       }
       statusDone();
-      const secs = ((Date.now() - t0) / 1000).toFixed(1);
-      const out = { name, region, created, runtime: cfg.Runtime, handler: cfg.Handler, language: src.lang, arn: cfg.FunctionArn, packages: installed, url, schedule: o.schedule ?? null,
-        seconds: Number(secs), invoke: `lizard fn invoke ${name}${o.region ? ` --region ${region}` : ""} '{}'` };
+      const where = o.region ? ` --region ${region}` : "";
+      if (d.status !== "ready") {
+        failEnv({ ...d, phase: d.phase, remediation: remediationFor(d, p, src!, o), next: undefined }, 1);
+      }
+
+      // --test: call it now (a URL function gets a GET / unless an event is given).
+      let test: any = null;
+      if (o.test !== undefined) {
+        status("testing…");
+        if (d.url?.value && o.test === true) {
+          const r = await fetch(d.url.value, { signal: AbortSignal.timeout(60_000) }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) } as any));
+          const text = await r.text();
+          test = { kind: "http", request: "GET /", status: r.status, ok: r.status > 0 && r.status < 500, body: text.slice(0, 2000) };
+        } else {
+          let ev: unknown = {};
+          if (typeof o.test === "string") { try { ev = JSON.parse(o.test); } catch { failEnv({ code: "INVALID_INPUT", error: "--test takes event JSON", remediation: `lizard fn deploy ${p} --test '{}' --json` }, 3); } }
+          const r = await aws(acct, "POST", `${fnPath(name)}/invocations`, ev, { headers: { "x-amz-log-type": "Tail" } });
+          const err = r.headers.get("x-amz-function-error");
+          const tail = r.headers.get("x-amz-log-result");
+          test = { kind: "invoke", ok: !err, error: err || undefined, result: r.data ?? null, logTail: tail ? Buffer.from(tail, "base64").toString("utf8").slice(-3000) : undefined };
+        }
+        statusDone();
+        if (!test.ok) failEnv({ schemaVersion: 1, status: "failed", phase: "test", code: "TEST_FAILED", name, region, version: d.version,
+          error: test.kind === "http" ? `GET / answered ${test.status}` : `The test invocation raised ${test.error}`, test, remediation: `lizard fn logs ${name}${where} --since 5m --json`,
+          serving: { version: d.version, unchanged: false } }, 1);
+      }
+
+      const next = [
+        d.schedule ? { label: "run the schedule now", command: `lizard fn invoke ${name}${where} --as-schedule --json` } : { label: "call it", command: `lizard fn invoke ${name}${where} '{}' --json` },
+        ...(d.url?.value ? [{ label: "call the URL", command: `curl -s ${d.url.value}` }] : []),
+        { label: "logs", command: `lizard fn logs ${name}${where} --since 5m --json` },
+      ];
+      const out = { schemaVersion: 1, status: "ready", name, region, version: d.version, created: d.created, changed: d.changed, runtime: d.runtime, handler: d.handler, language: d.language,
+        packages: d.packages, check: d.check, test, url: d.url ?? null, schedule: d.schedule ?? null, seconds: Number(((Date.now() - t0) / 1000).toFixed(1)), next };
       if (isJSONMode()) return printJSON(out);
-      success(`${created ? "Created" : "Updated"} ${chalk.bold(name)} in ${region} (${cfg.Runtime}, ${cfg.Handler}) in ${secs}s`);
-      if (installed?.length) info(`Packages: ${installed.join(" ")}`);
-      if (url) info(`URL: ${chalk.cyan(url)}`);
-      if (o.schedule) info(`Schedule: ${o.schedule}`);
-      info(`Call it: ${chalk.cyan(out.invoke)}`);
+      const pk = d.packages ?? {};
+      const resolved = pk.resolved ? Object.entries(pk.resolved).map(([k, v]) => `${k} ${v}`).join(", ") : (pk.requested ?? []).join(", ");
+      const srcLabel = { file: "from the dependency file", flag: "from --packages", imports: "from the imports", none: "" }[pk.source as string] ?? "";
+      if (pk.source !== "none" && resolved) console.log(`${chalk.dim("Packages ")} ${resolved}   ${chalk.dim(`(${srcLabel}${pk.cache === "hit" ? ", cached" : pk.installSeconds ? `, installed in ${pk.installSeconds}s` : ""})`)}`);
+      console.log(`${chalk.green(d.created ? "Created " : d.changed?.length ? "Updated " : "Unchanged")} ${chalk.bold(name)} in ${region} · ${d.runtime} · ${d.handler} · version ${d.version} · ${out.seconds}s`);
+      if (d.check?.kind === "start") console.log(`${chalk.dim("Checked  ")} module loads and handler found${d.check.coldStartMs ? ` (cold start ${d.check.coldStartMs} ms)` : ""}`);
+      if (test) console.log(`${chalk.dim("Tested   ")} ${test.kind === "http" ? `GET / -> ${test.status}` : "invoked, no error"}`);
+      if (d.url?.value) console.log(`${chalk.dim("URL      ")} ${chalk.cyan(d.url.value)}   ${d.url.auth === "none" ? "public  (--auth key to require a key)" : "requires a signed request"}`);
+      if (d.schedule) console.log(`${chalk.dim("Schedule ")} ${d.schedule.input !== d.schedule.expression ? `${d.schedule.input} = ` : ""}${d.schedule.expression} ${d.schedule.timezone} · next ${d.schedule.nextRuns?.[0] ?? "-"}`);
+      console.log(`${chalk.dim("Next     ")} ${next.map((n) => n.command).join("\n          ")}`);
     });
 
   fn.command("invoke")
@@ -370,17 +371,25 @@ Examples:
     .argument("[event]", "event JSON (default {}; - reads stdin)", "{}")
     .option("--logs", "print the invocation's log")
     .option("--async", "queue it (InvocationType Event) and return at once")
+    .option("--as-schedule", "send the event its schedule sends (run a scheduled job now)")
     .option("--region <region>").option("--project <id>")
     .action(async (name: string, event: string, o: any) => {
       const acct = await existingAccount(o, name);
       const body = event === "-" ? fs.readFileSync(0, "utf8") : event;
       let parsed: unknown;
-      try { parsed = JSON.parse(body); } catch { fail("The event must be JSON", 2); }
+      try { parsed = JSON.parse(body); } catch { fail("The event must be JSON", 3, "INVALID_INPUT"); }
+      if (o.asSchedule) {
+        // EventBridge Scheduler's event for a function, as `lizard fn deploy --schedule` sets it.
+        const s = await aws(acct, "GET", `schedules/${encodeURIComponent(name)}`).catch(() => null);
+        let input: any = { source: "lizard.schedule", "detail-type": "Scheduled Event", detail: {} };
+        try { if (s?.data?.Target?.Input) input = JSON.parse(s.data.Target.Input); } catch { /* default */ }
+        parsed = { ...input, time: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"), id: crypto.randomUUID() };
+      }
       const r = await aws(acct, "POST", `${fnPath(name)}/invocations`, parsed, { headers: { "x-amz-log-type": "Tail", ...(o.async ? { "x-amz-invocation-type": "Event" } : {}) } });
       const err = r.headers.get("x-amz-function-error");
       const tail = r.headers.get("x-amz-log-result");
       const logs = tail ? Buffer.from(tail, "base64").toString("utf8") : "";
-      if (isJSONMode()) { if (err) process.exitCode = 1; return printJSON({ status: o.async ? "queued" : err ? "error" : "ok", error: err || undefined, result: r.data ?? null, logs: o.logs ? logs : undefined }); }
+      if (isJSONMode()) { if (err) process.exitCode = EXIT.FAILED; return printJSON({ status: o.async ? "queued" : err ? "error" : "ok", error: err || undefined, result: r.data ?? null, logs: o.logs ? logs : undefined }); }
       if (o.logs && logs) process.stderr.write(chalk.dim(logs.endsWith("\n") ? logs : logs + "\n"));
       if (o.async) return success("Queued");
       process.stdout.write((typeof r.data === "string" ? r.data : JSON.stringify(r.data ?? null, null, 2)) + "\n");
@@ -479,6 +488,40 @@ Examples:
     });
 }
 
+// One table of exit codes for the whole CLI: 0 ok, 1 build/check/test failure, 2 authentication,
+// 3 invalid input or not found, 4 timeout.
+export const EXIT = { OK: 0, FAILED: 1, AUTH: 2, INVALID: 3, TIMEOUT: 4 } as const;
+
+/** A failure for people and agents: stdout empty, one JSON envelope on stderr (--json / no TTY), or readable text. */
+function failEnv(e: Record<string, any>, exit: number): never {
+  statusDone();
+  const env: Record<string, any> = { schemaVersion: 1, status: "failed", ...e };
+  for (const k of Object.keys(env)) if (env[k] === undefined || k === "deployId" || k === "log" || k === "startedAt" || k === "endedAt") delete (env as any)[k];
+  if (isJSONMode()) process.stderr.write(JSON.stringify(env, null, 2) + "\n");
+  else {
+    process.stderr.write(chalk.red(`Error (${env.code}): ${env.error}\n`));
+    if (env.serving?.unchanged) process.stderr.write(chalk.dim(`Version ${env.serving.version} is still serving: nothing changed.\n`));
+    if (env.logTail) process.stderr.write(chalk.dim(String(env.logTail).trim().split("\n").slice(-12).join("\n") + "\n"));
+    if (env.remediation) process.stderr.write(`Fix: ${chalk.cyan(env.remediation)}\n`);
+  }
+  process.exit(exit);
+}
+
+/** The exact command that fixes a failed deploy (every one is a command the CLI's tests run). */
+function remediationFor(d: any, p: string, src: Source, o: any): string {
+  const base = `lizard fn deploy ${p}${o.name ? ` --name ${o.name}` : ""}${o.region ? ` --region ${o.region}` : ""}`;
+  const have: string[] = d.packages?.requested ?? splitList(o.packages);
+  switch (d.code) {
+    case "IMPORT_ERROR": return d.missing?.length ? `${base} --packages ${[...new Set([...have, ...d.missing])].join(",")} --json` : `${base} --json   # fix the error in the log, then deploy again`;
+    case "HANDLER_NOT_FOUND": return d.candidates?.length ? `${base} --handler ${d.candidates[0]} --json` : `${base} --handler <module>.<function> --json`;
+    case "PACKAGES_CONFLICT": return `${base} --json   # list packages in ${d.packages?.file ?? "the dependency file"} only (drop --packages)`;
+    case "AMBIGUOUS_IMPORT": return `${base} --packages <the package you need, e.g. ${String(d.ambiguous?.[0]?.choices ?? "").split(",")[0].trim()}> --json`;
+    case "BUILD_FAILED": return d.packages?.notFound ? `${base} --packages ${have.filter((x) => x !== d.packages.notFound).join(",") || "''"} --json   # ${d.packages.notFound} does not exist` : `${base} --json   # fix the build error in logTail`;
+    case "INVALID_SCHEDULE": return `${base} --schedule "every hour" --json`;
+    default: return `${base} --json`;
+  }
+}
+
 function defaultName(p: string, src: Source): string {
   const base = p === "." ? path.basename(process.cwd()) : fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.basename(path.resolve(p)) : path.basename(p).replace(/\.[^.]+$/, "");
   const n = (["handler", "lambda_function", "index", "main", "app", "bootstrap"].includes(base) ? path.basename(path.resolve(path.dirname(p === "." ? "./x" : p))) : base)
@@ -493,18 +536,18 @@ async function existingAccount(o: any, name: string): Promise<Account> {
   if (o.region) {
     const region = await resolveRegion(o.region);
     const a = all.find((x) => x.region === region);
-    if (!a) fail(`No functions in ${region} for this project`, 1, "NOT_FOUND");
+    if (!a) fail(`No functions in ${region} for this project`, 3, "NOT_FOUND");
     return a!;
   }
   const holding: Account[] = [];
   for (const a of all) if (await getFn(a, name).catch(() => null)) holding.push(a);
-  if (!holding.length) fail(`Function ${name} not found (lizard fn ls)`, 1, "NOT_FOUND");
-  if (holding.length > 1) fail(`${name} exists in ${holding.map((a) => a.region).join(" and ")}: pass --region`, 2);
+  if (!holding.length) fail(`Function ${name} not found (lizard fn ls)`, 3, "NOT_FOUND");
+  if (holding.length > 1) fail(`${name} exists in ${holding.map((a) => a.region).join(" and ")}: pass --region`, 3, "REGION_REQUIRED");
   return holding[0];
 }
 
 function parseDuration(s: string): number {
   const m = String(s).match(/^(\d+)\s*(s|m|h|d)?$/);
-  if (!m) fail(`--since takes e.g. 30s, 10m, 2h, 1d (got ${s})`, 2);
+  if (!m) fail(`--since takes e.g. 30s, 10m, 2h, 1d (got ${s})`, 3, "INVALID_INPUT");
   return Number(m![1]) * ({ s: 1e3, m: 6e4, h: 36e5, d: 864e5 } as Record<string, number>)[m![2] ?? "m"];
 }

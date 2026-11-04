@@ -9,39 +9,69 @@ Use a function for: an API endpoint or webhook (`--url`), a cron job (`--schedul
 scraper or a data job you call from code, work queued from elsewhere. Use `lizard up` (a
 service) instead for a long-running server or anything with its own process manager.
 
-## One command: `lizard fn deploy`
+## The whole loop, for agents
+
+1. Write the handler file (Python, Node.js, TypeScript, Ruby, Go or Rust).
+2. Run `lizard fn deploy <path> --json` (add `--schedule "every hour"` for a job, `--test` to call it once).
+3. If `status` is not `"ready"`, run the `remediation` command exactly, then go back to 2.
+
+Deploy is idempotent by name and checks that the code **starts** before it takes traffic: an
+update that fails to start leaves the previous version serving (`serving.unchanged: true`).
+
+## `lizard fn deploy`
 
 ```bash
-lizard fn deploy handler.py --packages requests,beautifulsoup4 --url --json
+lizard fn deploy scraper.py --schedule "every hour" --json
 ```
 
-It creates the function or updates it (same name = update), installs the packages, waits
-until the function is ready and prints its ARN, URL and how to call it. It is idempotent: an
-unchanged file and unchanged packages are a no-op (about 2 s), a code change about 4 s.
-
-- **Source**: a file (`handler.py`, `index.mjs`, `lambda_function.rb`, `main.go`,
-  `bootstrap`), a directory, or `-` for stdin (with `--name` and `--runtime`).
-- **Language and runtime**: from the file extension (Python 3.13, Node.js 22, Ruby 3.3) or
-  `--runtime` (`python3.9`-`3.13`, `nodejs18.x`-`24.x`, `ruby3.2`-`3.4`, `java11/17/21`,
-  `provided.al2023`). Go (`main.go` / `go.mod`) and Rust (`Cargo.toml`) are compiled on
-  Lizard into an Amazon Linux 2023 `bootstrap`. TypeScript: compile to `.js` first.
-- **Handler**: found in the source (`def lambda_handler(event, context)` / `handler`,
+- **Source**: a file, a directory, or `-` (stdin, with `--name` and `--runtime`). Language,
+  runtime and handler come from the source (`def handler(event, context)`,
   `export const handler = async (event) => ...`); `--handler module.function` overrides.
-- **Packages**:
-  - `--packages a,b==1.2` preinstalls libraries in the function's own layer (Node.js, Python,
-    Ruby): ready at every start, never reinstalled by code deploys, rebuilt only when the list
-    changes. `--packages ""` removes them.
-  - A `requirements.txt`, `package.json` (with dependencies) or `Gemfile` next to the file
-    or in the directory is installed into the code instead (each deploy rebuilds).
-  - For Go / Rust, `--packages` become `go get` / `cargo add` before the build.
-  - Packages are installed on Lizard on the runtime's own Amazon Linux image, so binary
-    wheels and native modules (numpy, pandas, Pillow, sharp, cryptography) match.
-- **Settings**: `--env KEY=VALUE` (repeatable), `--memory <MB>` (up to 4096 on a 2 vCPU
-  sandbox, 8192 on 4, more on 8), `--timeout <s>`, `--region us|eu`, `--project <id>`.
-- `--url` gives it a public HTTPS URL (the event is API Gateway v2 / function URL shaped:
-  `event["body"]`, `event["queryStringParameters"]`, `event["requestContext"]["http"]["method"]`;
-  return `{"statusCode": 200, "headers": {...}, "body": "..."}` or any JSON).
-- `--schedule "rate(5 minutes)"` or `--schedule "cron(0 9 * * ? *)"` runs it on a schedule.
+  TypeScript (`index.ts`), Go (`main.go` / `go.mod`) and Rust (`Cargo.toml`) are compiled on Lizard.
+- **Packages, one rule** (the result's `packages.source` says which applied):
+  1. a dependency file in the source (`requirements.txt`, `package.json` with dependencies,
+     `Gemfile`, `go.mod`, `Cargo.toml`) is built into the code (`"file"`);
+  2. otherwise `--packages a,b==1.2` (`"flag"`; `--packages ''` removes them);
+  3. otherwise the packages the imports need are installed (`"imports"`: `bs4` ->
+     `beautifulsoup4`, `PIL` -> `pillow`, `yaml` -> `pyyaml`...); `--no-infer` turns it off.
+  Exact versions come back in `packages.resolved`; an unchanged list is not reinstalled
+  (`"cache": "hit"`). A dependency file and `--packages` together fail with `PACKAGES_CONFLICT`;
+  `import google` fails with `AMBIGUOUS_IMPORT` (name the package).
+- **URL**: on by default for handlers that read HTTP events (`statusCode`, `rawPath`,
+  `queryStringParameters`...); `--url` / `--no-url`; `--auth key` requires signed requests.
+  The event is a function-URL event; return `{"statusCode": 200, "headers": {...}, "body": "..."}`.
+- **Schedule**: `--schedule` takes `"every 15 minutes"`, `"hourly"`, `"daily at 09:00"`,
+  `"weekdays at 9am"`, `"every monday at 18:30"`, a 5-field cron (`"*/5 * * * *"`),
+  `rate(...)` or `cron(...)`; times are UTC; the result shows the expression and the next
+  runs. `--schedule off` removes it.
+- **Settings**: `--env KEY=VALUE` (repeatable), `--memory <MB>`, `--timeout <s>`,
+  `--region us|eu`, `--project <id>`. `--test [event]` calls it after deploying (GET / for URL
+  functions) and fails with `TEST_FAILED` if it errors. `--no-check` skips the start check.
+- Every deploy that changes something is a numbered **version** (`version` in the result).
+
+Success (`--json`, stdout):
+```json
+{"schemaVersion": 1, "status": "ready", "name": "scraper", "region": "us-east-1", "version": 1, "created": true,
+ "changed": ["code", "packages", "schedule"], "runtime": "python3.13", "handler": "scraper.handler",
+ "packages": {"source": "imports", "resolved": {"requests": "2.34.2", "beautifulsoup4": "4.15.0"}, "cache": "miss"},
+ "check": {"kind": "start", "ok": true}, "url": null,
+ "schedule": {"input": "every hour", "expression": "rate(1 hour)", "timezone": "UTC", "nextRuns": ["..."]},
+ "next": [{"label": "run the schedule now", "command": "lizard fn invoke scraper --as-schedule --json"}]}
+```
+
+Failure (stdout empty, one JSON object on stderr, exit code below):
+```json
+{"schemaVersion": 1, "status": "failed", "phase": "check", "code": "IMPORT_ERROR",
+ "error": "The function failed to start: No module named 'yaml'", "missing": ["pyyaml"],
+ "serving": {"version": 1, "unchanged": true}, "logTail": "...",
+ "remediation": "lizard fn deploy scraper.py --packages requests,pyyaml --json"}
+```
+
+Codes: `INVALID_INPUT`, `INVALID_SCHEDULE`, `NOT_FOUND`, `REGION_REQUIRED`, `SOURCE_TOO_LARGE`,
+`IMPORT_ERROR` (with `missing`), `HANDLER_NOT_FOUND` (with `candidates`), `START_FAILED`,
+`BUILD_FAILED` (with `logTail`), `PACKAGES_CONFLICT`, `AMBIGUOUS_IMPORT`, `TEST_FAILED`,
+`BUSY`, `TIMEOUT`. Exit codes: 0 ready, 1 build / start / test failure, 2 not signed in,
+3 invalid input or not found, 4 timeout.
 
 ## Calling and watching
 
@@ -49,6 +79,7 @@ unchanged file and unchanged packages are a no-op (about 2 s), a code change abo
 lizard fn invoke <name> '{"url": "https://example.com"}' --json   # result (+ --logs)
 lizard fn invoke <name> - < event.json
 lizard fn invoke <name> '{}' --async                               # queued, returns at once
+lizard fn invoke <name> --as-schedule --json                       # the event its schedule sends (run a job now)
 lizard fn logs <name> --since 10m [-f]                             # print() / console.log output
 lizard fn ls --json                                                # every region
 lizard fn rm <name>
@@ -106,7 +137,7 @@ func main() { lambda.Start(handler) }
 
 - The first function of a runtime in a region takes up to a minute (the runtime image is
   pulled once); later ones start in seconds. Idle functions pause and resume in about a second.
-- Calls keep working during deploys and package installs (no downtime; a call at the moment
-  of the switch can wait a second or two).
+- Calls keep working during deploys and package installs: the new code starts next to the
+  running one and takes over once it has started.
 - Billing is the sandbox time the function's environments use (paused is free).
 - The dashboard's Functions page shows the same functions (code editor, test, logs, packages).
