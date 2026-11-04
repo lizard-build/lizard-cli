@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import * as zlib from "node:zlib";
 import { createHash } from "node:crypto";
 import chalk from "chalk";
@@ -441,17 +442,40 @@ Examples:
 
   fn.command("env")
     .description("Print AWS credentials and endpoints for the project's functions (for the AWS SDKs / CLI): eval \"$(lizard fn env)\"")
+    .option("--new", "create a new access key instead of reusing this machine's")
     .option("--region <region>").option("--project <id>")
     .action(async (o: any) => {
       const { projectId } = await resolveProjectScope(o.project);
       const region = await resolveRegion(o.region);
       await accountFor(projectId, region, true);
-      const k = await api.post<any>(`/api/functions/projects/${encodeURIComponent(projectId)}/keys`);
-      const ep = k.endpoints?.[region];
-      if (isJSONMode()) return printJSON({ AWS_ACCESS_KEY_ID: k.accessKeyId, AWS_SECRET_ACCESS_KEY: k.secretAccessKey, AWS_REGION: region, AWS_ENDPOINT_URL_LAMBDA: ep, endpoints: k.endpoints });
-      process.stdout.write([`export AWS_ACCESS_KEY_ID=${k.accessKeyId}`, `export AWS_SECRET_ACCESS_KEY=${k.secretAccessKey}`, `export AWS_REGION=${region}`,
-        `export AWS_ENDPOINT_URL_LAMBDA=${ep}`, `export AWS_ENDPOINT_URL_SQS=${ep}`, `export AWS_ENDPOINT_URL_SCHEDULER=${ep}`, `export AWS_ENDPOINT_URL_EVENTBRIDGE=${ep}`, `export AWS_ENDPOINT_URL_CLOUDWATCH_LOGS=${ep}`].join("\n") + "\n");
-      if (process.stderr.isTTY) warn("A new access key was created (Access keys in the dashboard lists and deletes them).");
+      // One key per project on this machine, reused (eval'd in a shell profile, a key per run
+      // would pile up); kept only while the project still lists it.
+      const file = path.join(os.homedir(), ".lizard", "functions-keys.json");
+      let saved: Record<string, { accessKeyId: string; secretAccessKey: string; endpoints: Record<string, string> }> = {};
+      try { saved = JSON.parse(fs.readFileSync(file, "utf8")); } catch { saved = {}; }
+      let k = o.new ? null : saved[projectId] ?? null;
+      if (k) {
+        const live = await api.get<any>(`/api/functions/projects/${encodeURIComponent(projectId)}/keys`).catch(() => null);
+        if (!live?.keys?.some((x: any) => x.accessKeyId === k!.accessKeyId)) k = null;
+        else k.endpoints = live.endpoints ?? k.endpoints;
+      }
+      let created = false;
+      if (!k) {
+        k = await api.post<any>(`/api/functions/projects/${encodeURIComponent(projectId)}/keys`);
+        saved[projectId] = { accessKeyId: k!.accessKeyId, secretAccessKey: k!.secretAccessKey, endpoints: k!.endpoints };
+        fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+        fs.writeFileSync(file, JSON.stringify(saved, null, 2), { mode: 0o600 });
+        created = true;
+      }
+      const ep = k!.endpoints?.[region];
+      if (!ep) fail(`No Functions endpoint for ${region}`, 1);
+      const sh = (v: string) => `'${String(v).replace(/'/g, "'\\''")}'`;
+      // Shell exports by default even when stdout is a pipe: `eval "$(lizard fn env)"` is the point.
+      if (process.argv.includes("--json")) return printJSON({ AWS_ACCESS_KEY_ID: k!.accessKeyId, AWS_SECRET_ACCESS_KEY: k!.secretAccessKey, AWS_REGION: region, AWS_ENDPOINT_URL_LAMBDA: ep, endpoints: k!.endpoints, created });
+      const vars: [string, string][] = [["AWS_ACCESS_KEY_ID", k!.accessKeyId], ["AWS_SECRET_ACCESS_KEY", k!.secretAccessKey], ["AWS_REGION", region], ["AWS_DEFAULT_REGION", region],
+        ...["LAMBDA", "SQS", "SCHEDULER", "EVENTBRIDGE", "CLOUDWATCH_LOGS"].map((s2) => [`AWS_ENDPOINT_URL_${s2}`, ep] as [string, string])];
+      process.stdout.write(vars.map(([n, v]) => `export ${n}=${sh(v)}`).join("\n") + "\n");
+      if (created && process.stderr.isTTY) warn(`Created an access key for this project (saved in ${file}; Access keys in the dashboard lists and deletes keys).`);
     });
 }
 
