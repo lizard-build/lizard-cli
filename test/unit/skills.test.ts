@@ -15,8 +15,8 @@ describe("the core skill", () => {
     expect(Object.keys(EMBEDDED_SKILLS)).toEqual(["core"]);
   });
 
-  test("ships the sandboxes, deploys and sdk references, and names each one", () => {
-    expect(Object.keys(core.references).sort()).toEqual(["deploys", "sandboxes", "sdk"]);
+  test("ships the sandboxes, deploys, functions and sdk references, and names each one", () => {
+    expect(Object.keys(core.references).sort()).toEqual(["deploys", "functions", "sandboxes", "sdk"]);
     for (const ref of Object.keys(core.references)) {
       expect(core.content).toContain(`--ref ${ref}`);
     }

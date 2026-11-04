@@ -43,3 +43,10 @@ export declare function repoPath(repo: string): string;
 /** Seconds (Lizard Git) to "3m ago". */
 export declare function ago(sec: number | null | undefined): string;
 export declare const ACTIVE_RUN: Set<string>;
+/** A commit's checks in one word: its commit statuses and its CI runs together. (The status
+ *  API alone says "pending" for a commit with no statuses, even when every run passed.) */
+export declare function checksState(statuses: {
+    state: string;
+}[], runs: {
+    status: string;
+}[]): string;

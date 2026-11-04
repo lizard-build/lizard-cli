@@ -133,6 +133,8 @@ export function registerSandbox(program) {
         .option("--volume <name-or-id>", "Attach a persistent volume")
         .option("--with-token [key]", "Sign in `lizard` inside the sandbox with a new key limited to the sandbox's project and deleted with it (this liz_ key, or the one you use, only authorizes the request)")
         .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
+        .option("--allow-host <host>", "With no internet, still allow this host name (pypi.org, *.pythonhosted.org: ports 80/443) or IPv4 address/range (every port); repeat for more. Implies --no-internet", (v, all = []) => [...all, v])
+        .option("--no-internet", "Fully closed sandbox, for its whole life (its resumes and forks too): no internet and no public ports; commands and files still work")
         .action(async (opts) => {
         // A snapshot restores at its source's size (a Firecracker VM's memory is part of it; a
         // pod snapshot goes back onto the machine it was captured on), so the server ignores a
@@ -207,6 +209,9 @@ export function registerSandbox(program) {
                 volumeName,
                 lizardToken,
                 projectId,
+                // Sent only when asked: every other create stays byte-for-byte what it was.
+                ...(opts.internet === false || opts.allowHost?.length ? { internetAccess: false } : {}),
+                ...(opts.allowHost?.length ? { allowedHosts: opts.allowHost } : {}),
             };
             try {
                 sandbox = await createInDefaultRegion(body, defaultRegion);
@@ -231,6 +236,17 @@ export function registerSandbox(program) {
             throw e;
         }
         spinner?.stop();
+        // A platform that predates the option ignores it and starts a sandbox WITH internet.
+        // Asked for none: anything but an explicit false is deleted, never handed over.
+        if ((opts.internet === false || opts.allowHost?.length) && sandbox.internetAccess !== false) {
+            await api.delete(`/api/sandboxes/${sandbox.id}`).catch(() => { });
+            throw new Error("This region's platform does not support --no-internet yet; the sandbox it started had internet and was deleted.");
+        }
+        // An older platform ignores the list: the sandbox would have no internet at all, not what was asked.
+        if (opts.allowHost?.length && !Array.isArray(sandbox.allowedHosts)) {
+            await api.delete(`/api/sandboxes/${sandbox.id}`).catch(() => { });
+            throw new Error("This region's platform does not support --allow-host yet; the sandbox was deleted.");
+        }
         if (isJSONMode()) {
             printJSON(sandbox);
             return;
@@ -245,6 +261,9 @@ export function registerSandbox(program) {
             ? `  Size: ${sandbox.size} (${machine})${sandbox.pricePerHour != null ? `, $${sandbox.pricePerHour}/h` : ""}`
             : `  Machine: ${machine}`));
         info(chalk.dim(`  ${lifetimeLine(sandbox.expiresAt ?? sandbox.endAt)}`));
+        if (sandbox.internetAccess === false) {
+            info(chalk.dim(sandbox.allowedHosts?.length ? `  Internet: only ${sandbox.allowedHosts.join(", ")}` : "  Internet: off"));
+        }
         info("");
         info(sandboxNextSteps(sandbox.id));
     });
@@ -710,12 +729,11 @@ function registerSandboxFiles(sb) {
         .argument("<id>", "Sandbox ID")
         .argument("<local>", "Local file path")
         .argument("<remote>", "Destination path inside the sandbox")
-        .description("Upload a local file into a sandbox")
+        .description("Upload a local file into a sandbox (any size: big files go in pieces)")
         .action(async (id, local, remote) => {
-        const content = fs.readFileSync(local).toString("base64");
-        await api.post(`/api/sandboxes/${id}/files`, { path: remote, content, encoding: "base64" });
+        const size = await putSandboxFile(id, local, remote);
         if (isJSONMode())
-            printJSON({ id, path: remote, status: "written" });
+            printJSON({ id, path: remote, size, status: "written" });
         else
             success(`Wrote ${chalk.bold(remote)} in sandbox ${id}`);
     });
@@ -745,6 +763,62 @@ function registerSandboxFiles(sb) {
         else
             success(`Deleted ${chalk.bold(path)} in sandbox ${id}`);
     });
+}
+/** A file up to this size goes in one request. The server takes ~150 MB per request and the
+ *  content travels as base64 (4/3 of the bytes), so a single request stops at ~110 MB. */
+export const PUT_SINGLE_MAX = 64 * 1024 * 1024;
+/** A bigger file goes in pieces of this size, joined inside the sandbox. */
+export const PUT_CHUNK = 32 * 1024 * 1024;
+/**
+ * Write a local file into a sandbox; resolves with its size. Over PUT_SINGLE_MAX the file is
+ * read and sent one piece at a time (memory stays at one piece): each piece is written next to
+ * the destination, appended to a temporary file and removed, and the temporary file is renamed
+ * onto the destination at the end, so a failed upload never leaves a half-written file there
+ * and the sandbox's disk needs the file plus one piece.
+ */
+export async function putSandboxFile(id, local, remote, chunk = PUT_CHUNK, singleMax = PUT_SINGLE_MAX) {
+    const size = fs.statSync(local).size;
+    const write = (path, buf) => api.post(`/api/sandboxes/${id}/files`, { path, content: buf.toString("base64"), encoding: "base64" });
+    if (size <= singleMax) {
+        await write(remote, fs.readFileSync(local));
+        return size;
+    }
+    const sh = async (script, ...args) => {
+        const r = await api.post(`/api/sandboxes/${id}/exec`, { cmd: ["/bin/sh", "-c", script, "sh", ...args] });
+        if (r?.exitCode !== 0)
+            throw new Error(`Upload failed inside the sandbox: ${r?.stderr?.trim() || `exit ${r?.exitCode}`}`);
+    };
+    const tag = `${process.pid}-${Date.now().toString(36)}`;
+    const tmp = `${remote}.lizard-upload-${tag}`;
+    const part = `${tmp}.part`;
+    const pieces = Math.ceil(size / chunk);
+    const spinner = !isJSONMode() && isTTY() ? ora(`Uploading ${local} (0/${pieces})`).start() : null;
+    const fd = fs.openSync(local, "r");
+    try {
+        await sh('mkdir -p -- "$(dirname -- "$1")" && : > "$1"', tmp);
+        const buf = Buffer.alloc(chunk);
+        for (let i = 0, off = 0; off < size; i++) {
+            const n = fs.readSync(fd, buf, 0, Math.min(chunk, size - off), off);
+            if (n <= 0)
+                throw new Error(`Could not read ${local} at byte ${off}`);
+            await write(part, buf.subarray(0, n));
+            await sh('cat -- "$1" >> "$2" && rm -f -- "$1"', part, tmp);
+            off += n;
+            if (spinner)
+                spinner.text = `Uploading ${local} (${i + 1}/${pieces})`;
+        }
+        await sh('[ "$(wc -c < "$1")" -eq "$2" ] && mv -f -- "$1" "$3"', tmp, String(size), remote);
+        spinner?.stop();
+        return size;
+    }
+    catch (e) {
+        spinner?.fail();
+        await sh('rm -f -- "$1" "$2"', part, tmp).catch(() => { });
+        throw e;
+    }
+    finally {
+        fs.closeSync(fd);
+    }
 }
 /** Run a command inside a sandbox, streaming output. Resolves with the exit
  *  code: the remote command's code from the `exit` event, or 1 when the

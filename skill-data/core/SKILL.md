@@ -9,10 +9,11 @@ allowed-tools: Bash(lizard:*), Bash(~/.lizard/bin/lizard:*), Bash(which:*), Bash
 
 Lizard runs sandboxes and hosts apps, services, agents and managed databases. All capabilities are exposed through the `lizard` CLI (npm package `@lizard-build/cli`). This skill teaches you to drive it. If `lizard` isn't on PATH, install it: `curl -fsSL https://lizard.build/install.sh | bash` on macOS and Linux (no Node.js or sudo needed; if `lizard` is still not found, call `~/.lizard/bin/lizard`), `irm https://lizard.build/api/cli/install.ps1 | iex` in Windows PowerShell, or `npm install -g @lizard-build/cli` anywhere. The install script ends by running `lizard login`, so its output may already hold the sign-in links: see [Sign-in](#sign-in).
 
-This guide covers the whole platform. Three references go deeper; read one only when the task needs that depth:
+This guide covers the whole platform. Four references go deeper; read one only when the task needs that depth:
 
 - `lizard skills get core --ref sandboxes --json`: templates, commands, files and ports in depth, lifetime, sizes, shell, coding agents in a sandbox, desktop (computer use), volumes, snapshots, fork and pause/resume.
 - `lizard skills get core --ref deploys --json`: how builds are chosen, git and upload deploys, service fields, worker mode, secret precedence and scoping, addon variables, multi-step recipes.
+- `lizard skills get core --ref functions --json`: Lizard Functions (AWS Lambda-compatible): `lizard fn deploy handler.py --packages requests --url` creates or updates a function with preinstalled libraries in one command; invoke, logs, schedules, Go/Rust, the AWS SDKs; recipes.
 - `lizard skills get core --ref sdk --json`: building with Lizard from code through Lizard SDK (TypeScript, Python): sandboxes inside your own product, per-user workspaces and scoped keys, platform APIs.
 
 If `$ARGUMENTS` is non-empty, treat it as the user's request and act on it. If empty, ask what they want to do on Lizard.
