@@ -83,7 +83,7 @@ Prices are per hour, billed per second while the sandbox runs, flat by size: mea
 
 Lizard Sandboxes run as Firecracker microVMs, each with its own kernel. If a sandbox cannot start, creation fails with an error.
 
-An account's limit counts vCPU of running sandboxes (Small 2, Medium 4, Large 8; paused ones don't count), across all of the owner's workspaces: up to 4 Small (8 vCPU) on the trial, 40 vCPU on Pro, 220 on Pro 5x and 1,200 on Pro 20x. Starts are limited on the trial (6 a minute, 30 an hour, 100 a day) and on Pro (24 a minute, 120 an hour, no daily limit). Pro 5x and Pro 20x have unlimited starts. Enterprise has no fixed limit on sandboxes running at once: each customer's agreement sets the limit per workspace, and running, paused and crashed sandboxes all count toward it. Over a limit the API answers 429 `SANDBOX_LIMIT_REACHED` (with `unit: "vcpu"`, `limit`, `running` and `needed`, all in vCPU) or `SANDBOX_RATE_LIMITED` (with `retryAfterS`).
+An account's limit counts vCPU of running sandboxes (Small 2, Medium 4, Large 8; paused ones don't count), across all of the owner's workspaces: up to 4 Small (8 vCPU) on the trial, 40 vCPU on Pro, 220 on Pro 5x and 1,200 on Pro 20x. Starts are limited only on the trial (6 a minute, 30 an hour, 100 a day); Pro, Pro 5x and Pro 20x have unlimited starts. Enterprise has no fixed limit on sandboxes running at once: each customer's agreement sets the limit per workspace, and running, paused and crashed sandboxes all count toward it. Over a limit the API answers 429 `SANDBOX_LIMIT_REACHED` (with `unit: "vcpu"`, `limit`, `running` and `needed`, all in vCPU) or `SANDBOX_RATE_LIMITED` (with `retryAfterS`).
 
 ## Interactive shell
 

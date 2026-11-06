@@ -325,9 +325,8 @@ down starts with the next period. `lizard billing --json` shows `tier` and
 `pendingTier`. Sandbox limits count vCPU of running sandboxes (Small 2, Medium 4,
 Large 8; paused ones don't count), across all of the owner's workspaces: the trial
 runs up to 4 Small (8 vCPU), Pro 40 vCPU, Pro 5x 220, Pro 20x 1,200. Sandbox
-starts are limited on the trial (6 a minute, 30 an hour, 100 a day) and on Pro
-(24 a minute, 120 an hour, no daily limit); Pro 5x and Pro 20x have unlimited
-starts. Trial
+starts are limited only on the trial (6 a minute, 30 an hour, 100 a day); Pro,
+Pro 5x and Pro 20x have unlimited starts. Trial
 accounts run 1 replica per app; after the first paid invoice, 5. Pro cards are changed or removed on the Billing page;
 `lizard billing payment-methods remove` works only for Enterprise accounts (Pro: 409 `CREDITS_NOT_AVAILABLE`).
 Enterprise accounts pay as you go, invoiced monthly. There are no top-ups, no
@@ -355,8 +354,8 @@ vCPU of sandboxes at once, or too many starts per minute, hour or day, is HTTP 4
 not a billing problem. `SANDBOX_LIMIT_REACHED` has `unit: "vcpu"`, `limit`, `running` (vCPU in use)
 and `needed` (vCPU the new sandbox needs): pause or delete idle sandboxes, pick a
 smaller size, or ask the user about a higher Pro tier. `SANDBOX_RATE_LIMITED` has
-`retryAfterS`: wait that long; on the trial, the first paid invoice lifts the limit
-of 100 starts a day. A workspace can also have its own limits, set by its owner
+`retryAfterS`: wait that long; on the trial, the first paid invoice lifts the start
+limits. A workspace can also have its own limits, set by its owner
 (`lizard workspace limits <ws>` shows them with current use): `WORKSPACE_SANDBOX_LIMIT`
 (sandboxes running at once: pause or delete one) and `WORKSPACE_USAGE_LIMIT` (its apps
 and databases use as much CPU or memory as allowed: deploys, restarts, scale-ups, new
