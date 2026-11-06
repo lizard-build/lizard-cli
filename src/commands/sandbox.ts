@@ -373,7 +373,9 @@ export function registerSandbox(program: Command) {
         printJSON(cpu);
         return;
       }
-      console.log(cpu.model);
+      // Printable text only: with no host name the platform passes on what the guest reports,
+      // and code inside the sandbox can make that anything, terminal escapes included.
+      console.log(String(cpu.model ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, " ").trim());
       info(chalk.dim(`  ${cpu.vcpus} vCPU${cpu.source === "guest" ? " (the name the sandbox itself reports)" : ""}`));
     });
 
