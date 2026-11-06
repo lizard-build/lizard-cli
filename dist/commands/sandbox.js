@@ -316,6 +316,21 @@ export function registerSandbox(program) {
         else
             success(`Sandbox ${chalk.bold(id)} timeout set to ${ms}ms`);
     });
+    // The host's CPU by name: inside a Firecracker sandbox /proc/cpuinfo only says "AMD EPYC",
+    // so the platform reads it from the node. source "guest" means it could not, and this is
+    // what the sandbox itself reports.
+    sb.command("cpu")
+        .argument("<id>", "Sandbox ID")
+        .description("Show the CPU model a running sandbox runs on")
+        .action(async (id) => {
+        const cpu = await api.get(`/api/sandboxes/${id}/cpu`);
+        if (isJSONMode()) {
+            printJSON(cpu);
+            return;
+        }
+        console.log(cpu.model);
+        info(chalk.dim(`  ${cpu.vcpus} vCPU${cpu.source === "guest" ? " (the name the sandbox itself reports)" : ""}`));
+    });
     sb.command("exec")
         .argument("<id>", "Sandbox ID")
         .argument("[cmd...]", "Command and args to run (pass after `--`, e.g. `-- ls -la /tmp`)")

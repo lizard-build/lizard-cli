@@ -313,3 +313,17 @@ describe("after sandbox create", () => {
     for (const line of lines) expect(line.length).toBeLessThanOrEqual(80);
   });
 });
+
+describe("sandbox cpu", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("reads the platform's answer and prints it as JSON", async () => {
+    const answer = { id: "gap-lizard-pn10", model: "AMD EPYC 7351P 16-Core Processor", source: "host", vcpus: 2 };
+    vi.mocked(api.get).mockResolvedValue(answer);
+    const program = new Command().exitOverride();
+    registerSandbox(program);
+    await program.parseAsync(["sandbox", "cpu", "gap-lizard-pn10"], { from: "user" });
+    expect(api.get).toHaveBeenCalledWith("/api/sandboxes/gap-lizard-pn10/cpu");
+    expect(printJSON).toHaveBeenCalledWith(answer);
+  });
+});

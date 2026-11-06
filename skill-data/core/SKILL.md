@@ -103,6 +103,7 @@ lizard sandbox files put <id> ./app.py /workspace/app.py
 lizard sandbox exec <id> -- python3 /workspace/app.py
 lizard sandbox expose <id> 8000 --json                    # an HTTPS URL for a port in the sandbox
 lizard sandbox timeout <id> 3600000                       # keep it for an hour from now
+lizard sandbox cpu <id>                                   # the CPU model it runs on, e.g. AMD EPYC 7351P 16-Core Processor
 lizard sandbox pause <id> --fast                          # stop billing, keep files (~1 s); `resume <id>` brings it back
 lizard sandbox rm <id>                                    # delete it now (alias kill): no prompt without a terminal
 ```
