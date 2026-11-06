@@ -327,3 +327,21 @@ describe("sandbox cpu", () => {
     expect(printJSON).toHaveBeenCalledWith(answer);
   });
 });
+
+describe("sandbox cpu in a terminal", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("prints the name without control characters", async () => {
+    vi.resetModules();
+    vi.doMock("../../src/lib/format.js", () => ({ isJSONMode: () => false, printJSON: vi.fn(), info: vi.fn(), success: vi.fn(), error: vi.fn(), table: vi.fn(), statusColor: (s: string) => s, timeAgo: () => "", isTTY: () => true }));
+    const { registerSandbox: register } = await import("../../src/commands/sandbox.js");
+    const { api: mockedApi } = await import("../../src/lib/api.js");
+    vi.mocked(mockedApi.get).mockResolvedValue({ id: "s", model: "AMD\u001b]52;c;eA==\u0007 EPYC", source: "guest", vcpus: 2 });
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const program = new Command().exitOverride();
+    register(program);
+    await program.parseAsync(["sandbox", "cpu", "s"], { from: "user" });
+    expect(log).toHaveBeenCalledWith("AMD ]52;c;eA==  EPYC");
+    vi.doUnmock("../../src/lib/format.js");
+  });
+});
