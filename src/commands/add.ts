@@ -19,7 +19,17 @@ const CATALOG = [
   { name: "postgres", label: "PostgreSQL", description: "Relational database" },
   { name: "redis", label: "Redis", description: "In-memory key-value store" },
   { name: "s3", label: "S3 Bucket", description: "S3-compatible object storage" },
+  // Offered per account: listed only when GET /api/addon-types says so (the server refuses
+  // anyone else). `lizard add clickhouse` always reaches the server, which explains a refusal.
+  { name: "clickhouse", label: "ClickHouse", description: "Analytics database", perAccount: true },
 ] as const;
+
+/** The catalog this account may use: per-account types only when the server lists them. */
+async function availableCatalog(): Promise<(typeof CATALOG)[number][]> {
+  let types: string[] = [];
+  try { types = (await api.get<{ types: string[] }>("/api/addon-types")).types ?? []; } catch {}
+  return CATALOG.filter((c) => !("perAccount" in c) || types.includes(c.name));
+}
 
 async function detectPortFromDockerfile(repo: string): Promise<number | undefined> {
   // A Lizard Git repository: the build detects the port itself (never ask GitHub about a namesake).
@@ -51,6 +61,8 @@ function addonExampleVar(type: string): string {
       return "MONGODB_URL";
     case "redis":
       return "REDIS_URL";
+    case "clickhouse":
+      return "CLICKHOUSE_URL";
     case "s3":
       return "S3_ENDPOINT";
     default:
@@ -226,12 +238,13 @@ async function runAdd(input: AddInput): Promise<void> {
   {
     // ── --list: show DB catalog and exit ──────────────────────────────
     if (opts.list || (!types.length && !opts.addon && !opts.service && !opts.repo && !isTTY())) {
+        const catalog = await availableCatalog();
         if (isJSONMode()) {
-          printJSON(CATALOG);
+          printJSON(catalog);
         } else {
           table(
             ["Name", "Description"],
-            CATALOG.map((c) => [c.name, c.description]),
+            catalog.map((c) => [c.name, c.description]),
           );
         }
         return;
@@ -393,7 +406,7 @@ async function runAdd(input: AddInput): Promise<void> {
         if (kind === "database") {
           const sel = await p.select({
             message: "Select database",
-            options: CATALOG.filter((c) => c.name !== "s3").map((c) => ({
+            options: (await availableCatalog()).filter((c) => c.name !== "s3").map((c) => ({
               value: c.name,
               label: c.label,
               hint: c.description,
