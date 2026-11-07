@@ -1,6 +1,7 @@
 import { getToken } from "./auth.js";
 import { CURRENT_VERSION } from "./updater.js";
 import { detectAgent } from "./agent.js";
+import { recordFailedCall } from "./support.js";
 import * as https from "node:https";
 import * as http from "node:http";
 
@@ -226,14 +227,23 @@ async function request<T = any>(
   }
 
   const init = { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined };
-  const res = method === "GET" ? await fetchWithRetry(url, init) : await fetch(url, init);
+  let res: Response;
+  try {
+    res = method === "GET" ? await fetchWithRetry(url, init) : await fetch(url, init);
+  } catch (e: any) {
+    // Kept for `lizard support open`, which attaches the last failures to a ticket.
+    recordFailedCall(method, path, e?.cause?.code ?? e?.code ?? "network", e?.cause?.message ?? e?.message ?? String(e));
+    throw e;
+  }
 
   if (!res.ok) {
     let body: unknown = null;
     try {
       body = await res.json();
     } catch {}
-    throw apiErrorFrom(res.status, res.statusText, body);
+    const err = apiErrorFrom(res.status, res.statusText, body);
+    recordFailedCall(method, path, res.status, err.message, res.headers.get("x-request-id"));
+    throw err;
   }
 
   const text = await res.text();

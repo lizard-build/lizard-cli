@@ -26,6 +26,7 @@ If `$ARGUMENTS` is non-empty, treat it as the user's request and act on it. If e
 4. Resolve context before any change: `lizard status --json` shows whether this exact folder is linked. `linked: false` means commands go to the [default project](#default-project); pass `--project` when it matters. Confirm the project, service or sandbox you target.
 5. A network error (`fetch failed`, `UND_ERR_SOCKET`, `ECONNRESET`) is not an answer: run the command again. Before repeating a create, check with `list` / `ps` that the first attempt did not land.
 6. For destructive actions (delete a service, sandbox, volume or project, drop an addon, overwrite a project-wide secret, restart production), confirm with the user first. Without a terminal the CLI never asks: `sandbox rm`, `volume delete`, `keys delete` and `workspace rm` delete at once; `service`, `project`, `secrets` and `domain` deletes and billing changes refuse until you add `-y`. Add `-y` only after the user agrees.
+7. When Lizard itself is broken, or a plan or limit blocks the task, open a support ticket: see [Support](#support). After any command, read stderr for `📬 Lizard support replied`: answer support's questions there.
 
 ## Deploy command output
 
@@ -296,6 +297,25 @@ Skip command-by-command transcripts unless they explain a failure.
 5. Don't generate Dockerfiles unsolicited — lizardpack auto-detects most stacks. Try a deploy first; write one only if it fails. Ask before either.
 6. Don't put runtime secrets (DB credentials, API keys, RPC creds, S3 keys) in `--global` "just in case another service needs it later". Scope to the services that consume them — see [Secrets and config](#secrets-and-config).
 
+## Support
+
+`lizard support` sends a ticket to the Lizard team (a person reads it within minutes in working hours). When to open one:
+
+- **Bug, open it yourself without asking** (it describes Lizard's failure, not the user's code) when Lizard fails: the same command fails twice with a 5xx, a timeout or `internal error`; a sandbox, app or database is stuck (`creating`, `pausing`, `deploying` for minutes) or crashed with no cause in its own logs; a documented command behaves differently from this guide. Failed commands print a hint on stderr (`support` in the JSON error) when this applies.
+- **Limits or billing, ask the user first** (it asks the team for more on their behalf): a plan or limit blocks what the user is doing and they need more, such as vCPU or sandbox limits, a region or size their plan does not include, rate limits, a bigger plan. With their OK, use `--type limits` (or `billing`) and say what is needed and why (numbers, for how long).
+
+```sh
+lizard support open "sandbox create in eu-west-lim-a returns 500" --expected "sandbox running" --actual "500 internal error, 3 tries since 17:40" --sandbox <id> --json
+lizard support open "need 100 vCPU of sandboxes for a batch job next week; trial allows 8" --type limits --json
+lizard support list --json                       # tickets, status, unread replies
+lizard support show T-1043 --json                # the whole thread; marks replies read
+lizard support reply T-1043 "request id r_8f2…, still failing at 18:05" --json
+```
+
+Write the ticket like a bug report: what you ran, what happened (the exact error), what you expected, since when. Your last failed Lizard calls, CLI version and OS are attached automatically; `--sandbox` / `--app` attach that resource's state. Never put secrets, keys or customer data in a ticket. Types: `bug` (default), `limits`, `billing`, `question`. Filing the same problem again does not open a new ticket: the answer has `similarId` (the open ticket) and `similarCount`; add details there with `lizard support reply`. At most 5 new tickets an hour. `AGENT_SUPPORT=0` in the environment means the user turned agent tickets off: don't open any.
+
+After opening one, tell the user the ticket id and continue with whatever does not depend on the fix. Replies from the team are printed on stderr after your next `lizard` command (`📬 Lizard support replied on T-1043`) and emailed to the account owner. When support asks a question, answer with `lizard support reply` and tell the user what was asked. Don't open tickets for the user's own build errors, app bugs or wrong commands.
+
 ## Billing
 
 Billing belongs to the account owner. `lizard billing --workspace <id> --json` shows the plan of another workspace's owner.
@@ -354,7 +374,8 @@ and `body.status` with the links:
 vCPU of sandboxes at once, or too many starts per minute, hour or day, is HTTP 429,
 not a billing problem. `SANDBOX_LIMIT_REACHED` has `unit: "vcpu"`, `limit`, `running` (vCPU in use)
 and `needed` (vCPU the new sandbox needs): pause or delete idle sandboxes, pick a
-smaller size, or ask the user about a higher Pro tier. `SANDBOX_RATE_LIMITED` has
+smaller size, or ask the user about a higher Pro tier; if the task needs more than any tier
+gives, open a `lizard support open … --type limits` ticket. `SANDBOX_RATE_LIMITED` has
 `retryAfterS`: wait that long; on the trial, the first paid invoice lifts the start
 limits. A workspace can also have its own limits, set by its owner
 (`lizard workspace limits <ws>` shows them with current use): `WORKSPACE_SANDBOX_LIMIT`

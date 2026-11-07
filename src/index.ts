@@ -4,7 +4,7 @@ import { Command } from "commander";
 import chalk from "chalk";
 import { setJSONMode, isJSONMode, error } from "./lib/format.js";
 import { requireAuth, isLoggedIn } from "./lib/auth.js";
-import { setBaseURL, setAccessToken, APIError, isProjectDeletedError, isAccountScopeError } from "./lib/api.js";
+import { api, getRequestToken, setBaseURL, setAccessToken, APIError, isProjectDeletedError, isAccountScopeError } from "./lib/api.js";
 import { checkForUpdateInBackground, runBackgroundUpdate, CURRENT_VERSION } from "./lib/updater.js";
 
 const BANNER = chalk.rgb(16, 185, 129)(
@@ -102,6 +102,8 @@ import { registerUp } from "./commands/up.js";
 import { registerUpgrade } from "./commands/upgrade.js";
 import { registerVolume } from "./commands/volume.js";
 import { registerWhoami } from "./commands/whoami.js";
+import { registerSupport } from "./commands/support.js";
+import { printSupportInbox, isPlatformFailure, SUPPORT_HINT } from "./lib/support.js";
 import { registerWorkspace } from "./commands/workspace.js";
 
 const program = new Command();
@@ -197,6 +199,7 @@ registerSleep(program);
 registerSecrets(program);
 registerService(program);
 registerSkill(program);
+registerSupport(program);
 registerSSH(program);
 registerStatus(program);
 registerUnlink(program);
@@ -342,6 +345,16 @@ function writeAndExit(payload: string, code: number): void {
   process.stdout.write(payload, () => process.exit(code));
 }
 
+/** Support replies not seen yet, on stderr after the command (lib/support.ts). Skipped when not
+ *  signed in and for `lizard support show`, which prints the thread itself. */
+async function supportInbox(): Promise<void> {
+  const args = process.argv.slice(2).filter((a) => !a.startsWith("-"));
+  if (args[0] === "support" && args[1] === "show") return;
+  if (["login", "logout", "upgrade", "help", "docs", "skills"].includes(args[0] ?? "")) return;
+  if (!getRequestToken()) return;
+  await printSupportInbox(() => api.get("/api/support/unread"));
+}
+
 async function main() {
   // Hidden entry point: detached child spawned by checkForUpdateInBackground.
   // Handled before commander so it never shows up in help or telemetry.
@@ -414,6 +427,7 @@ async function main() {
 
   try {
     await program.parseAsync(process.argv);
+    await supportInbox();
   } catch (err: any) {
     // Commander throws for --help, --version, etc. — ignore those
     if (err.code === "commander.helpDisplayed" || err.code === "commander.version") {
@@ -494,6 +508,8 @@ async function main() {
       netCode === "UND_ERR_CONNECT_TIMEOUT";
 
     const exitCode = isAuth ? 2 : isNotFound ? 3 : isTimeout ? 4 : 1;
+    // Lizard itself failed (5xx, timeout, network): point the agent at a ticket.
+    const showSupportHint = isPlatformFailure(status, netCode) && !process.argv.slice(2).includes("support");
 
     if (isJSONMode()) {
       // Through writeAndExit, not console.log + exit: `body` carries the raw
@@ -506,6 +522,7 @@ async function main() {
               status: status ?? null,
               message: msg,
               body: apiErr?.body ?? null,
+              ...(showSupportHint ? { support: SUPPORT_HINT } : {}),
             },
           },
           null,
@@ -517,6 +534,8 @@ async function main() {
     }
 
     error(msg);
+    if (showSupportHint) process.stderr.write(chalk.dim(SUPPORT_HINT) + "\n");
+    await supportInbox();
     if (status === 401) {
       process.stderr.write("Run `lizard login` to re-authenticate.\n");
     }

@@ -7,7 +7,7 @@ export const DEFAULT_REGION = "us-east-1";
 // Resolve at every call so tests (and exotic shells that mutate HOME) get a
 // fresh path. Cost is negligible — we hit disk anyway. LIZARD_HOME lets tests
 // (and power users) point the config dir somewhere other than ~/.lizard.
-function configDir(): string {
+export function configDir(): string {
   return process.env.LIZARD_HOME
     ? path.join(process.env.LIZARD_HOME, ".lizard")
     : path.join(os.homedir(), ".lizard");
