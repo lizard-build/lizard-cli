@@ -214,6 +214,20 @@ describe("private sandbox snapshots", () => {
     await program.parseAsync(['sandbox', operation, 'sandbox-test', '--no-wait'], { from: 'user' });
     expect(api.post).toHaveBeenCalledWith(`/api/sandboxes/sandbox-test/${operation}`, {});
   });
+  it.each([
+    [[], {}],                                  // no choice: the platform's default (files only)
+    [['--full'], { memory: true }],            // memory + processes; "memory" works on older servers
+    [['--fast'], { memory: false }],
+  ])("pause %j sends %j", async (flags, body) => {
+    const program = new Command().exitOverride(); registerSandbox(program);
+    await program.parseAsync(['sandbox', 'pause', 'sandbox-test', ...flags as string[], '--no-wait'], { from: 'user' });
+    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/pause', body);
+  });
+  it("refuses --full together with --fast", async () => {
+    const program = new Command().exitOverride(); registerSandbox(program);
+    await expect(program.parseAsync(['sandbox', 'pause', 'sandbox-test', '--full', '--fast', '--no-wait'], { from: 'user' })).rejects.toThrow(/either --full or --fast/);
+    expect(api.post).not.toHaveBeenCalled();
+  });
   it("passes the private snapshot ID to create", async () => {
     await create(['--snapshot', 'snap-test']);
     expect(api.post).toHaveBeenCalledWith('/api/sandboxes', expect.objectContaining({ snapshotId: 'snap-test' }));

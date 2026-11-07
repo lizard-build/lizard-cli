@@ -612,19 +612,29 @@ Examples:
     const cmd = sb.command(operation)
       .argument("<id>", "Sandbox ID")
       .option("--no-wait", "Return once the operation is queued");
-    // --fast: no memory saved, so the pause takes about a second whatever the RAM; the resume boots fresh.
-    if (operation === "pause") cmd.option("--fast", "Pause instantly: keep files only, end processes (no memory saved)");
+    // Two kinds of pause. Fast (files only, about a second whatever the RAM; processes end and the
+    // resume boots fresh) is the platform's default. --full keeps memory and running processes.
+    // Neither flag sends no choice, so the platform's default applies. --full sends {"memory": true}
+    // (not "full") so it also works against servers older than the "full" name.
+    if (operation === "pause") {
+      cmd.option("--full", "Keep memory and running processes too (slower pause, resume picks up where it left off)");
+      cmd.option("--fast", "Keep files only and end processes (the default)");
+    }
     cmd
-      .description(operation === "pause" ? "Save running state (memory and files) and stop the sandbox" : "Restore a paused sandbox with its saved memory and files")
+      .description(operation === "pause" ? "Pause the sandbox: keeps its files (--full: also its memory and running processes)" : "Restore a paused sandbox with its saved files (and memory, if paused with --full)")
       .action(async (id: string, opts) => {
-        const fast = operation === "pause" && !!opts.fast;
-        const queued = await api.post<{ id: string; status: string; snapshotId?: string; memoryRestored?: boolean; tip?: string }>(`/api/sandboxes/${id}/${operation}`, fast ? { memory: false } : {});
+        if (operation === "pause" && opts.full && opts.fast) throw new Error("Use either --full or --fast, not both");
+        const choice = operation !== "pause" ? {} : opts.full ? { memory: true } : opts.fast ? { memory: false } : {};
+        const queued = await api.post<{ id: string; status: string; snapshotId?: string; memoryRestored?: boolean; pausedWithMemory?: boolean; fastPauseUnavailable?: string; tip?: string }>(`/api/sandboxes/${id}/${operation}`, choice);
         if (opts.wait && operation === 'pause' && queued.snapshotId) await waitForSnapshot(queued.snapshotId);
         const result = opts.wait ? await waitForSandbox(id, operation === "pause" ? "paused" : "running") : queued;
-        if (isJSONMode()) printJSON({ ...result, ...(operation === "resume" && queued.memoryRestored !== undefined ? { memoryRestored: queued.memoryRestored } : {}), ...(queued.tip ? { tip: queued.tip } : {}) });
+        // What the pause actually kept: the answer says (the default is the platform's to choose).
+        const filesOnly = operation === "pause" && (queued.pausedWithMemory === false || (queued.pausedWithMemory === undefined && !!opts.fast));
+        if (isJSONMode()) printJSON({ ...result, ...(operation === "resume" && queued.memoryRestored !== undefined ? { memoryRestored: queued.memoryRestored } : {}), ...(operation === "pause" && queued.pausedWithMemory !== undefined ? { pausedWithMemory: queued.pausedWithMemory } : {}), ...(queued.fastPauseUnavailable ? { fastPauseUnavailable: queued.fastPauseUnavailable } : {}), ...(queued.tip ? { tip: queued.tip } : {}) });
         else {
-          success(`Sandbox ${chalk.bold(id)}: ${result.status}${fast ? " (files only)" : ""}`);
-          if (fast) info("Processes ended. Resume boots it fresh with your files intact.");
+          success(`Sandbox ${chalk.bold(id)}: ${result.status}${filesOnly ? " (files only)" : operation === "pause" && queued.pausedWithMemory === true ? " (with memory)" : ""}`);
+          if (filesOnly) info(`Processes ended. Resume boots it fresh with your files intact (use ${chalk.bold("--full")} to keep running processes).`);
+          if (queued.fastPauseUnavailable) info(`Kept memory: ${queued.fastPauseUnavailable.replace(/; paused with memory instead$/, "")}.`);
           // The server says when a faster option fits (a large sandbox paused with its memory).
           if (queued.tip) info(`Tip: ${queued.tip.replace('{"fast": true} (CLI: pause --fast)', chalk.bold(`lizard sandbox pause ${id} --fast`))}`);
           if (operation === "resume" && queued.memoryRestored === false) info("It was paused without memory: booted fresh with its files; start your processes again.");
