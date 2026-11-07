@@ -598,14 +598,26 @@ Examples:
     .addOption(new Option("--scope <scope>", "Where it may be restored: user = any of your projects and workspaces, workspace = only this workspace, project = only this project. Default: user, or with a workspace/project-scoped key only what the key covers")
       .choices(SNAPSHOT_SCOPES))
     .option("--no-wait", "Return once capture is queued")
-    .description("Save a running sandbox, memory included")
+    // Files only by default (the platform's): about a second whatever the RAM, sandboxes started
+    // from it boot fresh. --full keeps memory and processes too. Sent as memory: true/false, which
+    // servers older than the "full" name accept; no flag = the platform's default.
+    .option("--full", "Also save memory and running processes: sandboxes started from it continue where this one was (slower to take)")
+    .option("--fast", "Files only (the default)")
+    .description("Save a running sandbox's files (--full: also its memory and running processes)")
     .action(async (id: string, opts) => {
+      if (opts.full && opts.fast) throw new Error("Use either --full or --fast, not both");
       // No pool size: Firecracker and gVisor snapshots keep no warm copies, and a runc pod
       // (the fallback when a Firecracker create fails) gets the server's default.
-      let snapshot = await api.post<SnapshotRecord>(`/api/sandboxes/${id}/snapshot`, { name: opts.name, scope: opts.scope });
-      if (opts.wait) snapshot = await waitForSnapshot(snapshot.id);
-      if (isJSONMode()) printJSON(snapshot);
-      else success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}`);
+      const choice = opts.full ? { memory: true } : opts.fast ? { memory: false } : {};
+      const taken = await api.post<SnapshotRecord & { withMemory?: boolean; fastSnapshotUnavailable?: string }>(`/api/sandboxes/${id}/snapshot`, { name: opts.name, scope: opts.scope, ...choice });
+      let snapshot: SnapshotRecord = taken;
+      if (opts.wait) snapshot = await waitForSnapshot(taken.id);
+      if (isJSONMode()) printJSON({ ...snapshot, ...(taken.withMemory !== undefined ? { withMemory: taken.withMemory } : {}), ...(taken.fastSnapshotUnavailable ? { fastSnapshotUnavailable: taken.fastSnapshotUnavailable } : {}) });
+      else {
+        success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}${taken.withMemory === true ? " (with memory)" : taken.withMemory === false ? " (files only)" : ""}`);
+        if (taken.withMemory === false) info(`Sandboxes started from it boot fresh with these files (use ${chalk.bold("--full")} to keep running processes).`);
+        if (taken.fastSnapshotUnavailable) info(taken.fastSnapshotUnavailable + ".");
+      }
     });
 
   for (const operation of ["pause", "resume"] as const) {

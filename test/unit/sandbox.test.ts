@@ -200,6 +200,11 @@ describe("private sandbox snapshots", () => {
     // No scope unless asked: the server picks 'user', or for a scoped key only what it covers.
     expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app', scope: undefined });
   });
+  it.each([[['--full'], { memory: true }], [['--fast'], { memory: false }]])("snapshot %j sends %j", async (flags, choice) => {
+    const program = new Command().exitOverride(); registerSandbox(program);
+    await program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'My app', ...flags as string[], '--no-wait'], { from: 'user' });
+    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app', scope: undefined, ...choice });
+  });
   it("no longer takes --warm", async () => {
     const program = new Command().exitOverride(); registerSandbox(program);
     await expect(program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'app', '--warm', '3', '--no-wait'], { from: 'user' })).rejects.toThrow(/unknown option/);
