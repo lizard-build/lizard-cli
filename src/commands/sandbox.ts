@@ -618,7 +618,7 @@ Examples:
     // (not "full") so it also works against servers older than the "full" name.
     if (operation === "pause") {
       cmd.option("--full", "Keep memory and running processes too (slower pause, resume picks up where it left off)");
-      cmd.option("--fast", "Keep files only and end processes (the default)");
+      cmd.option("--fast", "Same as a plain pause: keep files only and end processes");
     }
     cmd
       .description(operation === "pause" ? "Pause the sandbox: keeps its files (--full: also its memory and running processes)" : "Restore a paused sandbox with its saved files (and memory, if paused with --full)")
