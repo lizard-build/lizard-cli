@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Command } from "commander";
 import { registerSandbox, lifetimeLine, sandboxNextSteps } from "../../src/commands/sandbox.js";
 import { api, APIError } from "../../src/lib/api.js";
-import { printJSON } from "../../src/lib/format.js";
+import { printJSON, warn } from "../../src/lib/format.js";
 import { getProjectLink, resolveProjectId } from "../../src/lib/config.js";
 
 vi.mock("../../src/lib/api.js", () => {
@@ -18,7 +18,7 @@ vi.mock("../../src/lib/config.js", () => ({
   looksLikeId: (v: string) => /^[A-Za-z0-9_-]{21}$/.test(v) && /[A-Z]/.test(v),
   DEFAULT_REGION: "us-east-1",
 }));
-vi.mock("../../src/lib/format.js", () => ({ isJSONMode: () => true, printJSON: vi.fn() }));
+vi.mock("../../src/lib/format.js", () => ({ isJSONMode: () => true, printJSON: vi.fn(), warn: vi.fn() }));
 
 function create(args: string[]) {
   const program = new Command().exitOverride();
@@ -197,13 +197,46 @@ describe("private sandbox snapshots", () => {
   it("creates a snapshot without a pool size", async () => {
     const program = new Command().exitOverride(); registerSandbox(program);
     await program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'My app', '--no-wait'], { from: 'user' });
-    // No scope unless asked: the server picks 'user', or for a scoped key only what it covers.
-    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app', scope: undefined });
+    // Never a scope: every snapshot restores only in its own project.
+    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app' });
+    expect(warn).not.toHaveBeenCalled();
   });
   it.each([[['--full'], { memory: true }], [['--fast'], { memory: false }]])("snapshot %j sends %j", async (flags, choice) => {
     const program = new Command().exitOverride(); registerSandbox(program);
     await program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'My app', ...flags as string[], '--no-wait'], { from: 'user' });
-    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app', scope: undefined, ...choice });
+    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app', ...choice });
+  });
+  it.each(['user', 'workspace'])("still takes --scope %s from older scripts, warns and sends no scope", async scope => {
+    const program = new Command().exitOverride(); registerSandbox(program);
+    await program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'My app', '--scope', scope, '--no-wait'], { from: 'user' });
+    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app' });
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/only in its own project/));
+  });
+  it("takes --scope project quietly", async () => {
+    const program = new Command().exitOverride(); registerSandbox(program);
+    await program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'My app', '--scope', 'project', '--no-wait'], { from: 'user' });
+    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app' });
+    expect(warn).not.toHaveBeenCalled();
+  });
+  it("hides --scope and snapshot-scope from help", () => {
+    const program = new Command().exitOverride(); registerSandbox(program);
+    const sandbox = program.commands.find(c => c.name() === 'sandbox')!;
+    const snapshot = sandbox.commands.find(c => c.name() === 'snapshot')!;
+    expect(snapshot.helpInformation()).not.toMatch(/--scope/);
+    expect(sandbox.helpInformation()).not.toMatch(/snapshot-scope/);
+  });
+  it.each(['user', 'workspace', 'project'])("snapshot-scope %s changes nothing, calls no API and succeeds", async scope => {
+    const program = new Command().exitOverride(); registerSandbox(program);
+    await program.parseAsync(['sandbox', 'snapshot-scope', 'snap-test', scope], { from: 'user' });
+    expect(api.post).not.toHaveBeenCalled();
+    expect(api.get).not.toHaveBeenCalled();
+    expect(printJSON).toHaveBeenCalledWith({ id: 'snap-test', scope: 'project', message: expect.stringMatching(/only in its own project/) });
+  });
+  it("snapshot-scope still refuses an unknown scope", async () => {
+    const program = new Command().exitOverride().configureOutput({ writeErr: () => {} }); registerSandbox(program);
+    await expect(program.parseAsync(['sandbox', 'snapshot-scope', 'snap-test', 'team'], { from: 'user' })).rejects.toThrow(/Scope must be one of/);
+    expect(printJSON).not.toHaveBeenCalled();
   });
   it("no longer takes --warm", async () => {
     const program = new Command().exitOverride(); registerSandbox(program);
