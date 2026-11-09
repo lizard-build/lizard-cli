@@ -4,7 +4,7 @@ import fs from "node:fs";
 import * as https from "node:https";
 import * as http from "node:http";
 import * as p from "@clack/prompts";
-import { Command, InvalidArgumentError, Option } from "commander";
+import { Command, Option } from "commander";
 import open from "open";
 import { api, APIError, getBaseURL, getRawBytes, apiErrorFrom, clientHeaders, getRequestToken, withQuery, withScope, type ResourceScope } from "../lib/api.js";
 import { getToken } from "../lib/auth.js";
@@ -23,18 +23,13 @@ import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAg
 // so let it.
 const TEMPLATE_HINT = "base, interpreter, codex, claude, opencode, pi, prime, desktop";
 
-// The three machines a sandbox can be, each priced per hour, billed per second by the server. The
-// platform rejects anything else, so the CLI offers exactly these.
-const SANDBOX_SIZES = ["small", "medium", "large"] as const;
-const SIZE_HINT = "small 2 vCPU/4 GB, medium 4/8, large 8/16";
-// Sizes open only to accounts the platform enables (mini: 1 vCPU/2 GB). Accepted here but not
-// advertised in the help; the server refuses them for everyone else (SANDBOX_SIZE_NOT_ALLOWED).
-const GATED_SANDBOX_SIZES = ["mini"] as const;
-
-function parseSandboxSize(v: string): string {
-  if ((SANDBOX_SIZES as readonly string[]).includes(v) || (GATED_SANDBOX_SIZES as readonly string[]).includes(v)) return v;
-  throw new InvalidArgumentError(`Allowed choices are ${SANDBOX_SIZES.join(", ")}.`);
-}
+// The four machines a sandbox can be, each priced per hour, billed per second by the server. The
+// platform rejects anything else, so the CLI offers exactly these. Mini has no warm pool, so it
+// starts only from templates with a disk-only build (MINI_TEMPLATES); the server answers
+// SANDBOX_SIZE_NOT_ALLOWED for any other template.
+const SANDBOX_SIZES = ["mini", "small", "medium", "large"] as const;
+const SIZE_HINT = "mini 1 vCPU/2 GB, small 2/4, medium 4/8, large 8/16";
+const MINI_TEMPLATES = "base, claude, codex and interpreter";
 
 interface SandboxRecord {
   sandboxId: string;
@@ -178,7 +173,7 @@ export function registerSandbox(program: Command) {
   sb.command("create")
     .description("Create a sandbox")
     .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
-    .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small during the Pro trial (Small in US regions only)`).argParser(parseSandboxSize))
+    .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small on the Pro trial (US regions only). Mini works only with the ${MINI_TEMPLATES} templates`).choices(SANDBOX_SIZES))
     .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
     .option("--region <code>", `Region to create the sandbox in (default ${DEFAULT_REGION}; with --volume or --snapshot, theirs)`)
     .option("--snapshot <id>", "Create from a private saved snapshot, at the size it was taken at")
