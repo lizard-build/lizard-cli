@@ -24,7 +24,18 @@ function joinMessage(words: string[]): string {
 export function registerSupport(program: Command) {
   const support = program
     .command("support")
-    .description("Tickets to the Lizard team: something on Lizard is broken, or you need higher limits / a bigger plan. Replies appear after your next lizard command.");
+    .description("Tickets to the Lizard team: something on Lizard is broken, or you need higher limits / a bigger plan. Replies appear after your next lizard command.")
+    .addHelpText("after", `
+How to report a problem:
+  1. Is it Lizard's fault? Not for your own typos, build errors or app bugs.
+  2. Already reported? lizard support list
+     If an open ticket covers it: lizard support reply <ticket> "<new details>"
+  3. Otherwise open one, written like a bug report:
+     lizard support open "<what you ran> fails with <exact error> since <when>" \\
+       --expected "<what should happen>" --sandbox <id> | --app <name>
+     Last failed calls, CLI version and OS are attached. No secrets or keys.
+  Limits or billing: --type limits / --type billing, say what you need and why.
+  Replies show after your next lizard command.`);
 
   support
     .command("open")

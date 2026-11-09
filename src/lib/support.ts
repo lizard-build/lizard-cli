@@ -76,7 +76,7 @@ export function wantsSupportHint(opts: { status?: number; code?: string; exitCod
   return true;
 }
 
-export const SUPPORT_HINT = 'Lizard bug? Optional: lizard support open "<what happened>"';
+export const SUPPORT_HINT = "Lizard bug? Optional: lizard support --help";
 
 interface UnreadTicket { ticket: string; subject: string; status: string; messages: Array<{ from: string; body: string; at: string }> }
 
