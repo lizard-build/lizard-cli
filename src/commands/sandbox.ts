@@ -15,7 +15,7 @@ import { sandboxShell } from "./sandbox-ssh.js";
 import { startVncTunnel, vncTarget } from "./sandbox-vnc.js";
 import { registerSandboxAgentCommands } from "./agents.js";
 import { registerSandboxScheduleCommands } from "./sandbox-schedules.js";
-import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAgo, isTTY } from "../lib/format.js";
+import { success, info, warn, error, isJSONMode, printJSON, table, statusColor, timeAgo, isTTY } from "../lib/format.js";
 
 // Templates are per-region rows in sandbox_templates, not a constant. Hardcoding them
 // here meant a template that was built, registered and sitting warm in every region was
@@ -600,8 +600,9 @@ Examples:
   sb.command("snapshot")
     .argument("<id>", "Running sandbox ID")
     .requiredOption("--name <name>", "Name for this private snapshot")
-    .addOption(new Option("--scope <scope>", "Where it may be restored: user = any of your projects and workspaces, workspace = only this workspace, project = only this project. Default: user, or with a workspace/project-scoped key only what the key covers")
-      .choices(SNAPSHOT_SCOPES))
+    // A snapshot now restores only in its own project. --scope stays, out of the help, so
+    // older scripts still run; it is no longer sent.
+    .addOption(new Option("--scope <scope>").choices(SNAPSHOT_SCOPES).hideHelp())
     .option("--no-wait", "Return once capture is queued")
     // Files only by default (the platform's): about a second whatever the RAM, sandboxes started
     // from it boot fresh. --full keeps memory and processes too. Sent as memory: true/false, which
@@ -611,10 +612,11 @@ Examples:
     .description("Save a running sandbox's files (--full: also its memory and running processes)")
     .action(async (id: string, opts) => {
       if (opts.full && opts.fast) throw new Error("Use either --full or --fast, not both");
+      if (opts.scope && opts.scope !== "project") warn(`--scope ${opts.scope} has no effect: a snapshot now restores only in its own project.`);
       // No pool size: Firecracker and gVisor snapshots keep no warm copies, and a runc pod
       // (the fallback when a Firecracker create fails) gets the server's default.
       const choice = opts.full ? { memory: true } : opts.fast ? { memory: false } : {};
-      const taken = await api.post<SnapshotRecord & { withMemory?: boolean; fastSnapshotUnavailable?: string }>(`/api/sandboxes/${id}/snapshot`, { name: opts.name, scope: opts.scope, ...choice });
+      const taken = await api.post<SnapshotRecord & { withMemory?: boolean; fastSnapshotUnavailable?: string }>(`/api/sandboxes/${id}/snapshot`, { name: opts.name, ...choice });
       let snapshot: SnapshotRecord = taken;
       if (opts.wait) snapshot = await waitForSnapshot(taken.id);
       if (isJSONMode()) printJSON({ ...snapshot, ...(taken.withMemory !== undefined ? { withMemory: taken.withMemory } : {}), ...(taken.fastSnapshotUnavailable ? { fastSnapshotUnavailable: taken.fastSnapshotUnavailable } : {}) });
@@ -662,7 +664,7 @@ Examples:
   sb.command("restore")
     .argument("<snapshot-id>", "Saved snapshot ID")
     .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
-    .option("-p, --project <id>", "Project to start it in, in any of your workspaces (name, slug, or ID); defaults to the volume's project, else the snapshot's own")
+    .option("-p, --project <id>", "Project to start it in (name, slug, or ID); a snapshot restores only in its own project, the default")
     .option("--volume <name-or-id>", "Mount this volume at /workspace (Firecracker snapshot of a sandbox that had no volume; same region)")
     .description("Start a new sandbox from a private snapshot")
     .action(async (snapshotId: string, opts) => {
@@ -735,14 +737,16 @@ Examples:
       else success(`Snapshot ${chalk.bold(id)} will keep ${count} copies warm`);
     });
 
-  sb.command("snapshot-scope")
+  // Every snapshot now restores only in its own project, so there is no scope left to change.
+  // The command stays, out of the help and without an API call, so older scripts still run.
+  sb.command("snapshot-scope", { hidden: true })
     .argument("<snapshot-id>", "Saved snapshot ID")
-    .argument("<scope>", `Where it may be restored: ${SNAPSHOT_SCOPES.join(" | ")}`, parseSnapshotScope)
-    .description("Change where a snapshot you took may be restored: user = any of your projects and workspaces, workspace = only its workspace, project = only its project")
-    .action(async (id: string, scope: string) => {
-      const snapshot = await api.patch<SnapshotRecord>(`/api/sandbox-snapshots/${id}`, { scope });
-      if (isJSONMode()) printJSON(snapshot);
-      else success(`Snapshot ${chalk.bold(id)} can now be restored ${SCOPE_TEXT[scope]}`);
+    .argument("<scope>", SNAPSHOT_SCOPES.join(" | "), parseSnapshotScope)
+    .description("No longer needed: every snapshot restores only in its own project")
+    .action((id: string) => {
+      const message = "Nothing to change: every snapshot now restores only in its own project.";
+      if (isJSONMode()) printJSON({ id, scope: "project", message });
+      else info(message);
     });
 
   sb.command("snapshots")
@@ -755,12 +759,12 @@ Examples:
         const { projectId, scope } = await resolveProjectScope(opts.project);
         path = withScope(`/api/projects/${projectId}/snapshots`, scope);
       }
-      const snaps = await api.get<Array<{ id: string; template: string; name?: string; region: string; projectId: string; scope?: string; sourceSandboxId?: string; cpus: number; memoryMb: number; createdAt: number }>>(path);
+      const snaps = await api.get<Array<{ id: string; template: string; name?: string; region: string; projectId: string; sourceSandboxId?: string; cpus: number; memoryMb: number; createdAt: number }>>(path);
       if (isJSONMode()) { printJSON(snaps); return; }
       if (!snaps.length) { console.log("No snapshots."); return; }
       table(
-        ["Snapshot ID", "Name", "Scope", "Project", "Region", "CPU/Mem", "Created"],
-        snaps.map((s) => [s.id, s.name ?? "", s.scope ?? "project", s.projectId, s.region, `${s.cpus} vCPU / ${s.memoryMb} MB`, timeAgo(s.createdAt as any)]),
+        ["Snapshot ID", "Name", "Project", "Region", "CPU/Mem", "Created"],
+        snaps.map((s) => [s.id, s.name ?? "", s.projectId, s.region, `${s.cpus} vCPU / ${s.memoryMb} MB`, timeAgo(s.createdAt as any)]),
       );
     });
 
@@ -1059,8 +1063,8 @@ interface SnapshotRecord {
   id: string; name: string; projectId: string; region: string; status: string;
   poolSize: number; readyCount: number; error?: string; scope?: string;
 }
+// Old values, still accepted (and ignored) by `snapshot --scope` and `snapshot-scope`.
 const SNAPSHOT_SCOPES = ["user", "workspace", "project"];
-const SCOPE_TEXT: Record<string, string> = { user: "in any of your projects and workspaces", workspace: "only in its own workspace", project: "only in its own project" };
 function parseSnapshotScope(value: string): string {
   if (!SNAPSHOT_SCOPES.includes(value)) throw new Error(`Scope must be one of: ${SNAPSHOT_SCOPES.join(", ")}`);
   return value;

@@ -172,7 +172,7 @@ Names are unique within a project: `getOrCreate` returns the existing volume, `c
 | Start a sandbox from a snapshot (about 0.4 s) | `Sandbox.restore(id)` | `Sandbox.restore(id)` |
 | Live copies of a running sandbox (each counts toward the running limit) | `fork({ count })` | `fork(count=...)` |
 
-A snapshot belongs to the user who took it and restores into any project they can use, unless its scope is `workspace` or `project` (`snapshot(name, { scope })`, `Sandbox.setSnapshotScope(id, scope)`). To start many sandboxes that each keep their own files from one snapshot, take it without a volume and pass `volumeId` to each `restore`. A sandbox with a volume cannot be forked. `fork()` returns one entry per copy, with `sandbox` or `error` (for example the account's sandbox limit). Delete snapshots with `Sandbox.deleteSnapshot(id)`; sandboxes already restored keep running.
+A snapshot restores only in its own project and region. The user who took it and the members of its project can restore it. Restoring it into any other project throws `AuthenticationError` with `code` `SNAPSHOT_SCOPE`. To start many sandboxes that each keep their own files from one snapshot, take it without a volume and pass `volumeId` to each `restore`. A sandbox with a volume cannot be forked. `fork()` returns one entry per copy, with `sandbox` or `error` (for example the account's sandbox limit). Delete snapshots with `Sandbox.deleteSnapshot(id)`; sandboxes already restored keep running.
 
 ## Desktop (computer use)
 
@@ -227,7 +227,7 @@ const run = await lizard.git.actions.wait('me/app', (await lizard.git.actions.ru
 | Error | Meaning |
 |---|---|
 | `PaymentRequiredError` | HTTP 402: the account must start Pro, start it now, or pay an invoice. Show `message` as is and open `url`; retry after the user pays |
-| `AuthenticationError` | HTTP 401 or 403: bad key, no access, or a refusal such as a volume quota, a snapshot's scope or `ACCOUNT_SCOPE_REQUIRED`: check `code` |
+| `AuthenticationError` | HTTP 401 or 403: bad key, no access, or a refusal such as a volume quota, a snapshot restored outside its project (`SNAPSHOT_SCOPE`) or `ACCOUNT_SCOPE_REQUIRED`: check `code` |
 | `NotFoundError` | HTTP 404 |
 | `ConflictError` | HTTP 409, such as a volume name in use |
 | `TimeoutError` | HTTP 408 or 504 |
