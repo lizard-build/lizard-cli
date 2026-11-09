@@ -9,6 +9,7 @@ import { Command } from "commander";
 import { api, getBaseURL, getRequestToken, clientHeaders, APIError } from "../lib/api.js";
 import { resolveProjectScope } from "../lib/resolve.js";
 import { success, info, warn, fail, isJSONMode, printJSON, table } from "../lib/format.js";
+import { SUPPORT_HINT, wantsSupportHint } from "../lib/support.js";
 
 /**
  * `lizard fn`: Lizard Functions (AWS Lambda-compatible) from the CLI, made for one-command
@@ -496,6 +497,7 @@ export const EXIT = { OK: 0, FAILED: 1, AUTH: 2, INVALID: 3, TIMEOUT: 4 } as con
 function failEnv(e: Record<string, any>, exit: number): never {
   statusDone();
   const env: Record<string, any> = { schemaVersion: 1, status: "failed", ...e };
+  if (wantsSupportHint({ code: env.code, exitCode: exit })) env.support = SUPPORT_HINT;
   for (const k of Object.keys(env)) if (env[k] === undefined || k === "deployId" || k === "log" || k === "startedAt" || k === "endedAt") delete (env as any)[k];
   if (isJSONMode()) process.stderr.write(JSON.stringify(env, null, 2) + "\n");
   else {
@@ -503,6 +505,7 @@ function failEnv(e: Record<string, any>, exit: number): never {
     if (env.serving?.unchanged) process.stderr.write(chalk.dim(`Version ${env.serving.version} is still serving: nothing changed.\n`));
     if (env.logTail) process.stderr.write(chalk.dim(String(env.logTail).trim().split("\n").slice(-12).join("\n") + "\n"));
     if (env.remediation) process.stderr.write(`Fix: ${chalk.cyan(env.remediation)}\n`);
+    if (env.support) process.stderr.write(chalk.dim(env.support) + "\n");
   }
   process.exit(exit);
 }

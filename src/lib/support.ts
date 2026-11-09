@@ -62,15 +62,21 @@ export function agentName(): string | undefined {
   return detectAgent() ?? undefined;
 }
 
-/** Server-side or network failures are worth a ticket; a 4xx about the request usually is not. */
-export function isPlatformFailure(status: number | undefined, netCode?: string): boolean {
+/**
+ * Whether a failed command ends with the one-line support hint. Almost every error does: the hint
+ * is optional and one line, and an agent can't always tell a Lizard bug from its own mistake.
+ * Not shown for: sign-in problems (`lizard login` is the fix), cancelled prompts, `lizard support`
+ * itself, and AGENT_SUPPORT=0 (the user turned agent tickets off).
+ */
+export function wantsSupportHint(opts: { status?: number; code?: string; exitCode?: number } = {}): boolean {
   if (process.env.AGENT_SUPPORT === "0") return false;
-  if (status === undefined) return !!netCode;
-  return status >= 500 || status === 408;
+  if (process.argv.slice(2).includes("support")) return false;
+  if (opts.status === 401 || opts.code === "NOT_AUTHENTICATED" || opts.exitCode === 2) return false;
+  if (opts.exitCode === 5 || opts.exitCode === 130) return false;
+  return true;
 }
 
-export const SUPPORT_HINT =
-  'If this keeps failing, tell the Lizard team: lizard support open "<what you ran and what happened>" (the error above is attached automatically)';
+export const SUPPORT_HINT = "Lizard bug? Optional: lizard support --help";
 
 interface UnreadTicket { ticket: string; subject: string; status: string; messages: Array<{ from: string; body: string; at: string }> }
 

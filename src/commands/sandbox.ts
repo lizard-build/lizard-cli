@@ -14,6 +14,7 @@ import { resolveVolume } from "../lib/volume.js";
 import { sandboxShell } from "./sandbox-ssh.js";
 import { startVncTunnel, vncTarget } from "./sandbox-vnc.js";
 import { registerSandboxAgentCommands } from "./agents.js";
+import { registerSandboxScheduleCommands } from "./sandbox-schedules.js";
 import { success, info, warn, error, isJSONMode, printJSON, table, statusColor, timeAgo, isTTY } from "../lib/format.js";
 
 // Templates are per-region rows in sandbox_templates, not a constant. Hardcoding them
@@ -23,10 +24,13 @@ import { success, info, warn, error, isJSONMode, printJSON, table, statusColor, 
 // so let it.
 const TEMPLATE_HINT = "base, interpreter, codex, claude, opencode, pi, prime, desktop";
 
-// The three machines a sandbox can be, each priced per hour, billed per second by the server. The
-// platform rejects anything else, so the CLI offers exactly these.
-const SANDBOX_SIZES = ["small", "medium", "large"] as const;
-const SIZE_HINT = "small 2 vCPU/4 GB, medium 4/8, large 8/16";
+// The four machines a sandbox can be, each priced per hour, billed per second by the server. The
+// platform rejects anything else, so the CLI offers exactly these. Mini has no warm pool, so it
+// starts only from templates with a disk-only build (MINI_TEMPLATES); the server answers
+// SANDBOX_SIZE_NOT_ALLOWED for any other template.
+const SANDBOX_SIZES = ["mini", "small", "medium", "large"] as const;
+const SIZE_HINT = "mini 1 vCPU/2 GB, small 2/4, medium 4/8, large 8/16";
+const MINI_TEMPLATES = "base, claude, codex and interpreter";
 
 interface SandboxRecord {
   sandboxId: string;
@@ -170,7 +174,7 @@ export function registerSandbox(program: Command) {
   sb.command("create")
     .description("Create a sandbox")
     .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
-    .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small during the Pro trial (Small in US regions only)`).choices(SANDBOX_SIZES))
+    .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small on the Pro trial (US regions only). Mini works only with the ${MINI_TEMPLATES} templates`).choices(SANDBOX_SIZES))
     .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
     .option("--region <code>", `Region to create the sandbox in (default ${DEFAULT_REGION}; with --volume or --snapshot, theirs)`)
     .option("--snapshot <id>", "Create from a private saved snapshot, at the size it was taken at")
@@ -409,6 +413,7 @@ Examples:
     });
 
   registerSandboxAgentCommands(sb);
+  registerSandboxScheduleCommands(sb);
 
   sb.command("ssh")
     .alias("shell")

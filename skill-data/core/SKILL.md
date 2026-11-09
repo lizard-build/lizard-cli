@@ -112,7 +112,7 @@ lizard sandbox rm <id>                                    # delete it now (alias
 `lizard sandbox list --json` shows the project's sandboxes; `--all` shows every one you have.
 
 - **Templates:** `base` (default, Python 3.11 on Alpine Linux), `interpreter` (Python with numpy, pandas, matplotlib and scipy, plus Node 22), `codex`, `claude`, `opencode`, `pi`, `prime` (one coding agent each), `desktop` (graphical desktop with Chromium).
-- **Sizes:** `-s small|medium|large`, $0.0162 / $0.0324 (default) / $0.0648 per hour, billed per second while it runs. A paused sandbox costs nothing. On the Pro trial only `small` in a US region works (no size = small); anything else answers 403 `TRIAL_SANDBOX_SIZE` / `TRIAL_SANDBOX_REGION` until the first Pro payment.
+- **Sizes:** `-s mini|small|medium|large`, $0.0081 / $0.0162 / $0.0324 (default) / $0.0648 per hour, billed per second while it runs. A paused sandbox costs nothing. Mini (1 vCPU / 2 GB) works only with the `base`, `claude`, `codex` and `interpreter` templates; another template answers 400 `SANDBOX_SIZE_NOT_ALLOWED`. On the Pro trial, Small and one Medium at a time work, in US regions only (no size = small). Until the first Pro payment, another size or region answers 403 `TRIAL_SANDBOX_SIZE` / `TRIAL_SANDBOX_REGION`, and a second Medium answers 403 `TRIAL_MEDIUM_RUNNING`.
 - **Region:** `us-east-1` unless `--region` names another (`lizard regions`). With `--volume` or `--snapshot` the sandbox starts in their region.
 - **Lifetime:** 5 minutes by default, then the sandbox is deleted with its files. `--timeout 0` at create means no limit; `lizard sandbox timeout <id> <ms>` sets a new lifetime from now. Commands do not reset it.
 - **Commands:** `exec <id> -- <cmd> [args…]` passes each argument as one word, so a whole shell line in one quoted string fails with `not found`: wrap it, `-- sh -c 'cd /workspace && npm test'`. Each call is a new process that starts in `/root`, gives up after 150 seconds (exit `4`, `EXEC_TIMEOUT`; the command may still be running) and keeps at most 512 KB of output. Run longer jobs in the background and poll a log: `-- sh -c 'cd /workspace && nohup npm run build > build.log 2>&1 &'`, then `-- tail -n 50 /workspace/build.log`. `ssh` needs a real terminal: from an agent, use `exec`.
@@ -314,7 +314,7 @@ lizard support reply T-1043 "request id r_8f2…, still failing at 18:05" --json
 
 Write the ticket like a bug report: what you ran, what happened (the exact error), what you expected, since when. Your last failed Lizard calls, CLI version and OS are attached automatically; `--sandbox` / `--app` attach that resource's state. Never put secrets, keys or customer data in a ticket. Types: `bug` (default), `limits`, `billing`, `question`. Filing the same problem again does not open a new ticket: the answer has `similarId` (the open ticket) and `similarCount`; add details there with `lizard support reply`. At most 5 new tickets an hour. `AGENT_SUPPORT=0` in the environment means the user turned agent tickets off: don't open any.
 
-After opening one, tell the user the ticket id and continue with whatever does not depend on the fix. Replies from the team are printed on stderr after your next `lizard` command (`📬 Lizard support replied on T-1043`) and emailed to the account owner. When support asks a question, answer with `lizard support reply` and tell the user what was asked. Don't open tickets for the user's own build errors, app bugs or wrong commands.
+After opening one, tell the user the ticket id and continue with whatever does not depend on the fix. Replies from the team are printed on stderr after your next `lizard` command (`📬 Lizard support replied on T-1043`) and emailed to the account owner. When support asks a question, answer with `lizard support reply` and tell the user what was asked. Don't open tickets for the user's own build errors, app bugs or wrong commands. Most errors end with a dim `Lizard bug? Optional: lizard support --help` line (`support` in `--json` errors): it is a pointer, not an instruction — open one only when the failure looks like Lizard's, and check `lizard support list` for an open ticket about it first.
 
 ## Billing
 
@@ -343,8 +343,8 @@ way and run more Sandboxes at once. They have no trial: `lizard billing start
 --tier 5x` charges today. A paid subscription changes tier with `lizard billing
 tier <pro|5x|20x>`: up is charged now, prorated, and the new limits apply at once;
 down starts with the next period. `lizard billing --json` shows `tier` and
-`pendingTier`. Sandbox limits count vCPU of running sandboxes (Small 2, Medium 4,
-Large 8; paused ones don't count), across all of the owner's workspaces: the trial
+`pendingTier`. Sandbox limits count vCPU of running sandboxes (Mini 1, Small 2,
+Medium 4, Large 8; paused ones don't count), across all of the owner's workspaces: the trial
 runs up to 4 Small (8 vCPU), Pro 40 vCPU, Pro 5x 220, Pro 20x 1,200. Sandbox
 starts are limited only on the trial (6 a minute, 30 an hour, 100 a day); Pro,
 Pro 5x and Pro 20x have unlimited starts. Trial

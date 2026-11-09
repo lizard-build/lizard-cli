@@ -21,10 +21,13 @@ import { success, info, error, isJSONMode, printJSON, table, statusColor, timeAg
 // server validates against the region's actual list and answers with what IS available,
 // so let it.
 const TEMPLATE_HINT = "base, interpreter, codex, claude, opencode, pi, prime, desktop";
-// The three machines a sandbox can be, each priced per hour, billed per second by the server. The
-// platform rejects anything else, so the CLI offers exactly these.
-const SANDBOX_SIZES = ["small", "medium", "large"];
-const SIZE_HINT = "small 2 vCPU/4 GB, medium 4/8, large 8/16";
+// The four machines a sandbox can be, each priced per hour, billed per second by the server. The
+// platform rejects anything else, so the CLI offers exactly these. Mini has no warm pool, so it
+// starts only from templates with a disk-only build (MINI_TEMPLATES); the server answers
+// SANDBOX_SIZE_NOT_ALLOWED for any other template.
+const SANDBOX_SIZES = ["mini", "small", "medium", "large"];
+const SIZE_HINT = "mini 1 vCPU/2 GB, small 2/4, medium 4/8, large 8/16";
+const MINI_TEMPLATES = "base, claude, codex and interpreter";
 function parseIntOption(v) {
     const n = Number(v);
     if (!/^\d+$/.test(v) || !Number.isSafeInteger(n) || n < 1 || n > 65535) {
@@ -126,7 +129,7 @@ export function registerSandbox(program) {
     sb.command("create")
         .description("Create a sandbox")
         .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
-        .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small during the Pro trial (Small in US regions only)`).choices(SANDBOX_SIZES))
+        .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small on the Pro trial (US regions only). Mini works only with the ${MINI_TEMPLATES} templates`).choices(SANDBOX_SIZES))
         .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
         .option("--region <code>", `Region to create the sandbox in (default ${DEFAULT_REGION}; with --volume or --snapshot, theirs)`)
         .option("--snapshot <id>", "Create from a private saved snapshot, at the size it was taken at")
@@ -539,39 +542,64 @@ Examples:
         .addOption(new Option("--scope <scope>", "Where it may be restored: user = any of your projects and workspaces, workspace = only this workspace, project = only this project. Default: user, or with a workspace/project-scoped key only what the key covers")
         .choices(SNAPSHOT_SCOPES))
         .option("--no-wait", "Return once capture is queued")
-        .description("Save a running sandbox, memory included")
+        // Files only by default (the platform's): about a second whatever the RAM, sandboxes started
+        // from it boot fresh. --full keeps memory and processes too. Sent as memory: true/false, which
+        // servers older than the "full" name accept; no flag = the platform's default.
+        .option("--full", "Also save memory and running processes: sandboxes started from it continue where this one was (slower to take)")
+        .option("--fast", "Files only (the default)")
+        .description("Save a running sandbox's files (--full: also its memory and running processes)")
         .action(async (id, opts) => {
+        if (opts.full && opts.fast)
+            throw new Error("Use either --full or --fast, not both");
         // No pool size: Firecracker and gVisor snapshots keep no warm copies, and a runc pod
         // (the fallback when a Firecracker create fails) gets the server's default.
-        let snapshot = await api.post(`/api/sandboxes/${id}/snapshot`, { name: opts.name, scope: opts.scope });
+        const choice = opts.full ? { memory: true } : opts.fast ? { memory: false } : {};
+        const taken = await api.post(`/api/sandboxes/${id}/snapshot`, { name: opts.name, scope: opts.scope, ...choice });
+        let snapshot = taken;
         if (opts.wait)
-            snapshot = await waitForSnapshot(snapshot.id);
+            snapshot = await waitForSnapshot(taken.id);
         if (isJSONMode())
-            printJSON(snapshot);
-        else
-            success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}`);
+            printJSON({ ...snapshot, ...(taken.withMemory !== undefined ? { withMemory: taken.withMemory } : {}), ...(taken.fastSnapshotUnavailable ? { fastSnapshotUnavailable: taken.fastSnapshotUnavailable } : {}) });
+        else {
+            success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}${taken.withMemory === true ? " (with memory)" : taken.withMemory === false ? " (files only)" : ""}`);
+            if (taken.withMemory === false)
+                info(`Sandboxes started from it boot fresh with these files (use ${chalk.bold("--full")} to keep running processes).`);
+            if (taken.fastSnapshotUnavailable)
+                info(taken.fastSnapshotUnavailable + ".");
+        }
     });
     for (const operation of ["pause", "resume"]) {
         const cmd = sb.command(operation)
             .argument("<id>", "Sandbox ID")
             .option("--no-wait", "Return once the operation is queued");
-        // --fast: no memory saved, so the pause takes about a second whatever the RAM; the resume boots fresh.
-        if (operation === "pause")
-            cmd.option("--fast", "Pause instantly: keep files only, end processes (no memory saved)");
+        // Two kinds of pause. Fast (files only, about a second whatever the RAM; processes end and the
+        // resume boots fresh) is the platform's default. --full keeps memory and running processes.
+        // Neither flag sends no choice, so the platform's default applies. --full sends {"memory": true}
+        // (not "full") so it also works against servers older than the "full" name.
+        if (operation === "pause") {
+            cmd.option("--full", "Keep memory and running processes too (slower pause, resume picks up where it left off)");
+            cmd.option("--fast", "Same as a plain pause: keep files only and end processes");
+        }
         cmd
-            .description(operation === "pause" ? "Save running state (memory and files) and stop the sandbox" : "Restore a paused sandbox with its saved memory and files")
+            .description(operation === "pause" ? "Pause the sandbox: keeps its files (--full: also its memory and running processes)" : "Restore a paused sandbox with its saved files (and memory, if paused with --full)")
             .action(async (id, opts) => {
-            const fast = operation === "pause" && !!opts.fast;
-            const queued = await api.post(`/api/sandboxes/${id}/${operation}`, fast ? { memory: false } : {});
+            if (operation === "pause" && opts.full && opts.fast)
+                throw new Error("Use either --full or --fast, not both");
+            const choice = operation !== "pause" ? {} : opts.full ? { memory: true } : opts.fast ? { memory: false } : {};
+            const queued = await api.post(`/api/sandboxes/${id}/${operation}`, choice);
             if (opts.wait && operation === 'pause' && queued.snapshotId)
                 await waitForSnapshot(queued.snapshotId);
             const result = opts.wait ? await waitForSandbox(id, operation === "pause" ? "paused" : "running") : queued;
+            // What the pause actually kept: the answer says (the default is the platform's to choose).
+            const filesOnly = operation === "pause" && (queued.pausedWithMemory === false || (queued.pausedWithMemory === undefined && !!opts.fast));
             if (isJSONMode())
-                printJSON({ ...result, ...(operation === "resume" && queued.memoryRestored !== undefined ? { memoryRestored: queued.memoryRestored } : {}), ...(queued.tip ? { tip: queued.tip } : {}) });
+                printJSON({ ...result, ...(operation === "resume" && queued.memoryRestored !== undefined ? { memoryRestored: queued.memoryRestored } : {}), ...(operation === "pause" && queued.pausedWithMemory !== undefined ? { pausedWithMemory: queued.pausedWithMemory } : {}), ...(queued.fastPauseUnavailable ? { fastPauseUnavailable: queued.fastPauseUnavailable } : {}), ...(queued.tip ? { tip: queued.tip } : {}) });
             else {
-                success(`Sandbox ${chalk.bold(id)}: ${result.status}${fast ? " (files only)" : ""}`);
-                if (fast)
-                    info("Processes ended. Resume boots it fresh with your files intact.");
+                success(`Sandbox ${chalk.bold(id)}: ${result.status}${filesOnly ? " (files only)" : operation === "pause" && queued.pausedWithMemory === true ? " (with memory)" : ""}`);
+                if (filesOnly)
+                    info(`Processes ended. Resume boots it fresh with your files intact (use ${chalk.bold("--full")} to keep running processes).`);
+                if (queued.fastPauseUnavailable)
+                    info(`Kept memory: ${queued.fastPauseUnavailable.replace(/; paused with memory instead$/, "")}.`);
                 // The server says when a faster option fits (a large sandbox paused with its memory).
                 if (queued.tip)
                     info(`Tip: ${queued.tip.replace('{"fast": true} (CLI: pause --fast)', chalk.bold(`lizard sandbox pause ${id} --fast`))}`);

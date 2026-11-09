@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isPlatformFailure, printSupportInbox, recordFailedCall, ticketContext } from "../../src/lib/support.js";
+import { wantsSupportHint, printSupportInbox, recordFailedCall, ticketContext } from "../../src/lib/support.js";
 
 let home: string;
 beforeEach(() => { home = fs.mkdtempSync(path.join(os.tmpdir(), "lz-support-")); process.env.LIZARD_HOME = home; });
@@ -42,11 +42,23 @@ describe("ticket context", () => {
     expect(ctx.lastErrors[0].error).not.toContain("abcdefghijkl");
     expect(ctx.cliVersion).toBeTruthy();
   });
-  it("treats only platform-side failures as ticket-worthy", () => {
-    expect(isPlatformFailure(500)).toBe(true);
-    expect(isPlatformFailure(504)).toBe(true);
-    expect(isPlatformFailure(404)).toBe(false);
-    expect(isPlatformFailure(402)).toBe(false);
-    expect(isPlatformFailure(undefined, "ECONNRESET")).toBe(true);
+  it("hints on almost every error, never on sign-in, cancels, support itself or AGENT_SUPPORT=0", () => {
+    const argv = process.argv;
+    try {
+      process.argv = ["node", "lizard", "sandbox", "create"];
+      expect(wantsSupportHint({ status: 500 })).toBe(true);
+      expect(wantsSupportHint({ status: 404, exitCode: 3 })).toBe(true);
+      expect(wantsSupportHint({ status: 402 })).toBe(true);
+      expect(wantsSupportHint({ code: "ERROR", exitCode: 1 })).toBe(true);
+      expect(wantsSupportHint({ status: 401 })).toBe(false);
+      expect(wantsSupportHint({ code: "NOT_AUTHENTICATED" })).toBe(false);
+      expect(wantsSupportHint({ exitCode: 2 })).toBe(false);
+      expect(wantsSupportHint({ exitCode: 5 })).toBe(false);
+      process.env.AGENT_SUPPORT = "0";
+      expect(wantsSupportHint({ status: 500 })).toBe(false);
+      delete process.env.AGENT_SUPPORT;
+      process.argv = ["node", "lizard", "support", "open", "x"];
+      expect(wantsSupportHint({ status: 500 })).toBe(false);
+    } finally { process.argv = argv; delete process.env.AGENT_SUPPORT; }
   });
 });

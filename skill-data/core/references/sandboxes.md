@@ -12,6 +12,7 @@ The details behind the Sandboxes section of the core guide. Read the part the ta
 - [Size and pricing](#size-and-pricing)
 - [Interactive shell](#interactive-shell)
 - [Coding agents](#coding-agents)
+- [Schedules (wake, run, sleep)](#schedules-wake-run-sleep)
 - [Desktop (computer use)](#desktop-computer-use)
 - [Volumes](#volumes)
 - [Snapshots and pause/resume](#snapshots-and-pauseresume)
@@ -71,19 +72,22 @@ lizard sandbox files rm <id> <path>
 
 ## Size and pricing
 
-`lizard sandbox create -s/--size small|medium|large` picks the machine; the default is `medium`. On the Pro trial the only size is `small` (also the default) and only US regions work: another size or region answers 403 `TRIAL_SANDBOX_SIZE` / `TRIAL_SANDBOX_REGION`, and `lizard billing start-now` lifts it. There are exactly three sizes:
+`lizard sandbox create -s/--size mini|small|medium|large` picks the machine; the default is `medium`. On the Pro trial, Small (also the default) and one Medium at a time work, in US regions only: another size or region answers 403 `TRIAL_SANDBOX_SIZE` / `TRIAL_SANDBOX_REGION`, a second Medium answers 403 `TRIAL_MEDIUM_RUNNING`, and `lizard billing start-now` lifts both limits. There are exactly four sizes:
 
 | Size | vCPU | RAM | Disk | Price |
 |---|---|---|---|---|
+| `mini` | 1 | 2 GiB | 5 GB | $0.0081/h |
 | `small` | 2 | 4 GiB | 5 GB | $0.0162/h |
 | `medium` (default) | 4 | 8 GiB | 20 GB | $0.0324/h |
 | `large` | 8 | 16 GiB | 50 GB | $0.0648/h |
+
+Mini has no warm pool, so it starts only from templates with a disk-only build: `base`, `claude`, `codex` and `interpreter`. Any other template answers 400 `SANDBOX_SIZE_NOT_ALLOWED`; use `small` or larger for it.
 
 Prices are per hour, billed per second while the sandbox runs, flat by size: measured CPU/RAM is not charged, and disk and egress are included. A paused sandbox costs nothing. Attached volumes bill separately. `--size` cannot be combined with `--snapshot`: a snapshot restores at the size it was captured at (see [private snapshots](#snapshots-and-pauseresume)).
 
 Lizard Sandboxes run as Firecracker microVMs, each with its own kernel. If a sandbox cannot start, creation fails with an error.
 
-An account's limit counts vCPU of running sandboxes (Small 2, Medium 4, Large 8; paused ones don't count), across all of the owner's workspaces: up to 4 Small (8 vCPU) on the trial, 40 vCPU on Pro, 220 on Pro 5x and 1,200 on Pro 20x. Starts are limited only on the trial (6 a minute, 30 an hour, 100 a day); Pro, Pro 5x and Pro 20x have unlimited starts. Enterprise has no fixed limit on sandboxes running at once: each customer's agreement sets the limit per workspace, and running, paused and crashed sandboxes all count toward it. Over a limit the API answers 429 `SANDBOX_LIMIT_REACHED` (with `unit: "vcpu"`, `limit`, `running` and `needed`, all in vCPU) or `SANDBOX_RATE_LIMITED` (with `retryAfterS`).
+An account's limit counts vCPU of running sandboxes (Mini 1, Small 2, Medium 4, Large 8; paused ones don't count), across all of the owner's workspaces: up to 4 Small (8 vCPU) on the trial, 40 vCPU on Pro, 220 on Pro 5x and 1,200 on Pro 20x. Starts are limited only on the trial (6 a minute, 30 an hour, 100 a day); Pro, Pro 5x and Pro 20x have unlimited starts. Enterprise has no fixed limit on sandboxes running at once: each customer's agreement sets the limit per workspace, and running, paused and crashed sandboxes all count toward it. Over a limit the API answers 429 `SANDBOX_LIMIT_REACHED` (with `unit: "vcpu"`, `limit`, `running` and `needed`, all in vCPU) or `SANDBOX_RATE_LIMITED` (with `retryAfterS`).
 
 ## Interactive shell
 
@@ -118,6 +122,34 @@ sandbox can read them. `lizard agents` needs a full sign-in: a key limited to pr
 error as it is.
 
 Use `sandbox exec` to read a log file written by your process.
+
+## Schedules (wake, run, sleep)
+
+The platform can wake a paused sandbox on a timer, run a prompt or a shell command in it, and put
+it back to sleep. You pay only while it is awake; files in `/workspace` carry over between runs.
+
+```bash
+lizard sandbox schedule <id> --every 5m --prompt "Continue the research in /workspace/research; append findings to notes.md"
+lizard sandbox schedule <id> --every 10m --command "python3 /workspace/job.py"
+lizard sandbox schedule <id> --cron "0 9 * * mon-fri" --tz Europe/Berlin --command "./report.sh"
+lizard sandbox schedules [<id>]                 # list, with next and last run
+lizard sandbox schedule-run <sch_id> --wait     # run now and print the result
+lizard sandbox schedule-runs <sch_id> [-o]      # history; -o prints the latest output
+lizard sandbox schedule-set <sch_id> --every 15m | --off | --on
+lizard sandbox unschedule <sch_id>
+```
+
+- Each `--prompt` run starts a NEW agent conversation (on the project's agent credentials, as
+  `sandbox prompt`). Keep state in files: tell the agent to read and update a notes file.
+- `--command` runs in `/workspace` as root; success = exit code 0. Background processes it leaves
+  end when the sandbox sleeps.
+- Sleep is files-only by default (fast; processes end, the next wake boots fresh). `--keep-memory`
+  keeps processes and open apps between runs (e.g. a desktop's browser), with a slower pause.
+- A sandbox that was already running when a run starts is left running afterwards.
+- A run still going when the next is due makes that one skip. `--timeout` (default 10m) stops a
+  run. Five failed runs in a row switch the schedule off (`schedules` shows why).
+- Every 1m at most often. Prompt schedules need a key with no scopes (`ACCOUNT_SCOPE_REQUIRED`);
+  `--command` schedules work with scoped keys. Not on every account yet: `SCHEDULES_NOT_ENABLED`.
 
 ## Desktop (computer use)
 

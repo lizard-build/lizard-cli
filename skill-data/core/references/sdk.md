@@ -36,7 +36,7 @@ Options for `create()` (TypeScript / Python):
 
 | Option | Purpose |
 |---|---|
-| `size` | `small` (2 vCPU / 4 GB, $0.0162/h), `medium` (4 vCPU / 8 GB, $0.0324/h, default), `large` (8 vCPU / 16 GB, $0.0648/h) |
+| `size` | `mini` (1 vCPU / 2 GB, $0.0081/h; `base`, `claude`, `codex` and `interpreter` templates only; SDK 1.0.12 or later), `small` (2 vCPU / 4 GB, $0.0162/h), `medium` (4 vCPU / 8 GB, $0.0324/h, default), `large` (8 vCPU / 16 GB, $0.0648/h) |
 | `timeoutMs` / `timeout_ms` | Lifetime; default 300,000 ms (5 minutes); `0` means no deadline (the VM still stops after 596 hours) |
 | `envs` | Environment variables for every command in the sandbox (up to 256) |
 | `metadata` | Your own string labels, returned by `getInfo()` / `get_info()` (up to 64) |
@@ -47,7 +47,7 @@ Options for `create()` (TypeScript / Python):
 
 Templates: `base` (default), `interpreter` (Python with data libraries, plus Node 22), `codex`, `claude`, `opencode`, `pi`, `prime` (one coding agent each), `desktop`. The SDK and CLI give a sandbox 5 minutes by default; the raw API and the dashboard give none. Commands do not reset the deadline. Pricing is flat by size, billed per second while the sandbox runs; a sandbox restored from a snapshot runs at the source's size and is billed at that size; volumes bill separately.
 
-An account's limit counts vCPU of running sandboxes (Small 2, Medium 4, Large 8): up to 4 Small on the trial, 40 vCPU on Pro, 220 on Pro 5x and 1,200 on Pro 20x. Starts are limited only on the trial (6 a minute, 30 an hour, 100 a day); Pro, Pro 5x and Pro 20x have unlimited starts. Over a limit, a `LimitExceededError` (status 429) with `code` `SANDBOX_LIMIT_REACHED` (`unit` `vcpu`, `limit`, `running`, `needed`) or `SANDBOX_RATE_LIMITED` (`retryAfterS`). More than 32 commands at once in one sandbox gives `EXEC_LIMIT_REACHED`.
+An account's limit counts vCPU of running sandboxes (Mini 1, Small 2, Medium 4, Large 8): up to 4 Small on the trial, 40 vCPU on Pro, 220 on Pro 5x and 1,200 on Pro 20x. Starts are limited only on the trial (6 a minute, 30 an hour, 100 a day); Pro, Pro 5x and Pro 20x have unlimited starts. Over a limit, a `LimitExceededError` (status 429) with `code` `SANDBOX_LIMIT_REACHED` (`unit` `vcpu`, `limit`, `running`, `needed`) or `SANDBOX_RATE_LIMITED` (`retryAfterS`). More than 32 commands at once in one sandbox gives `EXEC_LIMIT_REACHED`.
 
 ## Quickstart
 
