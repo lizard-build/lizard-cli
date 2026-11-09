@@ -71,19 +71,22 @@ lizard sandbox files rm <id> <path>
 
 ## Size and pricing
 
-`lizard sandbox create -s/--size small|medium|large` picks the machine; the default is `medium`. On the Pro trial the only size is `small` (also the default) and only US regions work: another size or region answers 403 `TRIAL_SANDBOX_SIZE` / `TRIAL_SANDBOX_REGION`, and `lizard billing start-now` lifts it. There are exactly three sizes:
+`lizard sandbox create -s/--size mini|small|medium|large` picks the machine; the default is `medium`. On the Pro trial, Small (also the default) and one Medium at a time work, in US regions only: another size or region answers 403 `TRIAL_SANDBOX_SIZE` / `TRIAL_SANDBOX_REGION`, a second Medium answers 403 `TRIAL_MEDIUM_RUNNING`, and `lizard billing start-now` lifts both limits. There are exactly four sizes:
 
 | Size | vCPU | RAM | Disk | Price |
 |---|---|---|---|---|
+| `mini` | 1 | 2 GiB | 5 GB | $0.0081/h |
 | `small` | 2 | 4 GiB | 5 GB | $0.0162/h |
 | `medium` (default) | 4 | 8 GiB | 20 GB | $0.0324/h |
 | `large` | 8 | 16 GiB | 50 GB | $0.0648/h |
+
+Mini has no warm pool, so it starts only from templates with a disk-only build: `base`, `claude`, `codex` and `interpreter`. Any other template answers 400 `SANDBOX_SIZE_NOT_ALLOWED`; use `small` or larger for it.
 
 Prices are per hour, billed per second while the sandbox runs, flat by size: measured CPU/RAM is not charged, and disk and egress are included. A paused sandbox costs nothing. Attached volumes bill separately. `--size` cannot be combined with `--snapshot`: a snapshot restores at the size it was captured at (see [private snapshots](#snapshots-and-pauseresume)).
 
 Lizard Sandboxes run as Firecracker microVMs, each with its own kernel. If a sandbox cannot start, creation fails with an error.
 
-An account's limit counts vCPU of running sandboxes (Small 2, Medium 4, Large 8; paused ones don't count), across all of the owner's workspaces: up to 4 Small (8 vCPU) on the trial, 40 vCPU on Pro, 220 on Pro 5x and 1,200 on Pro 20x. Starts are limited only on the trial (6 a minute, 30 an hour, 100 a day); Pro, Pro 5x and Pro 20x have unlimited starts. Enterprise has no fixed limit on sandboxes running at once: each customer's agreement sets the limit per workspace, and running, paused and crashed sandboxes all count toward it. Over a limit the API answers 429 `SANDBOX_LIMIT_REACHED` (with `unit: "vcpu"`, `limit`, `running` and `needed`, all in vCPU) or `SANDBOX_RATE_LIMITED` (with `retryAfterS`).
+An account's limit counts vCPU of running sandboxes (Mini 1, Small 2, Medium 4, Large 8; paused ones don't count), across all of the owner's workspaces: up to 4 Small (8 vCPU) on the trial, 40 vCPU on Pro, 220 on Pro 5x and 1,200 on Pro 20x. Starts are limited only on the trial (6 a minute, 30 an hour, 100 a day); Pro, Pro 5x and Pro 20x have unlimited starts. Enterprise has no fixed limit on sandboxes running at once: each customer's agreement sets the limit per workspace, and running, paused and crashed sandboxes all count toward it. Over a limit the API answers 429 `SANDBOX_LIMIT_REACHED` (with `unit: "vcpu"`, `limit`, `running` and `needed`, all in vCPU) or `SANDBOX_RATE_LIMITED` (with `retryAfterS`).
 
 ## Interactive shell
 
