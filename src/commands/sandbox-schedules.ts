@@ -187,7 +187,7 @@ Examples:
       for (let i = 0; i < 24 * 60 * 6; i++) {
         await new Promise((r) => setTimeout(r, 5000));
         const { runs } = await api.get<{ runs: Run[] }>(`/api/sandbox-schedules/${sid}/runs?limit=1`);
-        if (runs[0] && runs[0].id !== prev) { run = runs[0]; if (run.status !== "running") break; }
+        if (runs[0] && runs[0].id !== prev) { run = runs[0]; if (run.endedAt) break; }
       }
       if (isJSONMode()) return printJSON(run ?? null);
       if (run) printRun(run, true);
