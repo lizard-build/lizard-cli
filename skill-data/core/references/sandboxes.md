@@ -12,6 +12,7 @@ The details behind the Sandboxes section of the core guide. Read the part the ta
 - [Size and pricing](#size-and-pricing)
 - [Interactive shell](#interactive-shell)
 - [Coding agents](#coding-agents)
+- [Schedules (wake, run, sleep)](#schedules-wake-run-sleep)
 - [Desktop (computer use)](#desktop-computer-use)
 - [Volumes](#volumes)
 - [Snapshots and pause/resume](#snapshots-and-pauseresume)
@@ -121,6 +122,34 @@ sandbox can read them. `lizard agents` needs a full sign-in: a key limited to pr
 error as it is.
 
 Use `sandbox exec` to read a log file written by your process.
+
+## Schedules (wake, run, sleep)
+
+The platform can wake a paused sandbox on a timer, run a prompt or a shell command in it, and put
+it back to sleep. You pay only while it is awake; files in `/workspace` carry over between runs.
+
+```bash
+lizard sandbox schedule <id> --every 5m --prompt "Continue the research in /workspace/research; append findings to notes.md"
+lizard sandbox schedule <id> --every 10m --command "python3 /workspace/job.py"
+lizard sandbox schedule <id> --cron "0 9 * * mon-fri" --tz Europe/Berlin --command "./report.sh"
+lizard sandbox schedules [<id>]                 # list, with next and last run
+lizard sandbox schedule-run <sch_id> --wait     # run now and print the result
+lizard sandbox schedule-runs <sch_id> [-o]      # history; -o prints the latest output
+lizard sandbox schedule-set <sch_id> --every 15m | --off | --on
+lizard sandbox unschedule <sch_id>
+```
+
+- Each `--prompt` run starts a NEW agent conversation (on the project's agent credentials, as
+  `sandbox prompt`). Keep state in files: tell the agent to read and update a notes file.
+- `--command` runs in `/workspace` as root; success = exit code 0. Background processes it leaves
+  end when the sandbox sleeps.
+- Sleep is files-only by default (fast; processes end, the next wake boots fresh). `--keep-memory`
+  keeps processes and open apps between runs (e.g. a desktop's browser), with a slower pause.
+- A sandbox that was already running when a run starts is left running afterwards.
+- A run still going when the next is due makes that one skip. `--timeout` (default 10m) stops a
+  run. Five failed runs in a row switch the schedule off (`schedules` shows why).
+- Every 1m at most often. Prompt schedules need a key with no scopes (`ACCOUNT_SCOPE_REQUIRED`);
+  `--command` schedules work with scoped keys. Not on every account yet: `SCHEDULES_NOT_ENABLED`.
 
 ## Desktop (computer use)
 
