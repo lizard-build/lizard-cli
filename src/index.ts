@@ -103,7 +103,7 @@ import { registerUpgrade } from "./commands/upgrade.js";
 import { registerVolume } from "./commands/volume.js";
 import { registerWhoami } from "./commands/whoami.js";
 import { registerSupport } from "./commands/support.js";
-import { printSupportInbox, isPlatformFailure, SUPPORT_HINT } from "./lib/support.js";
+import { printSupportInbox, wantsSupportHint, SUPPORT_HINT } from "./lib/support.js";
 import { registerWorkspace } from "./commands/workspace.js";
 
 const program = new Command();
@@ -508,8 +508,8 @@ async function main() {
       netCode === "UND_ERR_CONNECT_TIMEOUT";
 
     const exitCode = isAuth ? 2 : isNotFound ? 3 : isTimeout ? 4 : 1;
-    // Lizard itself failed (5xx, timeout, network): point the agent at a ticket.
-    const showSupportHint = isPlatformFailure(status, netCode) && !process.argv.slice(2).includes("support");
+    // One optional line pointing at `lizard support open` (lib/support.ts says when not).
+    const showSupportHint = wantsSupportHint({ status, code, exitCode });
 
     if (isJSONMode()) {
       // Through writeAndExit, not console.log + exit: `body` carries the raw

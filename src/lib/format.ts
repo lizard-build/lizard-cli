@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { SUPPORT_HINT, wantsSupportHint } from "./support.js";
 
 export function isTTY(): boolean {
   return Boolean(process.stdout.isTTY);
@@ -26,10 +27,12 @@ export function printJSON(data: unknown) {
  * semantics (2 = auth, 3 = not found, 127 = command not found, …).
  */
 export function fail(msg: string, exitCode = 1, code = "ERROR"): never {
+  const hint = wantsSupportHint({ code, exitCode });
   if (jsonMode) {
-    printJSON({ error: { code, status: null, message: msg, body: null } });
+    printJSON({ error: { code, status: null, message: msg, body: null, ...(hint ? { support: SUPPORT_HINT } : {}) } });
   } else {
     error(msg);
+    if (hint) supportHint();
   }
   process.exit(exitCode);
 }
@@ -41,6 +44,11 @@ export function success(msg: string) {
 
 export function error(msg: string) {
   process.stderr.write(chalk.red("Error:") + " " + msg + "\n");
+}
+
+/** The optional one-line pointer to `lizard support open`, dim, on stderr. */
+export function supportHint() {
+  process.stderr.write(chalk.dim(SUPPORT_HINT) + "\n");
 }
 
 export function warn(msg: string) {
