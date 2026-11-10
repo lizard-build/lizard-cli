@@ -174,6 +174,19 @@ describe("lizard billing (status)", () => {
     expect(text).toContain("Sandboxes: up to 1,200 vCPU at once");
   });
 
+  test("the trial shows its sandbox sizes instead of a vCPU limit", async () => {
+    routes({
+      "GET /api/billing/subscription": () => reply(200, {
+        ...paid, tiers,
+        limits: { tier: "trial", replicasPerApp: 1, sandboxVcpu: 8, maxSandboxCpus: 4 },
+      }),
+    });
+    await run(["billing"]);
+    const text = out();
+    expect(text).toContain("Sandboxes: 1 Small and 2 Mini at a time (US regions only)");
+    expect(text).not.toContain("vCPU at once");
+  });
+
   test("no plan offers the trial", async () => {
     routes({ "GET /api/billing/subscription": () => reply(200, { ...none, trial: { ...none.trial, promoCode: "ROST", days: 31, creditCents: 10000 } }) });
     await run(["billing"]);

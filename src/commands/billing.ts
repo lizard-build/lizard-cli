@@ -272,7 +272,10 @@ export function describeSubscription(sub: Subscription, now = Date.now()): strin
   if (sub.limits) {
     const n = sub.limits.replicasPerApp;
     lines.push(label("Replicas: ") + `up to ${n} per service`);
-    if (sub.limits.sandboxVcpu) {
+    if (sub.limits.tier === "trial") {
+      // The trial is limited by size, not vCPU: 1 Small and 2 Mini at a time, US regions only.
+      lines.push(label("Sandboxes: ") + "1 Small and 2 Mini at a time (US regions only); Medium and Large unlock after the first payment");
+    } else if (sub.limits.sandboxVcpu) {
       lines.push(label("Sandboxes: ") + `up to ${sub.limits.sandboxVcpu.toLocaleString("en-US")} vCPU at once`);
     }
   }
