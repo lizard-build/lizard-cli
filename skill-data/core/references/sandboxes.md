@@ -68,11 +68,11 @@ lizard sandbox files rm <id> <path>
 
 ## Lifetime
 
-`lizard sandbox create` and `lizard sandbox restore` send a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without a deadline (the VM itself still stops after 596 hours), or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. Pausing a sandbox freezes its remaining lifetime; resuming continues from it (see [private snapshots and pause/resume](#snapshots-and-pauseresume)). Copies from `sandbox fork` keep the source's lifetime unless `--timeout` sets another. Use volumes for persistent files.
+`lizard sandbox create` and `lizard sandbox restore` send a five-minute lifetime (`300000` milliseconds) by default. Pass `--timeout 0` to create a sandbox without a deadline (the VM itself still stops after 596 hours), or pass an integer up to `2147483647` milliseconds. This is a lifetime, not an idle timer: commands do not reset it. `lizard sandbox timeout <id> <ms>` sets a new lifetime of at least `1000` milliseconds. Pausing a sandbox freezes its remaining lifetime; resuming continues from it (see [private snapshots and pause/resume](#snapshots-and-pauseresume)). Copies from `sandbox fork` keep the source's lifetime unless `--timeout` sets another. Use volumes for persistent files. On the Pro trial a sandbox lives 1 hour at most, then it is deleted: no lifetime (or `0`) gets 1 hour, a longer one answers 403 `TRIAL_SANDBOX_LIFETIME` (`maxTimeoutMs: 3600000`), and `sandbox timeout` cannot move it past 1 hour from its creation (same 403 with `latestExpiresAt`); longer lifetimes unlock after the first payment.
 
 ## Size and pricing
 
-`lizard sandbox create -s/--size mini|small|medium|large` picks the machine; the default is `medium`. The Pro trial runs 1 Small and 2 Mini at a time, in US regions only (no size = small); Medium and Large unlock after the first payment. Medium or Large answers 403 `TRIAL_SANDBOX_SIZE` (`allowedSizes: ["small", "mini"]`), another region 403 `TRIAL_SANDBOX_REGION`, and a second Small or a third Mini 403 `TRIAL_SIZE_RUNNING` (`size`, `sizeLimit`, `sizeLimits: {"small": 1, "mini": 2}`): pause or delete one. `lizard billing start-now` lifts these limits. There are exactly four sizes:
+`lizard sandbox create -s/--size mini|small|medium|large` picks the machine; the default is `medium`. The Pro trial runs 1 Small and 2 Mini at a time, in US regions only (no size = small); Medium and Large unlock after the first payment. Medium or Large answers 403 `TRIAL_SANDBOX_SIZE` (`allowedSizes: ["small", "mini"]`), another region 403 `TRIAL_SANDBOX_REGION`, and a second Small or a third Mini 403 `TRIAL_SIZE_RUNNING` (`size`, `sizeLimit`, `sizeLimits: {"small": 1, "mini": 2}`): pause or delete one. Trial sandboxes are deleted 1 hour after they start at the latest (a longer `--timeout` answers 403 `TRIAL_SANDBOX_LIFETIME`, see [Lifetime](#lifetime)). `lizard billing start-now` lifts these limits. There are exactly four sizes:
 
 | Size | vCPU | RAM | Disk | Price |
 |---|---|---|---|---|
@@ -99,7 +99,7 @@ exit code.
 
 ## Coding agents
 
-Run a coding agent in a sandbox made from its template (`-t codex`, `-t claude`, `-t opencode`, `-t pi`, `-t prime`) on the user's own credentials. Give the sandbox a real lifetime (`--timeout 3600000`): at five minutes it is deleted with the agent mid-task. Another template with Node installs the agent at the first prompt, which is slow; one without Node can't run agents.
+Run a coding agent in a sandbox made from its template (`-t codex`, `-t claude`, `-t opencode`, `-t pi`, `-t prime`) on the user's own credentials. Give the sandbox a real lifetime (`--timeout 3600000`): at five minutes it is deleted with the agent mid-task. On the Pro trial 1 hour is the most a sandbox lives. Another template with Node installs the agent at the first prompt, which is slow; one without Node can't run agents.
 
 - `lizard agents` — your credentials in the linked project (or `-p <project>`) and which agents can run.
   Connect them per project (here or in the dashboard: the project's Sandboxes › Agents); they sign in

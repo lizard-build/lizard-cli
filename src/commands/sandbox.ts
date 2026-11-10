@@ -175,7 +175,7 @@ export function registerSandbox(program: Command) {
     .description("Create a sandbox")
     .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
     .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small on the Pro trial (1 Small and 2 Mini at a time, US regions only; Medium and Large unlock after the first payment). Mini works only with the ${MINI_TEMPLATES} templates`).choices(SANDBOX_SIZES))
-    .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
+    .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration (Pro trial: at most 3600000 = 1 hour, and 0 means 1 hour)", parseTimeoutOption, 300_000)
     .option("--region <code>", `Region to create the sandbox in (default ${DEFAULT_REGION}; with --volume or --snapshot, theirs)`)
     .option("--snapshot <id>", "Create from a private saved snapshot, at the size it was taken at")
     .option("--volume <name-or-id>", "Attach a persistent volume")
@@ -357,7 +357,7 @@ export function registerSandbox(program: Command) {
 
   sb.command("timeout")
     .argument("<id>", "Sandbox ID")
-    .argument("<ms>", "New lifetime in milliseconds (minimum 1000)", parseTimeoutOption)
+    .argument("<ms>", "New lifetime in milliseconds (minimum 1000; on the Pro trial a sandbox cannot outlive 1 hour from its creation)", parseTimeoutOption)
     .description("Update a sandbox's lifetime")
     .action(async (id: string, ms: number) => {
       const updated = await api.post<SandboxRecord>(`/api/sandboxes/${id}/timeout`, { timeoutMs: ms });
@@ -655,7 +655,7 @@ Examples:
 
   sb.command("restore")
     .argument("<snapshot-id>", "Saved snapshot ID")
-    .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration", parseTimeoutOption, 300_000)
+    .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration (Pro trial: at most 3600000 = 1 hour, and 0 means 1 hour)", parseTimeoutOption, 300_000)
     .option("-p, --project <id>", "Project to start it in (name, slug, or ID); a snapshot restores only in its own project, the default")
     .option("--volume <name-or-id>", "Mount this volume at /workspace (Firecracker snapshot of a sandbox that had no volume; same region)")
     .description("Start a new sandbox from a private snapshot")
@@ -675,7 +675,7 @@ Examples:
   sb.command("fork")
     .argument("<id>", "Running sandbox ID")
     .option("-n, --count <n>", `Copies to start (1-${MAX_FORK_COUNT})`, parseForkCount, 1)
-    .option("--timeout <ms>", "Lifetime of each copy in milliseconds; default: the source's", parseForkTimeout)
+    .option("--timeout <ms>", "Lifetime of each copy in milliseconds; default: the source's (Pro trial: at most 1 hour)", parseForkTimeout)
     .description("Start live copies of a running sandbox: memory, processes and files")
     .action(async (id: string, opts) => {
       // The platform pauses the source for a moment, captures it and boots every copy from that
