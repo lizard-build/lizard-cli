@@ -1,6 +1,6 @@
 import chalk from "chalk";
 import fs from "node:fs";
-import { Command, InvalidArgumentError } from "commander";
+import { Command, InvalidArgumentError, Option } from "commander";
 import { api } from "../lib/api.js";
 import { success, info, isJSONMode, printJSON, table, timeAgo, fail } from "../lib/format.js";
 
@@ -51,7 +51,7 @@ function printSchedule(s: Schedule) {
   console.log(`  sandbox   ${s.sandboxId}`);
   console.log(`  when      ${when(s)}${s.enabled && s.nextRunAt ? chalk.dim(`  (next ${inFuture(s.nextRunAt)})`) : ""}`);
   console.log(`  runs      ${what(s)}`);
-  console.log(`  timeout   ${s.timeoutSeconds}s${s.keepMemory ? "   sleeps with memory" : "   sleeps files-only"}`);
+  console.log(`  timeout   ${s.timeoutSeconds}s${s.keepMemory ? "   sleeps with memory" : ""}`);
   if (s.lastRunAt) console.log(`  last run  ${runStatus(s.running ? "running" : s.lastStatus)} ${chalk.dim(timeAgo(s.lastRunAt))}`);
   if (s.disabledReason) console.log(chalk.yellow(`  off: ${s.disabledReason}`));
 }
@@ -68,8 +68,10 @@ function addTaskOptions(c: Command, forCreate: boolean) {
     .option("-m, --model <model>", "Model for --prompt")
     .option("--effort <level>", "Reasoning effort for --prompt (minimal, low, medium, high, xhigh)")
     .option("--timeout <duration>", forCreate ? "Stop a run after this long (default 10m)" : "Stop a run after this long", parseDuration)
-    .option("--keep-memory", "Sleep with memory: processes and open apps survive between runs (slower pause)")
-    .option("--files-only", "Sleep with files only (the default): fast, processes end")
+    // Memory pauses are off for now: a schedule always sleeps files-only. Both flags stay
+    // accepted (out of the help) so older scripts still run; --keep-memory is not sent.
+    .addOption(new Option("--keep-memory").hideHelp())
+    .addOption(new Option("--files-only").hideHelp())
     .option("--name <name>", "A label for the schedule");
 }
 
@@ -85,7 +87,6 @@ function taskBody(opts: Record<string, any>): Record<string, unknown> {
   if (opts.model) body.model = opts.model;
   if (opts.effort) body.reasoningEffort = opts.effort;
   if (opts.timeout) body.timeoutSeconds = opts.timeout;
-  if (opts.keepMemory) body.keepMemory = true;
   if (opts.filesOnly) body.keepMemory = false;
   if (opts.name) body.name = opts.name;
   return body;
@@ -101,9 +102,8 @@ export function registerSandboxScheduleCommands(sb: Command) {
     .option("--disabled", "Create it switched off")
     .addHelpText("after", `
 Each run: a paused sandbox is woken (about a second), the prompt or command runs, and the
-sandbox goes back to sleep. A sandbox that was already running is left running. You pay only
-while it is awake. Files in /workspace carry over between runs; with --keep-memory, running
-processes and open apps (a desktop's browser) do too.
+sandbox goes back to sleep (files only: processes end). A sandbox that was already running is
+left running. You pay only while it is awake. Files in /workspace carry over between runs.
 
 A run that is still going when the next one is due makes that one skip. Five failed runs in
 a row switch the schedule off.
@@ -111,8 +111,7 @@ a row switch the schedule off.
 Examples:
   lizard sandbox schedule sb_abc123 --every 5m --prompt "Continue the research in /workspace/research; append findings to notes.md"
   lizard sandbox schedule sb_abc123 --every 10m --command "python3 /workspace/job.py"
-  lizard sandbox schedule sb_abc123 --cron "0 9 * * mon-fri" --tz Europe/Berlin --command "./report.sh"
-  lizard sandbox schedule sb_desktop --every 30m --keep-memory --command "node /workspace/check.js"`)
+  lizard sandbox schedule sb_abc123 --cron "0 9 * * mon-fri" --tz Europe/Berlin --command "./report.sh"`)
     .action(async (id: string, opts) => {
       if (!opts.every && !opts.cron) fail("Say how often: --every 5m, or --cron \"*/5 * * * *\"", 2, "USAGE");
       if (!opts.prompt && !opts.promptFile && !opts.command) fail("Say what to run: --prompt \"...\" or --command \"...\"", 2, "USAGE");

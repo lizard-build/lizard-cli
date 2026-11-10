@@ -228,10 +228,10 @@ describe("private sandbox snapshots", () => {
     expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app' });
     expect(warn).not.toHaveBeenCalled();
   });
-  it.each([[['--full'], { memory: true }], [['--fast'], { memory: false }]])("snapshot %j sends %j", async (flags, choice) => {
+  it.each([['--full'], ['--fast']])("snapshot still takes %s from older scripts and sends no memory choice", async flag => {
     const program = new Command().exitOverride(); registerSandbox(program);
-    await program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'My app', ...flags as string[], '--no-wait'], { from: 'user' });
-    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app', ...choice });
+    await program.parseAsync(['sandbox', 'snapshot', 'sandbox-test', '--name', 'My app', flag, '--no-wait'], { from: 'user' });
+    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/snapshot', { name: 'My app' });
   });
   it.each(['user', 'workspace'])("still takes --scope %s from older scripts, warns and sends no scope", async scope => {
     const program = new Command().exitOverride(); registerSandbox(program);
@@ -279,19 +279,12 @@ describe("private sandbox snapshots", () => {
     await program.parseAsync(['sandbox', operation, 'sandbox-test', '--no-wait'], { from: 'user' });
     expect(api.post).toHaveBeenCalledWith(`/api/sandboxes/sandbox-test/${operation}`, {});
   });
-  it.each([
-    [[], {}],                                  // no choice: the platform's default (files only)
-    [['--full'], { memory: true }],            // memory + processes; "memory" works on older servers
-    [['--fast'], { memory: false }],
-  ])("pause %j sends %j", async (flags, body) => {
+  // Memory pauses are off: every pause is the platform's default (files only); the old flags
+  // are still accepted so older scripts run, and send nothing.
+  it.each([[[]], [['--full']], [['--fast']], [['--full', '--fast']]])("pause %j sends the default pause", async flags => {
     const program = new Command().exitOverride(); registerSandbox(program);
     await program.parseAsync(['sandbox', 'pause', 'sandbox-test', ...flags as string[], '--no-wait'], { from: 'user' });
-    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/pause', body);
-  });
-  it("refuses --full together with --fast", async () => {
-    const program = new Command().exitOverride(); registerSandbox(program);
-    await expect(program.parseAsync(['sandbox', 'pause', 'sandbox-test', '--full', '--fast', '--no-wait'], { from: 'user' })).rejects.toThrow(/either --full or --fast/);
-    expect(api.post).not.toHaveBeenCalled();
+    expect(api.post).toHaveBeenCalledWith('/api/sandboxes/sandbox-test/pause', {});
   });
   it("passes the private snapshot ID to create", async () => {
     await create(['--snapshot', 'snap-test']);

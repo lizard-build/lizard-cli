@@ -604,26 +604,24 @@ Examples:
     // older scripts still run; it is no longer sent.
     .addOption(new Option("--scope <scope>").choices(SNAPSHOT_SCOPES).hideHelp())
     .option("--no-wait", "Return once capture is queued")
-    // Files only by default (the platform's): about a second whatever the RAM, sandboxes started
-    // from it boot fresh. --full keeps memory and processes too. Sent as memory: true/false, which
-    // servers older than the "full" name accept; no flag = the platform's default.
-    .option("--full", "Also save memory and running processes: sandboxes started from it continue where this one was (slower to take)")
-    .option("--fast", "Files only (the default)")
-    .description("Save a running sandbox's files (--full: also its memory and running processes)")
+    // Snapshots are files only: about a second whatever the RAM, sandboxes started from it boot
+    // fresh. Memory snapshots are off for now; --full/--fast stay accepted (out of the help) so
+    // older scripts still run, and are not sent: the platform's default applies.
+    .addOption(new Option("--full").hideHelp())
+    .addOption(new Option("--fast").hideHelp())
+    .description("Save a running sandbox's files")
     .action(async (id: string, opts) => {
-      if (opts.full && opts.fast) throw new Error("Use either --full or --fast, not both");
       if (opts.scope && opts.scope !== "project") warn(`--scope ${opts.scope} has no effect: a snapshot now restores only in its own project.`);
+      if (opts.full) warn("--full has no effect: snapshots keep files only.");
       // No pool size: Firecracker and gVisor snapshots keep no warm copies, and a runc pod
       // (the fallback when a Firecracker create fails) gets the server's default.
-      const choice = opts.full ? { memory: true } : opts.fast ? { memory: false } : {};
-      const taken = await api.post<SnapshotRecord & { withMemory?: boolean; fastSnapshotUnavailable?: string }>(`/api/sandboxes/${id}/snapshot`, { name: opts.name, ...choice });
+      const taken = await api.post<SnapshotRecord & { withMemory?: boolean; fastSnapshotUnavailable?: string }>(`/api/sandboxes/${id}/snapshot`, { name: opts.name });
       let snapshot: SnapshotRecord = taken;
       if (opts.wait) snapshot = await waitForSnapshot(taken.id);
-      if (isJSONMode()) printJSON({ ...snapshot, ...(taken.withMemory !== undefined ? { withMemory: taken.withMemory } : {}), ...(taken.fastSnapshotUnavailable ? { fastSnapshotUnavailable: taken.fastSnapshotUnavailable } : {}) });
+      if (isJSONMode()) printJSON({ ...snapshot, ...(taken.withMemory !== undefined ? { withMemory: taken.withMemory } : {}) });
       else {
-        success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}${taken.withMemory === true ? " (with memory)" : taken.withMemory === false ? " (files only)" : ""}`);
-        if (taken.withMemory === false) info(`Sandboxes started from it boot fresh with these files (use ${chalk.bold("--full")} to keep running processes).`);
-        if (taken.fastSnapshotUnavailable) info(taken.fastSnapshotUnavailable + ".");
+        success(`Snapshot ${chalk.bold(snapshot.id)}: ${snapshot.status}`);
+        if (taken.withMemory === false) info("Sandboxes started from it boot fresh with these files.");
       }
     });
 
@@ -631,32 +629,26 @@ Examples:
     const cmd = sb.command(operation)
       .argument("<id>", "Sandbox ID")
       .option("--no-wait", "Return once the operation is queued");
-    // Two kinds of pause. Fast (files only, about a second whatever the RAM; processes end and the
-    // resume boots fresh) is the platform's default. --full keeps memory and running processes.
-    // Neither flag sends no choice, so the platform's default applies. --full sends {"memory": true}
-    // (not "full") so it also works against servers older than the "full" name.
+    // One kind of pause: the platform's default (files only, about a second whatever the RAM;
+    // processes end and the resume boots fresh). Memory pauses are off for now; --full/--fast stay
+    // accepted (out of the help) so older scripts still run, and send nothing.
     if (operation === "pause") {
-      cmd.option("--full", "Keep memory and running processes too (slower pause, resume picks up where it left off)");
-      cmd.option("--fast", "Same as a plain pause: keep files only and end processes");
+      cmd.addOption(new Option("--full").hideHelp());
+      cmd.addOption(new Option("--fast").hideHelp());
     }
     cmd
-      .description(operation === "pause" ? "Pause the sandbox: keeps its files (--full: also its memory and running processes)" : "Restore a paused sandbox with its saved files (and memory, if paused with --full)")
+      .description(operation === "pause" ? "Pause the sandbox: keeps its files, ends running processes" : "Restore a paused sandbox with its saved files")
       .action(async (id: string, opts) => {
-        if (operation === "pause" && opts.full && opts.fast) throw new Error("Use either --full or --fast, not both");
-        const choice = operation !== "pause" ? {} : opts.full ? { memory: true } : opts.fast ? { memory: false } : {};
-        const queued = await api.post<{ id: string; status: string; snapshotId?: string; memoryRestored?: boolean; pausedWithMemory?: boolean; fastPauseUnavailable?: string; tip?: string }>(`/api/sandboxes/${id}/${operation}`, choice);
+        if (operation === "pause" && opts.full) warn("--full has no effect: pause keeps files only.");
+        const queued = await api.post<{ id: string; status: string; snapshotId?: string; memoryRestored?: boolean; pausedWithMemory?: boolean }>(`/api/sandboxes/${id}/${operation}`, {});
         if (opts.wait && operation === 'pause' && queued.snapshotId) await waitForSnapshot(queued.snapshotId);
         const result = opts.wait ? await waitForSandbox(id, operation === "pause" ? "paused" : "running") : queued;
-        // What the pause actually kept: the answer says (the default is the platform's to choose).
-        const filesOnly = operation === "pause" && (queued.pausedWithMemory === false || (queued.pausedWithMemory === undefined && !!opts.fast));
-        if (isJSONMode()) printJSON({ ...result, ...(operation === "resume" && queued.memoryRestored !== undefined ? { memoryRestored: queued.memoryRestored } : {}), ...(operation === "pause" && queued.pausedWithMemory !== undefined ? { pausedWithMemory: queued.pausedWithMemory } : {}), ...(queued.fastPauseUnavailable ? { fastPauseUnavailable: queued.fastPauseUnavailable } : {}), ...(queued.tip ? { tip: queued.tip } : {}) });
+        const filesOnly = operation === "pause" && queued.pausedWithMemory === false;
+        if (isJSONMode()) printJSON({ ...result, ...(operation === "resume" && queued.memoryRestored !== undefined ? { memoryRestored: queued.memoryRestored } : {}), ...(operation === "pause" && queued.pausedWithMemory !== undefined ? { pausedWithMemory: queued.pausedWithMemory } : {}) });
         else {
-          success(`Sandbox ${chalk.bold(id)}: ${result.status}${filesOnly ? " (files only)" : operation === "pause" && queued.pausedWithMemory === true ? " (with memory)" : ""}`);
-          if (filesOnly) info(`Processes ended. Resume boots it fresh with your files intact (use ${chalk.bold("--full")} to keep running processes).`);
-          if (queued.fastPauseUnavailable) info(`Kept memory: ${queued.fastPauseUnavailable.replace(/; paused with memory instead$/, "")}.`);
-          // The server says when a faster option fits (a large sandbox paused with its memory).
-          if (queued.tip) info(`Tip: ${queued.tip.replace('{"fast": true} (CLI: pause --fast)', chalk.bold(`lizard sandbox pause ${id} --fast`))}`);
-          if (operation === "resume" && queued.memoryRestored === false) info("It was paused without memory: booted fresh with its files; start your processes again.");
+          success(`Sandbox ${chalk.bold(id)}: ${result.status}`);
+          if (filesOnly) info("Processes ended. Resume boots it fresh with your files intact.");
+          if (operation === "resume" && queued.memoryRestored === false) info("Booted fresh with its files; start your processes again.");
         }
       });
   }
