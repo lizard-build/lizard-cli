@@ -306,7 +306,7 @@ Skip command-by-command transcripts unless they explain a failure.
 
 ```sh
 lizard support open "sandbox create in eu-west-lim-a returns 500" --expected "sandbox running" --actual "500 internal error, 3 tries since 17:40" --sandbox <id> --json
-lizard support open "need 100 vCPU of sandboxes for a batch job next week; trial allows 8" --type limits --json
+lizard support open "need 100 vCPU of sandboxes for a batch job next week; Pro allows 40" --type limits --json
 lizard support list --json                       # tickets, status, unread replies
 lizard support show T-1043 --json                # the whole thread; marks replies read
 lizard support reply T-1043 "request id r_8f2…, still failing at 18:05" --json
