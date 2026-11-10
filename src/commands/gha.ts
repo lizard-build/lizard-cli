@@ -27,7 +27,8 @@ interface Status {
   repo: string;
   lizardAccount: string | null;
   installationId: number | null;
-  trial: { maxSize: string } | null;
+  /** Never paid: `jobs` medium and large runner jobs in all, then small only (jobs/jobsLeft absent on older servers). */
+  trial: { maxSize: string; jobs?: Record<string, number>; jobsLeft?: Record<string, number> } | null;
   sizes: Size[];
   recentJobs: { id: string; workflow: string | null; job: string; status: string; conclusion: string | null; url: string | null; createdAt: number }[];
 }
@@ -280,9 +281,18 @@ function printReport(r: Report) {
   if (r.verdict === "READY" && r.sizes?.length && (r.state === "NEEDS_MIGRATION")) {
     lines.push("");
     lines.push(chalk.dim("Runner sizes (billed per second while a job runs): " + r.sizes.map((s) => `${s.name} ${s.vcpus} vCPU/${s.memoryGb} GB ${money(s.pricePerHour)}`).join(" · ")));
-    if (r.trial) lines.push(chalk.dim("Your account hasn't paid yet, so only small runners are available until you add credit."));
+    if (r.trial) lines.push(chalk.dim(trialLine(r.trial)));
   }
   console.log(lines.join("\n"));
+}
+
+/** The trial's runner jobs: medium and large jobs left of each when the server says, the rule otherwise. */
+export function trialLine(t: { jobs?: Record<string, number>; jobsLeft?: Record<string, number> }): string {
+  const left = t.jobsLeft, jobs = t.jobs;
+  if (left && left.medium != null && left.large != null) {
+    return `Trial: ${left.medium} of ${jobs?.medium ?? 20} medium and ${left.large} of ${jobs?.large ?? 10} large runner jobs left, then small runners only. Start Pro (or add credit) for unlimited.`;
+  }
+  return "Trial: 20 medium and 10 large runner jobs, then small runners only. Start Pro (or add credit) for unlimited.";
 }
 
 /** For agents: one line saying how to act on `next`. */

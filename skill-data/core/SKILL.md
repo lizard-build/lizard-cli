@@ -271,6 +271,8 @@ The loop: run `lizard gha --json` and act on `next`, then run it again. Repeat u
 - `next.actor: "agent"`: do it yourself: run `next.command` (or, with no command, what `next.say` says, e.g. commit and push). If `next.confirm` is true, ask the user first (show `next.say`); it connects billing or edits their files.
 - `verdict: "BLOCKED"`: tell the user `next.say` and stop; retrying won't help.
 
+Trial accounts (never paid) run 20 medium and 10 large runner jobs in all (across the account's organizations), plus small runners with no count, up to 8 vCPU at a time; `trial.jobsLeft` in `lizard gha --json` says how many are left. Once a size's jobs are used up, jobs of that size are skipped and `lizard gha migrate` picks a smaller runner, until the user starts Pro (`lizard billing start`) or adds credit. Pro ($19/month and up) has no job limits.
+
 Migrating is just a YAML edit in the user's checkout: the CLI never opens a pull request or merges anything. Two ways, both fine:
 
 - `lizard gha migrate` edits `runs-on` in `.github/workflows/*.yml` for you: it skips jobs that can't move (macOS, Windows, expressions, reusable workflows, runner groups), picks the size (`--size`, `--job build=large`) and keeps comments and formatting.
