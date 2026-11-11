@@ -70,7 +70,7 @@ describe("sandbox create size", () => {
     registerSandbox(program);
     const createCmd = program.commands.find((c) => c.name() === "sandbox")!.commands.find((c) => c.name() === "create")!;
     const help = createCmd.helpInformation().replace(/\s+/g, " ");
-    expect(help).toContain("mini 1 vCPU/2 GB, small 2/4, medium 4/8, large 8/16");
+    expect(help).toContain("mini 1 vCPU/2 GB RAM/5 GB disk, small 2/4/20, medium 4/8/40, large 8/16/80");
     expect(help).toContain("Mini works only with the base, claude, codex and interpreter templates");
     expect(help).toContain('(choices: "mini", "small", "medium", "large")');
   });

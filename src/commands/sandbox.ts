@@ -29,7 +29,7 @@ const TEMPLATE_HINT = "base, interpreter, codex, claude, opencode, pi, prime, de
 // starts only from templates with a disk-only build (MINI_TEMPLATES); the server answers
 // SANDBOX_SIZE_NOT_ALLOWED for any other template.
 const SANDBOX_SIZES = ["mini", "small", "medium", "large"] as const;
-const SIZE_HINT = "mini 1 vCPU/2 GB, small 2/4, medium 4/8, large 8/16";
+const SIZE_HINT = "mini 1 vCPU/2 GB RAM/5 GB disk, small 2/4/20, medium 4/8/40, large 8/16/80";
 const MINI_TEMPLATES = "base, claude, codex and interpreter";
 
 interface SandboxRecord {
