@@ -83,7 +83,7 @@ lizard sandbox files rm <id> <path>
 
 Mini has no warm pool, so it starts only from templates with a disk-only build: `base`, `claude`, `codex` and `interpreter`. Any other template answers 400 `SANDBOX_SIZE_NOT_ALLOWED`; use `small` or larger for it.
 
-Disk is the sandbox's own root disk (its home directory, `/workspace` and everything it installs); the file system shows a little less than the size (ext4 keeps ~5% for itself). A sandbox restored from a snapshot keeps at least its snapshot's disk.
+Disk is the sandbox's root file system (`/`): its home directory, `/workspace` and everything it installs share it (a volume, if attached, mounts over `/workspace`). `df -h` prints GiB, so it shows about 4.7G / 18.8G / 37.6G / 75.2G for `mini` / `small` / `medium` / `large`. A sandbox restored from a snapshot keeps at least its snapshot's disk.
 
 Prices are per hour, billed per second while the sandbox runs, flat by size: measured CPU/RAM is not charged, and disk and egress are included. A paused sandbox costs nothing. Attached volumes bill separately. `--size` cannot be combined with `--snapshot`: a snapshot restores at the size it was captured at (see [private snapshots](#snapshots-and-pauseresume)).
 
