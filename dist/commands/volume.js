@@ -2,6 +2,7 @@ import chalk from "chalk";
 import * as p from "@clack/prompts";
 import { api, withScope } from "../lib/api.js";
 import { assertValidVolumeName, resolveVolume } from "../lib/volume.js";
+import { DEFAULT_REGION } from "../lib/config.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { success, info, warn, isJSONMode, printJSON, table, isTTY } from "../lib/format.js";
 function parseIntOption(v) {
@@ -70,7 +71,7 @@ export function registerVolume(program) {
         .argument("<name>", "Volume name")
         .description("Create a persistent volume for sandboxes, or create one and attach it to a service with --service")
         .option("--size <gb>", "Size in GB (server limits apply; default 5)", parseIntOption)
-        .option("--region <code>", "Region to place the volume in (must match the sandbox that will attach it)")
+        .option("--region <code>", `Region to place the volume in (default ${DEFAULT_REGION}; must match the sandbox that will attach it)`)
         .option("-s, --service <name>", "Attach it to this service instead (one volume per service; files there survive restarts and redeploys)")
         .option("--mount-path <path>", "With --service: where the service sees it (default /data)")
         .option("-p, --project <id>", "Project name, slug, or ID")
@@ -98,7 +99,7 @@ export function registerVolume(program) {
         }
         if (!isJSONMode())
             info(`Creating volume ${chalk.cyan(name)}...`);
-        const created = await api.post(withScope(`/api/projects/${projectId}/volumes`, scope), { name, sizeGb, region: opts.region });
+        const created = await api.post(withScope(`/api/projects/${projectId}/volumes`, scope), { name, sizeGb, region: opts.region || DEFAULT_REGION });
         if (isJSONMode()) {
             printJSON(created);
             return;
