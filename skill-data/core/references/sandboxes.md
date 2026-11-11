@@ -77,7 +77,7 @@ lizard sandbox files rm <id> <path>
 | Size | vCPU | RAM | Disk | Price |
 |---|---|---|---|---|
 | `nano` | 0.5 | 1 GiB | 5 GB | $0.00405/h |
-| `mini` | 1 | 2 GiB | 5 GB | $0.0081/h |
+| `mini` | 1 | 2 GiB | 10 GB | $0.0081/h |
 | `small` | 2 | 4 GiB | 20 GB | $0.0162/h |
 | `medium` (default) | 4 | 8 GiB | 40 GB | $0.0324/h |
 | `large` | 8 | 16 GiB | 80 GB | $0.0648/h |
@@ -86,7 +86,7 @@ Mini has no warm pool, so it starts only from templates with a disk-only build: 
 
 Nano is half a vCPU: the sandbox sees 1 CPU (`nproc` says 1) but gets at most half a core of time, so CPU-bound work takes about twice as long as on Mini (the rest shows as steal time). It suits an idle shell or a coding agent waiting on a model. Nano starts only from `base`, `claude` and `codex`; any other template answers 400 `SANDBOX_SIZE_NOT_ALLOWED` with `templates`.
 
-Disk is the sandbox's root file system (`/`): its home directory, `/workspace` and everything it installs share it (a volume, if attached, mounts over `/workspace`). `df -h` prints GiB, so it shows about 4.7G / 4.7G / 18.8G / 37.6G / 75.2G for `nano` / `mini` / `small` / `medium` / `large`. A sandbox restored from a snapshot keeps at least its snapshot's disk.
+Disk is the sandbox's root file system (`/`): its home directory, `/workspace` and everything it installs share it (a volume, if attached, mounts over `/workspace`). `df -h` prints GiB, so it shows about 4.7G / 9.4G / 18.8G / 37.6G / 75.2G for `nano` / `mini` / `small` / `medium` / `large`. A sandbox restored from a snapshot keeps at least its snapshot's disk.
 
 Prices are per hour, billed per second while the sandbox runs, flat by size: measured CPU/RAM is not charged, and disk and egress are included. A paused sandbox costs nothing. Attached volumes bill separately. `--size` cannot be combined with `--snapshot`: a snapshot restores at the size it was captured at (see [private snapshots](#snapshots-and-pauseresume)).
 
