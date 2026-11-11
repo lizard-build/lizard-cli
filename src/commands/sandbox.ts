@@ -30,7 +30,7 @@ const TEMPLATE_HINT = "base, interpreter, codex, claude, opencode, pi, prime, de
 // held to 50% of a core) only from NANO_TEMPLATES. The server answers SANDBOX_SIZE_NOT_ALLOWED
 // for any other template.
 const SANDBOX_SIZES = ["nano", "mini", "small", "medium", "large"] as const;
-const SIZE_HINT = "nano 0.5 vCPU/1 GB RAM/5 GB disk, mini 1/2/5, small 2/4/20, medium 4/8/40, large 8/16/80";
+const SIZE_HINT = "nano 0.5 vCPU/1 GB RAM/5 GB disk, mini 1/2/10, small 2/4/20, medium 4/8/40, large 8/16/80";
 const MINI_TEMPLATES = "base, claude, codex and interpreter";
 const NANO_TEMPLATES = "base, claude and codex";
 
