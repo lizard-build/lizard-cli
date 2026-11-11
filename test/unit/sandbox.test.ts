@@ -55,24 +55,25 @@ describe("sandbox create size", () => {
     vi.mocked(api.post).mockResolvedValue({ id: "sandbox-test" });
   });
 
-  it.each(["mini", "small", "medium", "large"])("sends --size %s to the API", async (size) => {
+  it.each(["nano", "mini", "small", "medium", "large"])("sends --size %s to the API", async (size) => {
     await create(["--size", size]);
     expect(api.post).toHaveBeenCalledWith("/api/sandboxes", expect.objectContaining({ size }));
   });
 
   it("rejects an unknown size before making a request", async () => {
-    await expect(create(["--size", "tiny"])).rejects.toThrow(/mini, small, medium, large|"mini", "small", "medium", "large"/);
+    await expect(create(["--size", "tiny"])).rejects.toThrow(/nano, mini, small, medium, large|"nano", "mini", "small", "medium", "large"/);
     expect(api.post).not.toHaveBeenCalled();
   });
 
-  it("lists every size, Mini included, in the help", () => {
+  it("lists every size, Nano and Mini included, in the help", () => {
     const program = new Command();
     registerSandbox(program);
     const createCmd = program.commands.find((c) => c.name() === "sandbox")!.commands.find((c) => c.name() === "create")!;
     const help = createCmd.helpInformation().replace(/\s+/g, " ");
-    expect(help).toContain("mini 1 vCPU/2 GB RAM/5 GB disk, small 2/4/20, medium 4/8/40, large 8/16/80");
+    expect(help).toContain("nano 0.5 vCPU/1 GB RAM/5 GB disk, mini 1/2/5, small 2/4/20, medium 4/8/40, large 8/16/80");
+    expect(help).toContain("Nano only with base, claude and codex");
     expect(help).toContain("Mini works only with the base, claude, codex and interpreter templates");
-    expect(help).toContain('(choices: "mini", "small", "medium", "large")');
+    expect(help).toContain('(choices: "nano", "mini", "small", "medium", "large")');
   });
 });
 
