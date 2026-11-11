@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import { api, streamSSE, getBaseURL, clientHeaders, APIError, apiErrorFrom, isPaymentRequired, withScope } from "../lib/api.js";
-import { updateProjectLink } from "../lib/config.js";
+import { updateProjectLink, DEFAULT_REGION } from "../lib/config.js";
 import { resolveContext, getScope } from "../lib/resolve.js";
 import { ensureLinked } from "./init.js";
 import { success, info, error, isJSONMode, isTTY, printJSON, statusColor, } from "../lib/format.js";
@@ -27,7 +27,7 @@ export function registerUp(program) {
         .option("-s, --service <name>", "Service to deploy to (defaults to linked)")
         .option("-p, --project <id>", "Project name, slug, or ID")
         .option("--no-gitignore", "Don't ignore paths from .gitignore")
-        .option("--region <code>", "Region to create the service in (new services only)")
+        .option("--region <code>", `Region to create the service in (default ${DEFAULT_REGION}; new services only)`)
         .option("--build-command <cmd>", "Build command to run (e.g. 'npm run build')")
         .option("--start-command <cmd>", "Start command to run (e.g. 'node dist/index.js')")
         .option("--pre-deploy-command <cmd>", "Pre-deploy command (e.g. 'node dist/migrate.js')")
@@ -101,7 +101,7 @@ export function registerUp(program) {
     });
 }
 // ── deploy strategies ────────────────────────────────────────────────────────
-async function deployFromLocal(args) {
+export async function deployFromLocal(args) {
     const defaultName = args.serviceFlag || getDefaultAppName(args.targetPath);
     info(`${args.existingServiceId ? "Uploading" : "Creating service from"} ${chalk.dim(args.targetPath)}`);
     let appName = args.serviceFlag || defaultName;
@@ -130,8 +130,10 @@ async function deployFromLocal(args) {
             qs.set("port", String(resolvedPort));
         if (!args.existingServiceId) {
             qs.set("name", appName);
-            if (args.region)
-                qs.set("region", args.region);
+            // No --region: us-east-1, like sandbox create and add. Leaving it out let the
+            // platform pick the region of whichever server answered, and DNS sends
+            // European users to the EU one.
+            qs.set("region", args.region || DEFAULT_REGION);
             // New services with no detected port default to 3000
             if (resolvedPort === undefined)
                 qs.set("port", "3000");

@@ -35,7 +35,7 @@ describe('volume create size', () => {
   it('uses server defaults and workspace scope', async () => {
     await create();
     expect(api.get).toHaveBeenCalledWith('/api/projects/p1/volume-limits?workspaceId=w1');
-    expect(api.post).toHaveBeenCalledWith('/api/projects/p1/volumes?workspaceId=w1', { name: 'cache', sizeGb: 5, region: undefined });
+    expect(api.post).toHaveBeenCalledWith('/api/projects/p1/volumes?workspaceId=w1', { name: 'cache', sizeGb: 5, region: 'us-east-1' });
   });
   it('accepts the boundary and follows a changed limit', async () => {
     await create('50');

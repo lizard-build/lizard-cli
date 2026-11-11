@@ -190,7 +190,7 @@ Use `lizard volume create <name> --size <gb> --project <project>` for persistent
 Persistent volumes for sandboxes. A volume's name is its key within the project; every command takes a name or ID.
 
 ```
-lizard volume create <name> [--size <gb>] [--region <code>]   # default 5 GB; a sandbox with --volume starts in its region
+lizard volume create <name> [--size <gb>] [--region <code>]   # default 5 GB in us-east-1; a sandbox with --volume starts in its region
 lizard volume list --json                                     # name, sizeGb, status, attachedTo
 lizard volume resize <name> --size <gb>                       # grow in place
 lizard volume rm <name> [-y]                                  # refused while attached; delete the sandbox first

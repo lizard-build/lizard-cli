@@ -164,7 +164,7 @@ lizard add postgres                  # or one at a time
 
 - The first addon of each type is named after it (`postgres`, `redis`, `s3`); later ones get names like `postgres-autumn-bear`. References use the real name: `${{postgres.DATABASE_PRIVATE_URL}}`.
 - Connect a service explicitly: `lizard secrets set DATABASE_URL='${{postgres.DATABASE_PRIVATE_URL}}' --service <svc>` (Redis: `REDIS_URL='${{redis.REDIS_PRIVATE_URL}}'`). Every running Postgres and Redis also reaches every service as `DATABASE_URL` / `REDIS_URL` (public URL), but only from that service's next deploy, and with two of a type either may win.
-- Private URLs resolve only in the addon's region: `lizard add` defaults to `us-east-1`, so pass the service's `--region` if it runs elsewhere.
+- Private URLs resolve only in the addon's region: `lizard up` and `lizard add` both default to `us-east-1`, so to run elsewhere pass the same `--region` to both.
 - A reference to a missing addon or key becomes an empty string and does not fail the deploy; renaming an addon breaks its references.
 - `lizard ps --json` and `lizard add <db> --json` print database passwords and S3 keys in plain text: don't repeat them to the user.
 - S3 comes with a private bucket named `default`, up to 16 GiB per S3 addon. `lizard s3 upload <file>`, `lizard s3 list` and `lizard s3 url <key> --expires <seconds>` (a temporary download link that needs no credentials) work without an AWS SDK; AWS SDKs need `forcePathStyle: true`. Making a bucket public is done in the dashboard.
