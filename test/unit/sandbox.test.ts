@@ -9,7 +9,7 @@ vi.mock("../../src/lib/api.js", () => {
   class APIError extends Error {
     constructor(public status: number, message: string, public code = "", public body: unknown = null) { super(message); }
   }
-  return { api: { post: vi.fn(), get: vi.fn(), delete: vi.fn() }, APIError };
+  return { api: { post: vi.fn(), get: vi.fn(), put: vi.fn(), delete: vi.fn() }, APIError };
 });
 vi.mock("open", () => ({ default: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("../../src/lib/config.js", () => ({
@@ -416,5 +416,49 @@ describe("sandbox cpu in a terminal", () => {
     await program.parseAsync(["sandbox", "cpu", "s"], { from: "user" });
     expect(log).toHaveBeenCalledWith("AMD ]52;c;eA==  EPYC");
     vi.doUnmock("../../src/lib/format.js");
+  });
+});
+
+describe("sandbox proxy", () => {
+  function run(args: string[]) {
+    const program = new Command().exitOverride();
+    registerSandbox(program);
+    return program.parseAsync(["sandbox", ...args], { from: "user" });
+  }
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it("sends --proxy at create and keeps a sandbox that has it", async () => {
+    vi.mocked(api.post).mockResolvedValue({ id: "sb1", proxy: "http://u@h.example.com:8000" });
+    await run(["create", "--proxy", "http://u:p@h.example.com:8000"]);
+    expect(api.post).toHaveBeenCalledWith("/api/sandboxes", expect.objectContaining({ proxy: "http://u:p@h.example.com:8000" }));
+    expect(api.delete).not.toHaveBeenCalled();
+  });
+
+  it("deletes the sandbox when the platform ignored --proxy", async () => {
+    vi.mocked(api.post).mockResolvedValue({ id: "sb1" });
+    vi.mocked(api.delete).mockResolvedValue({});
+    await expect(run(["create", "--proxy", "http://u:p@h.example.com:8000"])).rejects.toThrow(/does not support --proxy/);
+    expect(api.delete).toHaveBeenCalledWith("/api/sandboxes/sb1");
+  });
+
+  it("turns it on, off, and refuses both at once", async () => {
+    vi.mocked(api.put).mockResolvedValue({ id: "sb1", proxy: "socks5://u@h.example.com:1080" });
+    await run(["proxy", "sb1", "socks5://u:p@h.example.com:1080"]);
+    expect(api.put).toHaveBeenCalledWith("/api/sandboxes/sb1/proxy", { proxy: "socks5://u:p@h.example.com:1080" });
+    vi.mocked(api.delete).mockResolvedValue({ id: "sb1", proxy: null });
+    await run(["proxy", "sb1", "--off"]);
+    expect(api.delete).toHaveBeenCalledWith("/api/sandboxes/sb1/proxy");
+    await expect(run(["proxy", "sb1", "http://h.example.com:1", "--off"])).rejects.toThrow(/not both/);
+  });
+
+  it("explains itself in --help", () => {
+    const program = new Command();
+    registerSandbox(program);
+    const cmd = program.commands.find((c) => c.name() === "sandbox")!.commands.find((c) => c.name() === "proxy")!;
+    let help = "";
+    cmd.configureOutput({ writeOut: (s) => { help += s; } });
+    cmd.outputHelp();
+    expect(help).toContain("never falls back to a direct connection");
+    expect(help).toContain("ipv4.webshare.io");
   });
 });

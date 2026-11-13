@@ -50,6 +50,8 @@ interface SandboxRecord {
   internetAccess?: boolean;
   /** With no internet: what is still reachable (--allow-host). */
   allowedHosts?: string[];
+  /** The sandbox's proxy without its password (--proxy, `sandbox proxy`); null: none. Absent from older platforms. */
+  proxy?: string | null;
   guestIp?: string;
   startedAt: number | string;
   endAt?: number | string;
@@ -185,6 +187,7 @@ export function registerSandbox(program: Command) {
     .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
     .option("--allow-host <host>", "With no internet, still allow this host name (pypi.org, *.pythonhosted.org: ports 80/443) or IPv4 address/range (every port); repeat for more. Implies --no-internet", (v: string, all: string[] = []) => [...all, v])
     .option("--no-internet", "Fully closed sandbox, for its whole life (its resumes and forks too): no internet and no public ports; commands and files still work")
+    .option("--proxy <url>", "Send all of the sandbox's internet traffic through your proxy, any supplier: http://user:pass@host:port or socks5://user:pass@host:port. See `lizard sandbox proxy --help`")
     .action(async (opts) => {
       // A snapshot restores at its source's size (a Firecracker VM's memory is part of it; a
       // pod snapshot goes back onto the machine it was captured on), so the server ignores a
@@ -263,6 +266,7 @@ export function registerSandbox(program: Command) {
           // Sent only when asked: every other create stays byte-for-byte what it was.
           ...(opts.internet === false || opts.allowHost?.length ? { internetAccess: false } : {}),
           ...(opts.allowHost?.length ? { allowedHosts: opts.allowHost } : {}),
+          ...(opts.proxy ? { proxy: opts.proxy } : {}),
         };
         try {
           sandbox = await createInDefaultRegion(body, defaultRegion);
@@ -297,6 +301,12 @@ export function registerSandbox(program: Command) {
         throw new Error("This region's platform does not support --allow-host yet; the sandbox was deleted.");
       }
 
+      // A platform that predates --proxy ignores it: the sandbox would go out directly, so it is deleted.
+      if (opts.proxy && !sandbox.proxy) {
+        await api.delete(`/api/sandboxes/${sandbox.id}`).catch(() => {});
+        throw new Error("This region's platform does not support --proxy yet; the sandbox it started went out directly and was deleted.");
+      }
+
       if (isJSONMode()) {
         printJSON(sandbox);
         return;
@@ -314,6 +324,7 @@ export function registerSandbox(program: Command) {
       if (sandbox.internetAccess === false) {
         info(chalk.dim(sandbox.allowedHosts?.length ? `  Internet: only ${sandbox.allowedHosts.join(", ")}` : "  Internet: off"));
       }
+      if (sandbox.proxy) info(chalk.dim(`  Proxy: ${sandbox.proxy}`));
       info("");
       info(sandboxNextSteps(sandbox.id));
     });
@@ -365,6 +376,53 @@ export function registerSandbox(program: Command) {
       const updated = await api.post<SandboxRecord>(`/api/sandboxes/${id}/timeout`, { timeoutMs: ms });
       if (isJSONMode()) printJSON(updated);
       else success(`Sandbox ${chalk.bold(id)} timeout set to ${ms}ms`);
+    });
+
+  sb.command("proxy")
+    .argument("<id>", "Sandbox ID")
+    .argument("[url]", "Proxy URL: http://user:pass@host:port, https://user:pass@host:port or socks5://user:pass@host:port")
+    .option("--off", "Stop using a proxy: the sandbox goes out directly again")
+    .description("Route a running sandbox's internet traffic through a proxy, or stop (no URL: show the current one)")
+    .addHelpText(
+      "after",
+      `
+Sends every internet connection the sandbox opens through your proxy, from any
+supplier (residential, ISP, datacenter). It is applied outside the sandbox, so
+every program goes through it with no setup inside (no HTTP_PROXY needed) and
+nothing in the sandbox can go around it. Sites see the proxy's IP.
+
+  lizard sandbox proxy <id> http://user:pass@host:port     turn on (or switch)
+  lizard sandbox proxy <id> socks5://user:pass@host:port   SOCKS5 works the same
+  lizard sandbox proxy <id> --off                          back to direct
+  lizard sandbox proxy <id>                                show the current one
+
+Check it from inside:
+  lizard sandbox exec <id> -- curl -s https://ipv4.webshare.io/
+
+- Takes effect at once for new connections; connections already open keep
+  going the way they went (restart a long-running client to move it).
+- If the proxy is down or the password is wrong, connections fail: traffic
+  never falls back to a direct connection.
+- Only TCP is proxied: DNS and other UDP (QUIC/HTTP3) go out directly.
+- The sandbox must be running. The proxy stays through pause/resume and is
+  copied to forks. Set it at create with \`sandbox create --proxy <url>\`.
+- The password is stored encrypted and never shown again.
+`,
+    )
+    .action(async (id: string, url: string | undefined, opts: { off?: boolean }) => {
+      if (url && opts.off) throw new Error("Give a proxy URL or --off, not both.");
+      if (!url && !opts.off) {
+        const sandbox = await api.get<SandboxRecord>(`/api/sandboxes/${id}`);
+        if (isJSONMode()) printJSON({ id, proxy: sandbox.proxy ?? null });
+        else console.log(sandbox.proxy ? sandbox.proxy : "No proxy: the sandbox goes out directly");
+        return;
+      }
+      const result = url
+        ? await api.put<{ id: string; proxy: string | null }>(`/api/sandboxes/${id}/proxy`, { proxy: url })
+        : await api.delete<{ id: string; proxy: string | null }>(`/api/sandboxes/${id}/proxy`);
+      if (isJSONMode()) printJSON(result);
+      else if (result?.proxy) success(`Sandbox ${chalk.bold(id)} now goes out through ${result.proxy}`);
+      else success(`Sandbox ${chalk.bold(id)} goes out directly again`);
     });
 
   // The host's CPU by name: inside a Firecracker sandbox /proc/cpuinfo only says "AMD EPYC",
