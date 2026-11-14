@@ -74,7 +74,7 @@ lizard sandbox files rm <id> <path>
 
 ## Size and pricing
 
-`lizard sandbox create -s/--size nano|mini|small|medium|large|big` picks the machine; the default is `medium`. The Pro trial runs 1 Small, 2 Mini and 2 Nano at a time, in US regions only (no size = small); Medium, Large and Big unlock after the first payment. Medium or Large answers 403 `TRIAL_SANDBOX_SIZE` (`allowedSizes: ["small", "mini", "nano"]`), another region 403 `TRIAL_SANDBOX_REGION`, and a second Small or a third Mini or Nano 403 `TRIAL_SIZE_RUNNING` (`size`, `sizeLimit`, `sizeLimits: {"small": 1, "mini": 2, "nano": 2}`): pause or delete one. Trial sandboxes are deleted 1 hour after they start at the latest (a longer `--timeout` answers 403 `TRIAL_SANDBOX_LIFETIME`, see [Lifetime](#lifetime)). `lizard billing start-now` lifts these limits. There are exactly six sizes:
+`lizard sandbox create -s/--size nano|mini|small|medium|large|big` picks the machine; the default is `medium`. The Pro trial runs 1 Small, 2 Mini and 2 Nano at a time, in US regions only (no size = small); Medium, Large and Big unlock after the first payment. Medium answers 403 `TRIAL_SANDBOX_SIZE` (`allowedSizes: ["small", "mini", "nano"]`), Large or Big 403 `SANDBOX_SIZE_NOT_ALLOWED` (`maxSandboxCpus: 4`), another region 403 `TRIAL_SANDBOX_REGION`, and a second Small or a third Mini or Nano 403 `TRIAL_SIZE_RUNNING` (`size`, `sizeLimit`, `sizeLimits: {"small": 1, "mini": 2, "nano": 2}`): pause or delete one. Trial sandboxes are deleted 1 hour after they start at the latest (a longer `--timeout` answers 403 `TRIAL_SANDBOX_LIFETIME`, see [Lifetime](#lifetime)). `lizard billing start-now` lifts these limits. There are exactly six sizes:
 
 | Size | vCPU | RAM | Disk | Price |
 |---|---|---|---|---|
