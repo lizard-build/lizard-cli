@@ -24,13 +24,14 @@ import { success, info, warn, error, isJSONMode, printJSON, table, statusColor, 
 // so let it.
 const TEMPLATE_HINT = "base, interpreter, codex, claude, opencode, pi, prime, desktop";
 
-// The five machines a sandbox can be, each priced per hour, billed per second by the server. The
+// The six machines a sandbox can be, each priced per hour, billed per second by the server. The
 // platform rejects anything else, so the CLI offers exactly these. Mini has no warm pool, so it
 // starts only from templates with a disk-only build (MINI_TEMPLATES); Nano (half a vCPU: 1 vCPU
 // held to 50% of a core) only from NANO_TEMPLATES. The server answers SANDBOX_SIZE_NOT_ALLOWED
-// for any other template.
-const SANDBOX_SIZES = ["nano", "mini", "small", "medium", "large"] as const;
-const SIZE_HINT = "nano 0.5 vCPU/1 GB RAM/5 GB disk, mini 1/2/10, small 2/4/20, medium 4/8/40, large 8/16/80";
+// for any other template. Big (16 vCPU) likewise boots only from a disk-only build, and needs a
+// paid account (the trial runs up to 4 vCPU per sandbox).
+const SANDBOX_SIZES = ["nano", "mini", "small", "medium", "large", "big"] as const;
+const SIZE_HINT = "nano 0.5 vCPU/1 GB RAM/5 GB disk, mini 1/2/10, small 2/4/20, medium 4/8/40, large 8/16/80, big 16/32/120";
 const MINI_TEMPLATES = "base, claude, codex and interpreter";
 const NANO_TEMPLATES = "base, claude and codex";
 
@@ -178,7 +179,7 @@ export function registerSandbox(program: Command) {
   sb.command("create")
     .description("Create a sandbox")
     .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
-    .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small on the Pro trial (1 Small, 2 Mini and 2 Nano at a time, US regions only; Medium and Large unlock after the first payment). Mini works only with the ${MINI_TEMPLATES} templates, Nano only with ${NANO_TEMPLATES}`).choices(SANDBOX_SIZES))
+    .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small on the Pro trial (1 Small, 2 Mini and 2 Nano at a time, US regions only; Medium, Large and Big unlock after the first payment). Mini works only with the ${MINI_TEMPLATES} templates, Nano only with ${NANO_TEMPLATES}`).choices(SANDBOX_SIZES))
     .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration (Pro trial: at most 3600000 = 1 hour, and 0 means 1 hour)", parseTimeoutOption, 300_000)
     .option("--region <code>", `Region to create the sandbox in (default ${DEFAULT_REGION}; with --volume or --snapshot, theirs)`)
     .option("--snapshot <id>", "Create from a private saved snapshot, at the size it was taken at")

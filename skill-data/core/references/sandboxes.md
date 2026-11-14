@@ -74,7 +74,7 @@ lizard sandbox files rm <id> <path>
 
 ## Size and pricing
 
-`lizard sandbox create -s/--size nano|mini|small|medium|large` picks the machine; the default is `medium`. The Pro trial runs 1 Small, 2 Mini and 2 Nano at a time, in US regions only (no size = small); Medium and Large unlock after the first payment. Medium or Large answers 403 `TRIAL_SANDBOX_SIZE` (`allowedSizes: ["small", "mini", "nano"]`), another region 403 `TRIAL_SANDBOX_REGION`, and a second Small or a third Mini or Nano 403 `TRIAL_SIZE_RUNNING` (`size`, `sizeLimit`, `sizeLimits: {"small": 1, "mini": 2, "nano": 2}`): pause or delete one. Trial sandboxes are deleted 1 hour after they start at the latest (a longer `--timeout` answers 403 `TRIAL_SANDBOX_LIFETIME`, see [Lifetime](#lifetime)). `lizard billing start-now` lifts these limits. There are exactly five sizes:
+`lizard sandbox create -s/--size nano|mini|small|medium|large|big` picks the machine; the default is `medium`. The Pro trial runs 1 Small, 2 Mini and 2 Nano at a time, in US regions only (no size = small); Medium, Large and Big unlock after the first payment. Medium or Large answers 403 `TRIAL_SANDBOX_SIZE` (`allowedSizes: ["small", "mini", "nano"]`), another region 403 `TRIAL_SANDBOX_REGION`, and a second Small or a third Mini or Nano 403 `TRIAL_SIZE_RUNNING` (`size`, `sizeLimit`, `sizeLimits: {"small": 1, "mini": 2, "nano": 2}`): pause or delete one. Trial sandboxes are deleted 1 hour after they start at the latest (a longer `--timeout` answers 403 `TRIAL_SANDBOX_LIFETIME`, see [Lifetime](#lifetime)). `lizard billing start-now` lifts these limits. There are exactly six sizes:
 
 | Size | vCPU | RAM | Disk | Price |
 |---|---|---|---|---|
@@ -83,12 +83,15 @@ lizard sandbox files rm <id> <path>
 | `small` | 2 | 4 GiB | 20 GB | $0.0162/h |
 | `medium` (default) | 4 | 8 GiB | 40 GB | $0.0324/h |
 | `large` | 8 | 16 GiB | 80 GB | $0.0648/h |
+| `big` | 16 | 32 GiB | 120 GB | $0.1296/h |
 
 Mini has no warm pool, so it starts only from templates with a disk-only build: `base`, `claude`, `codex` and `interpreter`. Any other template answers 400 `SANDBOX_SIZE_NOT_ALLOWED`; use `small` or larger for it.
 
+Big has no warm pool either, so it starts only from templates with a disk-only build: `base`, `claude`, `codex`, `interpreter` and `desktop` (not `android`); it takes a few seconds longer to start than Large. On the trial it answers 403 `SANDBOX_SIZE_NOT_ALLOWED` (the trial runs up to 4 vCPU per sandbox).
+
 Nano is half a vCPU: the sandbox sees 1 CPU (`nproc` says 1) but gets at most half a core of time, so CPU-bound work takes about twice as long as on Mini (the rest shows as steal time). It suits an idle shell or a coding agent waiting on a model. Nano starts only from `base`, `claude` and `codex`; any other template answers 400 `SANDBOX_SIZE_NOT_ALLOWED` with `templates`.
 
-Disk is the sandbox's root file system (`/`): its home directory, `/workspace` and everything it installs share it (a volume, if attached, mounts over `/workspace`). `df -h` prints GiB, so it shows about 4.7G / 9.4G / 18.8G / 37.6G / 75.2G for `nano` / `mini` / `small` / `medium` / `large`. A sandbox restored from a snapshot keeps at least its snapshot's disk.
+Disk is the sandbox's root file system (`/`): its home directory, `/workspace` and everything it installs share it (a volume, if attached, mounts over `/workspace`). `df -h` prints GiB, so it shows about 4.7G / 9.4G / 18.8G / 37.6G / 75.2G / 112.8G for `nano` / `mini` / `small` / `medium` / `large` / `big`. A sandbox restored from a snapshot keeps at least its snapshot's disk.
 
 Prices are per hour, billed per second while the sandbox runs, flat by size: measured CPU/RAM is not charged, and disk and egress are included. A paused sandbox costs nothing. Attached volumes bill separately. `--size` cannot be combined with `--snapshot`: a snapshot restores at the size it was captured at (see [private snapshots](#snapshots-and-pauseresume)).
 

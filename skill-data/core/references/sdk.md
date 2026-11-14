@@ -36,7 +36,7 @@ Options for `create()` (TypeScript / Python):
 
 | Option | Purpose |
 |---|---|
-| `size` | `mini` (1 vCPU / 2 GB, $0.0081/h; `base`, `claude`, `codex` and `interpreter` templates only; SDK 1.0.12 or later), `small` (2 vCPU / 4 GB, $0.0162/h), `medium` (4 vCPU / 8 GB, $0.0324/h, default), `large` (8 vCPU / 16 GB, $0.0648/h) |
+| `size` | `mini` (1 vCPU / 2 GB, $0.0081/h; `base`, `claude`, `codex` and `interpreter` templates only; SDK 1.0.12 or later), `small` (2 vCPU / 4 GB, $0.0162/h), `medium` (4 vCPU / 8 GB, $0.0324/h, default), `large` (8 vCPU / 16 GB, $0.0648/h), `big` (16 vCPU / 32 GB, $0.1296/h; `base`, `claude`, `codex`, `interpreter`, `desktop` templates; paid accounts) |
 | `timeoutMs` / `timeout_ms` | Lifetime; default 300,000 ms (5 minutes); `0` means no deadline (the VM still stops after 596 hours). Pro trial: at most 3,600,000 (1 hour), `0` gets 1 hour, longer is 403 `TRIAL_SANDBOX_LIFETIME` |
 | `envs` | Environment variables for every command in the sandbox (up to 256) |
 | `metadata` | Your own string labels, returned by `getInfo()` / `get_info()` (up to 64) |
@@ -47,7 +47,7 @@ Options for `create()` (TypeScript / Python):
 
 Templates: `base` (default), `interpreter` (Python with data libraries, plus Node 22), `codex`, `claude`, `opencode`, `pi`, `prime` (one coding agent each), `desktop`. The SDK and CLI give a sandbox 5 minutes by default; the raw API and the dashboard give none. Commands do not reset the deadline. Pricing is flat by size, billed per second while the sandbox runs; a sandbox restored from a snapshot runs at the source's size and is billed at that size; volumes bill separately.
 
-An account's limit counts vCPU of running sandboxes (Mini 1, Small 2, Medium 4, Large 8): 40 vCPU on Pro, 220 on Pro 5x and 1,200 on Pro 20x. The trial runs 1 Small and 2 Mini at a time, US regions only (no size = small); Medium and Large unlock after the first payment (403 `TRIAL_SANDBOX_SIZE` / `TRIAL_SANDBOX_REGION`, and 403 `TRIAL_SIZE_RUNNING` for a second Small or a third Mini). A trial sandbox is deleted 1 hour after it starts at the latest: a longer `timeoutMs` or `setTimeout` past that answers 403 `TRIAL_SANDBOX_LIFETIME`. Starts are limited only on the trial (6 a minute, 30 an hour, 100 a day); Pro, Pro 5x and Pro 20x have unlimited starts. Over a limit, a `LimitExceededError` (status 429) with `code` `SANDBOX_LIMIT_REACHED` (`unit` `vcpu`, `limit`, `running`, `needed`) or `SANDBOX_RATE_LIMITED` (`retryAfterS`). More than 32 commands at once in one sandbox gives `EXEC_LIMIT_REACHED`.
+An account's limit counts vCPU of running sandboxes (Mini 1, Small 2, Medium 4, Large 8, Big 16): 40 vCPU on Pro, 220 on Pro 5x and 1,200 on Pro 20x. The trial runs 1 Small and 2 Mini at a time, US regions only (no size = small); Medium and Large unlock after the first payment (403 `TRIAL_SANDBOX_SIZE` / `TRIAL_SANDBOX_REGION`, and 403 `TRIAL_SIZE_RUNNING` for a second Small or a third Mini). A trial sandbox is deleted 1 hour after it starts at the latest: a longer `timeoutMs` or `setTimeout` past that answers 403 `TRIAL_SANDBOX_LIFETIME`. Starts are limited only on the trial (6 a minute, 30 an hour, 100 a day); Pro, Pro 5x and Pro 20x have unlimited starts. Over a limit, a `LimitExceededError` (status 429) with `code` `SANDBOX_LIMIT_REACHED` (`unit` `vcpu`, `limit`, `running`, `needed`) or `SANDBOX_RATE_LIMITED` (`retryAfterS`). More than 32 commands at once in one sandbox gives `EXEC_LIMIT_REACHED`.
 
 ## Quickstart
 
