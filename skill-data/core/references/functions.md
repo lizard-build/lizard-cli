@@ -139,5 +139,6 @@ func main() { lambda.Start(handler) }
   pulled once); later ones start in seconds. Idle functions pause and resume in about a second.
 - Calls keep working during deploys and package installs: the new code starts next to the
   running one and takes over once it has started.
-- Billing is the sandbox time the function's environments use (paused is free).
+- Billing is the sandbox time the function's environments use; a paused one costs only its
+  used disk, $0.14 per GB-month.
 - The dashboard's Functions page shows the same functions (code editor, test, logs, packages).
