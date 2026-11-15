@@ -61,6 +61,8 @@ interface SandboxRecord {
   /** Set by the platform when nothing named a project and it used the account's default. */
   projectName?: string;
   projectDefaulted?: boolean;
+  /** Only when created with --repo. */
+  repo?: { fullName: string; path: string | null; status: "cloned" | "cloning" | "failed"; error?: string; readOnly?: boolean; manageUrl?: string };
 }
 
 function parseIntOption(v: string): number {
@@ -189,6 +191,8 @@ export function registerSandbox(program: Command) {
     .option("--allow-host <host>", "With no internet, still allow this host name (pypi.org, *.pythonhosted.org: ports 80/443) or IPv4 address/range (every port); repeat for more. Implies --no-internet", (v: string, all: string[] = []) => [...all, v])
     .option("--no-internet", "Fully closed sandbox, for its whole life (its resumes and forks too): no internet and no public ports; commands and files still work")
     .option("--proxy <url>", "Send all of the sandbox's internet traffic through your proxy, any supplier: http://user:pass@host:port or socks5://user:pass@host:port. See `lizard sandbox proxy --help`")
+    .option("--repo <owner/name>", "Start with this GitHub repository cloned into /workspace/<name>; the sandbox can push and open pull requests to it (only it). Needs GitHub connected and Lizard's GitHub App on the repository's owner")
+    .option("--repo-workflows", "With --repo: may also change .github/workflows")
     .action(async (opts) => {
       // A snapshot restores at its source's size (a Firecracker VM's memory is part of it; a
       // pod snapshot goes back onto the machine it was captured on), so the server ignores a
@@ -268,6 +272,7 @@ export function registerSandbox(program: Command) {
           ...(opts.internet === false || opts.allowHost?.length ? { internetAccess: false } : {}),
           ...(opts.allowHost?.length ? { allowedHosts: opts.allowHost } : {}),
           ...(opts.proxy ? { proxy: opts.proxy } : {}),
+          ...(opts.repo ? { repo: opts.repo, repoWorkflows: !!opts.repoWorkflows } : {}),
         };
         try {
           sandbox = await createInDefaultRegion(body, defaultRegion);
@@ -326,6 +331,14 @@ export function registerSandbox(program: Command) {
         info(chalk.dim(sandbox.allowedHosts?.length ? `  Internet: only ${sandbox.allowedHosts.join(", ")}` : "  Internet: off"));
       }
       if (sandbox.proxy) info(chalk.dim(`  Proxy: ${sandbox.proxy}`));
+      if (opts.repo && !sandbox.repo) {
+        info(chalk.yellow(`  --repo is not supported by this region's platform yet: nothing was cloned`));
+      } else if (sandbox.repo) {
+        const r = sandbox.repo;
+        if (r.status === "failed") info(chalk.yellow(`  Repo: ${r.fullName} was not cloned: ${r.error ?? "unknown error"}`));
+        else info(chalk.dim(`  Repo: ${r.fullName} -> ${r.path}${r.status === "cloning" ? " (still cloning)" : ""}`));
+        if (r.readOnly) info(chalk.yellow(`  Read only: GitHub has not given Lizard write access on this account yet. Accept it at ${r.manageUrl}`));
+      }
       info("");
       info(sandboxNextSteps(sandbox.id));
     });
