@@ -6,7 +6,7 @@ import os from "node:os";
 import { spawn } from "node:child_process";
 import { createPublicKey, verify } from "node:crypto";
 
-export const CURRENT_VERSION = "4.0.129";
+export const CURRENT_VERSION = "4.0.130";
 const RELEASES_API = "https://api.github.com/repos/lizard-build/lizard-cli/releases/latest";
 const RELEASE_BASE = "https://github.com/lizard-build/lizard-cli/releases/latest/download";
 
