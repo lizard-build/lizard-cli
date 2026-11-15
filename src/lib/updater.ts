@@ -4,10 +4,33 @@ import { Readable } from "node:stream";
 import { join, dirname } from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
+import { createPublicKey, verify } from "node:crypto";
 
 export const CURRENT_VERSION = "4.0.129";
 const RELEASES_API = "https://api.github.com/repos/lizard-build/lizard-cli/releases/latest";
 const RELEASE_BASE = "https://github.com/lizard-build/lizard-cli/releases/latest/download";
+
+/**
+ * The key every release binary is signed with (Ed25519; the release workflow signs with the
+ * private half, a GitHub Actions secret, and publishes `<asset>.sig`: the signature in base64).
+ * An update is installed only if its signature checks out against this key, so a release asset
+ * swapped by anyone without the key (a leaked GitHub token, a tampered download) is refused.
+ */
+export const RELEASE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEALrK9fMg2zspZJZpIx5bZi69eIpRYsXMsC2uYPZ97d/w=
+-----END PUBLIC KEY-----
+`;
+
+/** Does sigB64 (the text of `<asset>.sig`) sign data with the release key? */
+export function verifyReleaseSignature(data: Uint8Array, sigB64: string, publicKeyPem = RELEASE_PUBLIC_KEY): boolean {
+  const sig = Buffer.from(sigB64.trim(), "base64");
+  if (sig.length !== 64) return false;
+  try {
+    return verify(null, data, createPublicKey(publicKeyPem), sig);
+  } catch {
+    return false;
+  }
+}
 
 /** Minimum gap between background update checks. */
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h
@@ -143,9 +166,16 @@ export async function selfUpdate(onProgress?: (msg: string) => void): Promise<bo
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(60000) });
     if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+    const sigRes = await fetch(`${url}.sig`, { signal: AbortSignal.timeout(15000) });
+    if (!sigRes.ok) throw new Error(`No signature for ${binaryName} (${sigRes.status}): not installing it`);
+    const sig = await sigRes.text();
 
-    const writer = createWriteStream(tmp);
+    const writer = createWriteStream(tmp, { mode: 0o600 });
     await pipeline(Readable.fromWeb(res.body as any), writer);
+    // Check what is on disk, the bytes that would run.
+    if (!verifyReleaseSignature(readFileSync(tmp), sig)) {
+      throw new Error(`${binaryName}: the signature does not match Lizard's release key; not installing it`);
+    }
     chmodSync(tmp, 0o755);
 
     onProgress?.("Installing...");

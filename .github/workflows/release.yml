@@ -90,6 +90,15 @@ jobs:
           bun build --compile --target=bun-linux-arm64   src/index.ts --outfile bin/lizard-linux-arm64
           bun build --compile --target=bun-windows-x64   src/index.ts --outfile bin/lizard-windows-x64.exe
 
+      - name: Sign binaries
+        env:
+          LIZARD_RELEASE_SIGNING_KEY: ${{ secrets.LIZARD_RELEASE_SIGNING_KEY }}
+        run: |
+          node scripts/sign-release.mjs \
+            bin/lizard-darwin-arm64 bin/lizard-darwin-x64 \
+            bin/lizard-linux-x64 bin/lizard-linux-arm64 \
+            bin/lizard-windows-x64.exe
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -101,6 +110,11 @@ jobs:
             bin/lizard-linux-x64
             bin/lizard-linux-arm64
             bin/lizard-windows-x64.exe
+            bin/lizard-darwin-arm64.sig
+            bin/lizard-darwin-x64.sig
+            bin/lizard-linux-x64.sig
+            bin/lizard-linux-arm64.sig
+            bin/lizard-windows-x64.exe.sig
             install.sh
             install.ps1
             install.cmd
