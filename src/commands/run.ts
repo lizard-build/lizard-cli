@@ -4,6 +4,7 @@ import { api, withScope } from "../lib/api.js";
 import { getProjectLink } from "../lib/config.js";
 import { resolveProjectScope, resolveService } from "../lib/resolve.js";
 import { warn, fail } from "../lib/format.js";
+import { isStartupEnvName } from "../lib/env-guard.js";
 
 interface Secret {
   key: string;
@@ -37,7 +38,12 @@ export function registerRun(program: Command) {
       const projectSecrets = await api.get<Secret[]>(
         withScope(`/api/projects/${projectId}/secrets`, scope),
       );
-      for (const s of projectSecrets) env[s.key] = s.value;
+      const skipped = new Set<string>();
+      const put = (s: Secret) => {
+        if (isStartupEnvName(s.key)) skipped.add(s.key);
+        else env[s.key] = s.value;
+      };
+      for (const s of projectSecrets) put(s);
 
       // 2. service / addon secrets (override project)
       if (opts.service !== false) {
@@ -62,8 +68,12 @@ export function registerRun(program: Command) {
             }
             throw err;
           });
-          for (const s of serviceSecrets) env[s.key] = s.value;
+          for (const s of serviceSecrets) put(s);
         }
+      }
+
+      if (skipped.size) {
+        warn(`not set locally: ${[...skipped].sort().join(", ")} (variables that change how programs start; they still apply on Lizard)`);
       }
 
       // argv-style spawn — no shell, so quoting / pipes / `;` in user-supplied

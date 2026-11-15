@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { api, APIError, getRequestToken } from "../lib/api.js";
-import { fail, isJSONMode, printJSON, table, timeAgo } from "../lib/format.js";
+import { fail, isJSONMode, printJSON, table, timeAgo, warn } from "../lib/format.js";
 
 /**
  * `lizard gha`: run a repository's GitHub Actions jobs on Lizard runners.
@@ -287,6 +287,19 @@ function printReport(r: Report) {
 }
 
 /** The trial's runner jobs: medium and large jobs left of each when the server says, the rule otherwise. */
+/**
+ * The preview's edited files that may be written: only paths this checkout sent, exactly. The
+ * answer comes from the server; a path it made up (../../.bashrc) is never written.
+ */
+export function writableChanges<T extends { path: string; changed?: boolean; text?: string | null }>(
+  sent: { path: string }[],
+  answer: T[],
+): { changed: T[]; foreign: string[] } {
+  const ok = new Set(sent.map((f) => f.path));
+  const edits = answer.filter((f) => f.changed && f.text);
+  return { changed: edits.filter((f) => ok.has(f.path)), foreign: edits.filter((f) => !ok.has(f.path)).map((f) => f.path) };
+}
+
 export function trialLine(t: { jobs?: Record<string, number>; jobsLeft?: Record<string, number> }): string {
   const left = t.jobsLeft, jobs = t.jobs;
   if (left && left.medium != null && left.large != null) {
@@ -405,7 +418,8 @@ lizard-large-ubuntu-2404 (8 vCPU), billed per second. GitHub organizations only.
       const files = readWorkflows(ctx.root!);
       if (!files.length) fail("No workflow files in .github/workflows.", 1, "NO_WORKFLOWS");
       const p = await getPreview(files, { size: opts.size, jobs: parseJobSizes(opts.job), cache: opts.cache, docker: opts.docker });
-      const changed = p.files.filter((f) => f.changed && f.text);
+      const { changed, foreign } = writableChanges(files, p.files);
+      if (foreign.length) warn(`Skipped ${foreign.join(", ")}: the server answered with a file that wasn't sent.`);
       if (!opts.dryRun) for (const f of changed) writeFileSync(path.join(ctx.root!, f.path), f.text!);
 
       const moves = p.files.flatMap((f) => f.moves.map((m) => ({ file: f.path, ...m })));
