@@ -233,18 +233,58 @@ function safeJoin(root: string, p: string): string {
   return join(root, ...p.split("/"));
 }
 
-function writeFile(root: string, p: string, content: Buffer, mode: string): FileState {
+/** A working-file path one of whose folders is a symlink: writing or deleting it would act outside the checkout. */
+export class UnsafePathError extends APIError {
+  constructor(p: string, link: string) {
+    super(400, `refusing ${p}: ${link} is a symlink, and the file would be written through it (outside the checkout)`, "UNSAFE_PATH");
+  }
+}
+
+/**
+ * safeJoin, and every folder between the checkout and the file must be a real folder (or not
+ * exist yet). A repository can hold a symlink `d -> ~/.ssh` and, in a later commit, a file
+ * `d/authorized_keys`: written blindly, that file lands wherever the link points.
+ */
+function safeTarget(root: string, p: string): string {
   const full = safeJoin(root, p);
-  mkdirSync(dirname(full), { recursive: true });
+  const parts = p.split("/");
+  let d = root;
+  for (const part of parts.slice(0, -1)) {
+    d = join(d, part);
+    let st;
+    try {
+      st = lstatSync(d);
+    } catch {
+      break; // missing: mkdir makes real folders from here on
+    }
+    if (st.isSymbolicLink()) throw new UnsafePathError(p, relative(root, d));
+  }
+  return full;
+}
+
+/** Remove whatever is at full (file, symlink or folder) without following a symlink. */
+function clearPath(full: string): void {
   try {
     const st = lstatSync(full);
     if (st.isDirectory()) rmSync(full, { recursive: true });
     else unlinkSync(full);
   } catch {}
+}
+
+/** Write a regular file at full, never through a symlink already there. */
+function writeNoFollow(full: string, content: Buffer): void {
+  clearPath(full);
+  writeFileSync(full, content, { flag: "wx" }); // fails rather than follow a link that appeared
+}
+
+function writeFile(root: string, p: string, content: Buffer, mode: string): FileState {
+  const full = safeTarget(root, p);
+  mkdirSync(dirname(full), { recursive: true });
   if (mode === "120000") {
+    clearPath(full);
     symlinkSync(content.toString(), full);
   } else {
-    writeFileSync(full, content);
+    writeNoFollow(full, content);
     chmodSync(full, mode === "100755" ? 0o755 : 0o644);
   }
   const st = lstatSync(full);
@@ -256,7 +296,13 @@ export function removeFileAt(root: string, p: string): void {
 }
 
 function removeFile(root: string, p: string): void {
-  const full = safeJoin(root, p);
+  let full: string;
+  try {
+    full = safeTarget(root, p);
+  } catch (e) {
+    if (e instanceof UnsafePathError) return; // never delete through a symlinked folder
+    throw e;
+  }
   try {
     unlinkSync(full);
   } catch {}
@@ -447,6 +493,19 @@ export async function sync(root: string, c: Checkout, toBranch?: string): Promis
   const clashSet = new Set(clash);
   const merged: string[] = [];
   const conflicts: Conflict[] = [];
+  // Removals first: a symlink the branch deleted must be gone before a file is written under
+  // its name (else the file lands where the link pointed).
+  for (const p of toRemove) {
+    if (clashSet.has(p)) continue;
+    if (!dirty.has(p)) removeFile(root, p);
+    delete c.files[p];
+    res.removed.push(p);
+  }
+  const unsafe = (p: string, e: unknown): boolean => {
+    if (!(e instanceof UnsafePathError)) return false;
+    conflicts.push({ path: p, reason: e.message });
+    return true;
+  };
   if (clash.length) {
     const need = new Set<string>();
     for (const p of clash) {
@@ -465,7 +524,12 @@ export async function sync(root: string, c: Checkout, toBranch?: string): Promis
       }
       if (!l) {
         // Deleted here, changed on the branch: theirs comes back; deleting it again is one rm away.
-        c.files[p] = writeFile(root, p, got.get(w!.h)!, w!.m);
+        try {
+          c.files[p] = writeFile(root, p, got.get(w!.h)!, w!.m);
+        } catch (e) {
+          if (unsafe(p, e)) continue;
+          throw e;
+        }
         conflicts.push({ path: p, reason: `you deleted it, ${branch} changed it: their version is back (delete it again if you meant to)` });
         continue;
       }
@@ -475,13 +539,19 @@ export async function sync(root: string, c: Checkout, toBranch?: string): Promis
         conflicts.push({ path: p, reason: `${branch} deleted it, you changed it: your version is kept` });
         continue;
       }
-      const full = safeJoin(root, p);
+      let full: string;
+      try {
+        full = safeTarget(root, p);
+      } catch (e) {
+        if (unsafe(p, e)) continue;
+        throw e;
+      }
       const ours = l.m === "120000" ? Buffer.from(readlinkSync(full)) : readFileSync(full);
       const base = baseF ? got.get(baseF.h)! : Buffer.alloc(0);
       const theirs = got.get(w.h)!;
       c.files[p] = { h: w.h, m: w.m }; // the branch's version is what yours now differs from
       if (l.m === "120000" || w.m === "120000" || isBinaryBuf(base) || isBinaryBuf(ours) || isBinaryBuf(theirs)) {
-        writeFileSync(full + ".theirs", theirs);
+        writeNoFollow(full + ".theirs", theirs);
         conflicts.push({ path: p, reason: `binary, changed on both sides: yours kept, theirs saved as ${p}.theirs` });
         continue;
       }
@@ -499,14 +569,13 @@ export async function sync(root: string, c: Checkout, toBranch?: string): Promis
       c.files[p] = { ...local.get(p)!, h: f.h, m: f.m }; // already identical locally
       continue;
     }
-    c.files[p] = writeFile(root, p, blobs.get(f.h)!, f.m);
+    try {
+      c.files[p] = writeFile(root, p, blobs.get(f.h)!, f.m);
+    } catch (e) {
+      if (unsafe(p, e)) continue;
+      throw e;
+    }
     res.updated.push(p);
-  }
-  for (const p of toRemove) {
-    if (clashSet.has(p)) continue;
-    if (!dirty.has(p)) removeFile(root, p);
-    delete c.files[p];
-    res.removed.push(p);
   }
   c.base = r.id;
   c.root = r.root;
