@@ -2,6 +2,7 @@ import chalk from "chalk";
 import fs from "node:fs";
 import { Command, InvalidArgumentError, Option } from "commander";
 import { api } from "../lib/api.js";
+import { resolveProjectId } from "../lib/config.js";
 import { success, info, isJSONMode, printJSON, table, timeAgo, fail } from "../lib/format.js";
 
 // Sandbox schedules: the platform wakes a paused sandbox on a timer, runs a prompt (the coding
@@ -27,6 +28,13 @@ function parseDuration(v: string): number {
   const m = v.trim().toLowerCase().match(/^(\d+)\s*(s|m|h|d)?$/);
   if (!m) throw new InvalidArgumentError("Use e.g. 30s, 10m, 2h");
   return Number(m[1]) * { s: 1, m: 60, h: 3600, d: 86400 }[(m[2] ?? "s") as "s"];
+}
+
+/** --daily-at "09:00" [--weekdays] as the cron the server runs: what the dashboard's "Daily at" makes. */
+export function dailyCron(at: string, weekdays: boolean): string {
+  const m = String(at).trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!m) fail(`--daily-at takes a time as HH:MM (24 h), e.g. 09:00; got "${at}"`, 2, "USAGE");
+  return `${Number(m![2])} ${Number(m![1])} * * ${weekdays ? "1-5" : "*"}`;
 }
 
 const when = (s: Schedule) => (s.every ? `every ${s.every}` : `cron ${s.cron}${s.timezone !== "UTC" ? ` (${s.timezone})` : ""}`);
@@ -60,7 +68,9 @@ function addTaskOptions(c: Command, forCreate: boolean) {
   return c
     .option("--every <interval>", "How often: 1m minimum, e.g. 5m, 1h, 1d")
     .option("--cron <expr>", 'Cron instead: "m h dom mon dow", e.g. "*/5 * * * *", "0 9 * * mon-fri", @daily')
-    .option("--tz <zone>", "Time zone for --cron (IANA name, e.g. Europe/Berlin)")
+    .option("--daily-at <HH:MM>", "Once a day at this time instead (24 h, in --tz; UTC by default)")
+    .option("--weekdays", "With --daily-at: Monday to Friday only")
+    .option("--tz <zone>", "Time zone for --daily-at and --cron (IANA name, e.g. Europe/Berlin)")
     .option("--prompt <text>", "Run the coding agent with this prompt (a new conversation each run)")
     .option("--prompt-file <path>", "Read the prompt from a file")
     .option("--command <cmd>", "Run this shell command instead (in /workspace, as root)")
@@ -85,7 +95,9 @@ export function addCreateScheduleOptions(c: Command): Command {
   return c
     .option("--every <interval>", "Schedule: wake the sandbox this often and run --command or --prompt (1m minimum, e.g. 5m, 1h, 1d)")
     .option("--cron <expr>", 'Schedule by cron instead: "m h dom mon dow", e.g. "0 9 * * mon-fri", @daily')
-    .option("--tz <zone>", "Time zone for --cron (IANA name, e.g. Europe/Berlin)")
+    .option("--daily-at <HH:MM>", "Once a day at this time instead (24 h, in --tz; UTC by default)")
+    .option("--weekdays", "With --daily-at: Monday to Friday only")
+    .option("--tz <zone>", "Time zone for --daily-at and --cron (IANA name, e.g. Europe/Berlin)")
     .option("--command <cmd>", "Schedule: run this shell command (in /workspace, as root)")
     .option("--prompt <text>", "Schedule: run the coding agent with this prompt, a new conversation each run (needs an agent template: -t claude, codex, ...)")
     .option("--prompt-file <path>", "Schedule: read the prompt from a file")
@@ -98,14 +110,14 @@ export function addCreateScheduleOptions(c: Command): Command {
 
 /** The schedule a `sandbox create` asked for, checked before anything is created; null: none. */
 export function createScheduleBody(opts: Record<string, any>): Record<string, unknown> | null {
-  const timing = !!(opts.every || opts.cron);
+  const timing = !!(opts.every || opts.cron || opts.dailyAt);
   const task = !!(opts.prompt || opts.promptFile || opts.command);
-  const extras = ["tz", "agent", "model", "effort", "runTimeout", "scheduleName"].filter((k) => opts[k] !== undefined);
+  const extras = ["tz", "weekdays", "agent", "model", "effort", "runTimeout", "scheduleName"].filter((k) => opts[k] !== undefined);
   if (!timing && !task) {
-    if (extras.length) fail("These options belong to a schedule: add --every 10m (or --cron) and --command \"...\" (or --prompt)", 2, "USAGE");
+    if (extras.length) fail("These options belong to a schedule: add --every 10m (or --daily-at 09:00, or --cron) and --command \"...\" (or --prompt)", 2, "USAGE");
     return null;
   }
-  if (!timing) fail("Say how often the schedule runs: --every 5m, or --cron \"*/5 * * * *\"", 2, "USAGE");
+  if (!timing) fail("Say when the schedule runs: --every 5m, --daily-at 09:00, or --cron \"*/5 * * * *\"", 2, "USAGE");
   if (!task) fail("Say what the schedule runs: --command \"...\" or --prompt \"...\"", 2, "USAGE");
   return taskBody({ ...opts, timeout: opts.runTimeout, name: opts.scheduleName });
 }
@@ -130,6 +142,10 @@ function taskBody(opts: Record<string, any>): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   if (opts.every) body.every = opts.every;
   if (opts.cron) body.cron = opts.cron;
+  if (opts.dailyAt) {
+    if (opts.every || opts.cron) fail("Give one of --every, --daily-at and --cron", 2, "USAGE");
+    body.cron = dailyCron(opts.dailyAt, !!opts.weekdays);
+  } else if (opts.weekdays) fail("--weekdays goes with --daily-at HH:MM", 2, "USAGE");
   if (opts.tz) body.timezone = opts.tz;
   if (opts.promptFile) body.prompt = fs.readFileSync(opts.promptFile, "utf8");
   if (opts.prompt) body.prompt = opts.prompt;
@@ -169,7 +185,7 @@ Examples:
   lizard sandbox schedule sb_abc123 --every 10m --command "python3 /workspace/job.py"
   lizard sandbox schedule sb_abc123 --cron "0 9 * * mon-fri" --tz Europe/Berlin --command "./report.sh"`)
     .action(async (id: string, opts) => {
-      if (!opts.every && !opts.cron) fail("Say how often: --every 5m, or --cron \"*/5 * * * *\"", 2, "USAGE");
+      if (!opts.every && !opts.cron && !opts.dailyAt) fail("Say when: --every 5m, --daily-at 09:00, or --cron \"*/5 * * * *\"", 2, "USAGE");
       if (!opts.prompt && !opts.promptFile && !opts.command) fail("Say what to run: --prompt \"...\" or --command \"...\"", 2, "USAGE");
       const body = taskBody(opts);
       if (opts.disabled) body.enabled = false;
@@ -249,12 +265,31 @@ Examples:
     });
 
   sb.command("schedule-runs")
-    .argument("<scheduleId>", "Schedule ID (sch_...)")
-    .description("Show a schedule's recent runs; --output prints the latest run's output")
+    .argument("[scheduleId]", "Schedule ID (sch_...). Without one: the project's latest runs, across its schedules")
+    .description("Show a schedule's recent runs, or the project's latest runs across all its schedules; --output prints the latest run's output")
     .option("-n, --limit <n>", "How many runs", "20")
     .option("-o, --output", "Print the latest run's output in full")
-    .action(async (sid: string, opts) => {
-      const { runs } = await api.get<{ runs: Run[] }>(`/api/sandbox-schedules/${sid}/runs?limit=${Number(opts.limit) || 20}`);
+    .option("-p, --project <id>", "Without a schedule ID: this project (name, slug, or ID) instead of the linked one")
+    .action(async (sid: string | undefined, opts) => {
+      const limit = Math.min(Math.max(Number(opts.limit) || 20, 1), 200);
+      if (!sid) {
+        // What the dashboard's Schedules tab shows: every schedule of the project, their runs merged.
+        const projectId = await resolveProjectId(opts.project);
+        const { schedules } = await api.get<{ schedules: Schedule[] }>(`/api/sandbox-schedules?projectId=${encodeURIComponent(projectId)}`);
+        const per = await Promise.all(schedules.map((s) =>
+          api.get<{ runs: Run[] }>(`/api/sandbox-schedules/${s.id}/runs?limit=${Math.min(limit, 20)}`).then((r) => r.runs.map((run) => ({ run, schedule: s })), () => [])));
+        const rows = per.flat().sort((x, y) => Date.parse(y.run.startedAt) - Date.parse(x.run.startedAt)).slice(0, limit);
+        if (isJSONMode()) return printJSON(rows.map(({ run, schedule }) => ({ ...run, scheduleId: schedule.id, sandboxId: schedule.sandboxId })));
+        if (!rows.length) return info("No runs yet. A schedule is set when a sandbox is created: lizard sandbox create --every 10m --command \"...\"");
+        if (opts.output) return printRun(rows[0].run, true);
+        const worked = rows.reduce((n, r) => n + (r.run.durationMs ?? 0), 0);
+        table(["started", "sandbox", "ran", "status", "worked", "schedule"], rows.map(({ run, schedule }) => [
+          timeAgo(run.startedAt), schedule.sandboxId, what(schedule), runStatus(run.status),
+          run.durationMs != null ? `${Math.round(run.durationMs / 1000)}s` : "-", schedule.id,
+        ]));
+        return info(chalk.dim(`${rows.length} run${rows.length === 1 ? "" : "s"}, ${Math.round(worked / 1000)}s worked in total`));
+      }
+      const { runs } = await api.get<{ runs: Run[] }>(`/api/sandbox-schedules/${sid}/runs?limit=${limit}`);
       if (isJSONMode()) return printJSON(runs);
       if (!runs.length) return info("No runs yet.");
       if (opts.output) return printRun(runs[0], true);

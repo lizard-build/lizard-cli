@@ -13,6 +13,7 @@ The details behind the Sandboxes section of the core guide. Read the part the ta
 - [Interactive shell](#interactive-shell)
 - [Coding agents](#coding-agents)
 - [Schedules (wake, run, sleep)](#schedules-wake-run-sleep)
+- [Environments (what a new sandbox starts with)](#environments-what-a-new-sandbox-starts-with)
 - [Desktop (computer use)](#desktop-computer-use)
 - [Volumes](#volumes)
 - [Snapshots and pause/resume](#snapshots-and-pauseresume)
@@ -142,11 +143,15 @@ it back to sleep. You pay only while it is awake; files in `/workspace` carry ov
 # A schedule is set when the sandbox is created (an existing sandbox takes no new one):
 lizard sandbox create --timeout 0 --every 10m --command "python3 /workspace/job.py"
 lizard sandbox create -t claude --timeout 0 --every 5m --prompt "Continue the research in /workspace/research; append findings to notes.md"
-lizard sandbox create --timeout 0 --cron "0 9 * * mon-fri" --tz Europe/Berlin --command "./report.sh"
+lizard sandbox create --timeout 0 --daily-at 09:00 --weekdays --tz Europe/Berlin --command "./report.sh"
+lizard sandbox create --timeout 0 --cron "0 */6 * * *" --command "./sync.sh"
+lizard sandbox create -e staging --timeout 0 --every 1h --command "./check.sh"   # with an environment's variables
 lizard sandbox schedule <id> --every 10m --command "..."   # only in the sandbox's first 15 minutes
 lizard sandbox schedules [<id>]                 # list, with next and last run
+lizard sandbox schedule-show <sch_id>           # one schedule, with the full prompt or command
+lizard sandbox schedule-runs [-p <project>]     # the project's latest runs across all its schedules
+lizard sandbox schedule-runs <sch_id> [-o]      # one schedule's history; -o prints the latest output
 lizard sandbox schedule-run <sch_id> --wait     # run now and print the result
-lizard sandbox schedule-runs <sch_id> [-o]      # history; -o prints the latest output
 lizard sandbox schedule-set <sch_id> --every 15m | --off | --on
 lizard sandbox unschedule <sch_id>
 ```
@@ -159,15 +164,66 @@ lizard sandbox unschedule <sch_id>
 - A sandbox that was already running when a run starts is left running afterwards.
 - A run still going when the next is due makes that one skip. `--timeout` (default 10m) stops a
   run. Five failed runs in a row switch the schedule off (`schedules` shows why).
-- Environments: a project can hold several named sets of variables (dashboard: Sandboxes →
-  Environment). `lizard sandbox create -e staging` starts the sandbox with that environment's
-  variables instead of the project's default ones; an unknown name is refused with the names there are.
 - Only at creation: a sandbox older than 15 minutes answers `SCHEDULE_ONLY_AT_CREATE` to a new
   schedule; create a new sandbox with one. Its existing schedules can still be changed, run, deleted.
 - `--prompt` needs a sandbox with an agent: create it from `-t claude`, `codex`, `opencode`, `pi`
   or `prime`. The base template has none (`AGENT_NOT_IN_SANDBOX`); `--command` works anywhere.
-- Every 1m at most often. Prompt schedules need a key with no scopes (`ACCOUNT_SCOPE_REQUIRED`);
-  `--command` schedules work with scoped keys. Not on every account yet: `SCHEDULES_NOT_ENABLED`.
+- When: `--every` (1m to 30d), `--daily-at HH:MM` (add `--weekdays` for Monday to Friday), or
+  `--cron`; `--tz` is the time zone of the last two (UTC otherwise). One of the three.
+- On `create` the run limit is `--run-timeout` and the label `--schedule-name` (create's own
+  `--timeout` is the sandbox's lifetime); on `schedule` / `schedule-set` they are `--timeout` and
+  `--name`. Prompt options: `--prompt-file <path>`, `--agent`, `-m <model>`, `--effort`. A run may
+  last 6 h at most. `schedule --disabled` creates it switched off.
+- Prompt schedules need a key with no scopes (`ACCOUNT_SCOPE_REQUIRED`); `--command` schedules work
+  with scoped keys. A prompt schedule can be changed or run only by whoever created it
+  (`SCHEDULE_CREATOR_ONLY`); anyone in the project may switch it off, rename or delete it.
+- At most 50 schedules per account (`SCHEDULE_LIMIT`); the last 200 runs of each are kept. Not on
+  every account yet: `SCHEDULES_NOT_ENABLED`.
+- Keep the sandbox from expiring: create it with `--timeout 0`.
+
+## Environments (what a new sandbox starts with)
+
+A project's environment is what every sandbox created in it starts with (dashboard: Sandboxes →
+Environment). It has three parts:
+
+- **Variables**: in every process of the sandbox. Stored encrypted; they survive pause and resume.
+- **Agent instructions**: a user-level `CLAUDE.md` (Claude Code) and `AGENTS.md` (Codex, OpenCode,
+  pi, Prime), 32 KB each, written into the sandbox at create.
+- **GitHub access**: chosen repositories (the first 10) are cloned into `/workspace/<name>` and
+  `git` and `gh` are signed in for them, read or write. Set up in the dashboard only.
+
+A project can also hold **named environments**: other complete sets of variables. A sandbox
+created with `-e <name>` gets that environment's variables INSTEAD of the default ones, never both.
+Instructions and GitHub access are the project's, whatever the environment.
+
+```bash
+lizard sandbox environments                       # the project's environments, instructions, GitHub access
+lizard sandbox environment-show [name] [--values] # variables (values masked without --values)
+lizard sandbox environment-set API_URL=https://api.example.com TOKEN=...      # the default environment
+lizard sandbox environment-create staging --copy-from default
+lizard sandbox environment-set -e staging API_URL=https://staging.example.com
+lizard sandbox environment-set -e staging --from-file .env.staging
+lizard sandbox environment-unset -e staging OLD_KEY
+lizard sandbox environment-rename staging preview
+lizard sandbox environment-rm preview
+lizard sandbox environment-instructions --claude-md ./CLAUDE.md --agents-md ./AGENTS.md
+lizard sandbox environment-instructions --print claude-md | --clear-agents-md
+lizard sandbox create -e staging                  # start with the staging variables
+lizard sandbox create --repo owner/name           # one repository of your own, instead of the project's
+```
+
+- A change applies to sandboxes created after it; a running sandbox keeps what it started with.
+- `-e` takes the environment's name; an unknown one is refused with the names there are
+  (`SANDBOX_ENVIRONMENT_NOT_FOUND`). `-e default` is the same as no `-e`.
+- Every command takes `-p <project>`; without it, the linked project, else the default project.
+- Up to 200 variables per environment (names: letters, digits and `_`; values up to 32 KB) and 20
+  named environments per project (names: letters, digits, spaces and `. _ -`, at most 40 characters).
+- Never print values to the user or into a log: `environment-show` masks them unless `--values`.
+- `create --repo owner/name` (add `--repo-workflows` to let it change `.github/workflows`) gives the
+  sandbox write access to that one repository, cloned into `/workspace/<name>`, in place of the
+  project's GitHub access. It needs your own GitHub sign-in and a key with no scopes.
+- Not on every account yet: the commands answer `SANDBOX_ENVIRONMENT_NOT_ENABLED`, and creating a
+  second environment `SANDBOX_ENVIRONMENTS_NOT_ENABLED`.
 
 ## Desktop (computer use)
 

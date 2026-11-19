@@ -14,6 +14,7 @@ import { resolveVolume } from "../lib/volume.js";
 import { sandboxShell } from "./sandbox-ssh.js";
 import { startVncTunnel, vncTarget } from "./sandbox-vnc.js";
 import { registerSandboxAgentCommands } from "./agents.js";
+import { registerSandboxEnvironmentCommands } from "./sandbox-environments.js";
 import { registerSandboxScheduleCommands, addCreateScheduleOptions, createScheduleBody, scheduleNewSandbox, scheduleLine } from "./sandbox-schedules.js";
 import { success, info, warn, error, isJSONMode, printJSON, table, statusColor, timeAgo, isTTY } from "../lib/format.js";
 
@@ -521,6 +522,7 @@ Examples:
 
   registerSandboxAgentCommands(sb);
   registerSandboxScheduleCommands(sb);
+  registerSandboxEnvironmentCommands(sb);
 
   sb.command("ssh")
     .alias("shell")

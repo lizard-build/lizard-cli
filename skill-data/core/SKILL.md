@@ -11,7 +11,7 @@ Lizard runs sandboxes and hosts apps, services, agents and managed databases. Al
 
 This guide covers the whole platform. Four references go deeper; read one only when the task needs that depth:
 
-- `lizard skills get core --ref sandboxes --json`: templates, commands, files and ports in depth, lifetime, sizes, shell, coding agents in a sandbox, desktop (computer use), volumes, snapshots, fork and pause/resume.
+- `lizard skills get core --ref sandboxes --json`: templates, commands, files and ports in depth, lifetime, sizes, shell, coding agents in a sandbox, schedules (wake, run, sleep), environments (variables, agent instructions and GitHub access a new sandbox starts with), desktop (computer use), volumes, snapshots, fork and pause/resume.
 - `lizard skills get core --ref deploys --json`: how builds are chosen, git and upload deploys, service fields, worker mode, secret precedence and scoping, addon variables, multi-step recipes.
 - `lizard skills get core --ref functions --json`: Lizard Functions (AWS Lambda-compatible): `lizard fn deploy handler.py --packages requests --url` creates or updates a function with preinstalled libraries in one command; invoke, logs, schedules, Go/Rust, the AWS SDKs; recipes.
 - `lizard skills get core --ref sdk --json`: building with Lizard from code through Lizard SDK (TypeScript, Python): sandboxes inside your own product, per-user workspaces and scoped keys, platform APIs.
