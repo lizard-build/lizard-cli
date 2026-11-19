@@ -14,7 +14,7 @@ import { resolveVolume } from "../lib/volume.js";
 import { sandboxShell } from "./sandbox-ssh.js";
 import { startVncTunnel, vncTarget } from "./sandbox-vnc.js";
 import { registerSandboxAgentCommands } from "./agents.js";
-import { registerSandboxScheduleCommands } from "./sandbox-schedules.js";
+import { registerSandboxScheduleCommands, addCreateScheduleOptions, createScheduleBody, scheduleNewSandbox, scheduleLine } from "./sandbox-schedules.js";
 import { success, info, warn, error, isJSONMode, printJSON, table, statusColor, timeAgo, isTTY } from "../lib/format.js";
 
 // Templates are per-region rows in sandbox_templates, not a constant. Hardcoding them
@@ -178,7 +178,7 @@ export function registerSandbox(program: Command) {
     .alias("sb")
     .description("Manage ephemeral compute sandboxes");
 
-  sb.command("create")
+  addCreateScheduleOptions(sb.command("create")
     .description("Create a sandbox")
     .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
     .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small on the Pro trial (1 Small, 2 Mini and 2 Nano at a time, US regions only; Medium, Large and Big unlock after the first payment). Mini works only with the ${MINI_TEMPLATES} templates, Nano only with ${NANO_TEMPLATES}`).choices(SANDBOX_SIZES))
@@ -193,7 +193,19 @@ export function registerSandbox(program: Command) {
     .option("--proxy <url>", "Send all of the sandbox's internet traffic through your proxy, any supplier: http://user:pass@host:port or socks5://user:pass@host:port. See `lizard sandbox proxy --help`")
     .option("--repo <owner/name>", "Start with this GitHub repository cloned into /workspace/<name>; the sandbox can push and open pull requests to it (only it). Needs GitHub connected and Lizard's GitHub App on the repository's owner")
     .option("--repo-workflows", "With --repo: may also change .github/workflows")
+    .option("-e, --environment <name>", "Start with the variables of this sandbox environment of the project (Sandboxes → Environment) instead of its default ones"))
+    .addHelpText("after", `
+A schedule is set here, when the sandbox is created:
+  lizard sandbox create --timeout 0 --every 10m --command "python3 /workspace/job.py"
+  lizard sandbox create -t claude --timeout 0 --cron "0 9 * * mon-fri" --tz Europe/Berlin --prompt "Write today's report to /workspace/report.md"
+Each run wakes the sandbox, runs the command or prompt, and puts it back to sleep (files only).
+A prompt needs a sandbox from an agent template (claude, codex, opencode, pi, prime).`)
     .action(async (opts) => {
+      const scheduleBody = createScheduleBody(opts);
+      // Refused before anything is created: the server only finds out once the sandbox runs.
+      if (scheduleBody?.prompt && !opts.snapshot && ["base", "interpreter"].includes(opts.template)) {
+        throw new Error(`--prompt needs a sandbox with a coding agent, and the '${opts.template}' template has none. Add -t claude (or codex, opencode, pi, prime), or schedule a --command instead.`);
+      }
       // A snapshot restores at its source's size (a Firecracker VM's memory is part of it; a
       // pod snapshot goes back onto the machine it was captured on), so the server ignores a
       // size alongside it. Say so rather than quietly creating something other than asked.
@@ -273,6 +285,7 @@ export function registerSandbox(program: Command) {
           ...(opts.allowHost?.length ? { allowedHosts: opts.allowHost } : {}),
           ...(opts.proxy ? { proxy: opts.proxy } : {}),
           ...(opts.repo ? { repo: opts.repo, repoWorkflows: !!opts.repoWorkflows } : {}),
+          ...(opts.environment ? { environment: opts.environment } : {}),
         };
         try {
           sandbox = await createInDefaultRegion(body, defaultRegion);
@@ -313,8 +326,20 @@ export function registerSandbox(program: Command) {
         throw new Error("This region's platform does not support --proxy yet; the sandbox it started went out directly and was deleted.");
       }
 
+      // A platform that predates environments ignores the option: the sandbox would start with
+      // the project's default variables, not the ones asked for, so it is deleted.
+      if (opts.environment && opts.environment.trim().toLowerCase() !== "default" && !(sandbox as any).environment) {
+        await api.delete(`/api/sandboxes/${sandbox.id}`).catch(() => {});
+        throw new Error("This region's platform does not support --environment yet; the sandbox it started had the project's default variables and was deleted.");
+      }
+
+      // The schedule, right after the create. If it is refused the sandbox stays: it works, and
+      // the schedule can be set again in its first 15 minutes.
+      const scheduled = scheduleBody ? await scheduleNewSandbox(sandbox.id, scheduleBody) : null;
+
       if (isJSONMode()) {
-        printJSON(sandbox);
+        printJSON(scheduled ? { ...sandbox, schedule: scheduled.schedule ?? null, ...(scheduled.error ? { scheduleError: scheduled.error } : {}) } : sandbox);
+        if (scheduled?.error) process.exitCode = 1;
         return;
       }
       success(`Sandbox ${chalk.bold(sandbox.id)} created`);
@@ -338,6 +363,14 @@ export function registerSandbox(program: Command) {
         if (r.status === "failed") info(chalk.yellow(`  Repo: ${r.fullName} was not cloned: ${r.error ?? "unknown error"}`));
         else info(chalk.dim(`  Repo: ${r.fullName} -> ${r.path}${r.status === "cloning" ? " (still cloning)" : ""}`));
         if (r.readOnly) info(chalk.yellow(`  Read only: GitHub has not given Lizard write access on this account yet. Accept it at ${r.manageUrl}`));
+      }
+      const usedEnvironment = (sandbox as any).environment as { name: string } | undefined;
+      if (usedEnvironment) info(chalk.dim(`  Environment: ${usedEnvironment.name}`));
+      if (scheduled?.schedule) info(chalk.dim(`  Schedule: ${scheduleLine(scheduled.schedule)}`));
+      if (scheduled?.error) {
+        warn(`The sandbox was created, but its schedule was not: ${scheduled.error}`);
+        info(chalk.dim(`  Set it within 15 minutes: lizard sandbox schedule ${sandbox.id} --every ... --command "..."`));
+        process.exitCode = 1;
       }
       info("");
       info(sandboxNextSteps(sandbox.id));

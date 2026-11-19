@@ -139,9 +139,11 @@ The platform can wake a paused sandbox on a timer, run a prompt or a shell comma
 it back to sleep. You pay only while it is awake; files in `/workspace` carry over between runs.
 
 ```bash
-lizard sandbox schedule <id> --every 5m --prompt "Continue the research in /workspace/research; append findings to notes.md"
-lizard sandbox schedule <id> --every 10m --command "python3 /workspace/job.py"
-lizard sandbox schedule <id> --cron "0 9 * * mon-fri" --tz Europe/Berlin --command "./report.sh"
+# A schedule is set when the sandbox is created (an existing sandbox takes no new one):
+lizard sandbox create --timeout 0 --every 10m --command "python3 /workspace/job.py"
+lizard sandbox create -t claude --timeout 0 --every 5m --prompt "Continue the research in /workspace/research; append findings to notes.md"
+lizard sandbox create --timeout 0 --cron "0 9 * * mon-fri" --tz Europe/Berlin --command "./report.sh"
+lizard sandbox schedule <id> --every 10m --command "..."   # only in the sandbox's first 15 minutes
 lizard sandbox schedules [<id>]                 # list, with next and last run
 lizard sandbox schedule-run <sch_id> --wait     # run now and print the result
 lizard sandbox schedule-runs <sch_id> [-o]      # history; -o prints the latest output
@@ -157,6 +159,13 @@ lizard sandbox unschedule <sch_id>
 - A sandbox that was already running when a run starts is left running afterwards.
 - A run still going when the next is due makes that one skip. `--timeout` (default 10m) stops a
   run. Five failed runs in a row switch the schedule off (`schedules` shows why).
+- Environments: a project can hold several named sets of variables (dashboard: Sandboxes →
+  Environment). `lizard sandbox create -e staging` starts the sandbox with that environment's
+  variables instead of the project's default ones; an unknown name is refused with the names there are.
+- Only at creation: a sandbox older than 15 minutes answers `SCHEDULE_ONLY_AT_CREATE` to a new
+  schedule; create a new sandbox with one. Its existing schedules can still be changed, run, deleted.
+- `--prompt` needs a sandbox with an agent: create it from `-t claude`, `codex`, `opencode`, `pi`
+  or `prime`. The base template has none (`AGENT_NOT_IN_SANDBOX`); `--command` works anywhere.
 - Every 1m at most often. Prompt schedules need a key with no scopes (`ACCOUNT_SCOPE_REQUIRED`);
   `--command` schedules work with scoped keys. Not on every account yet: `SCHEDULES_NOT_ENABLED`.
 

@@ -75,6 +75,57 @@ function addTaskOptions(c: Command, forCreate: boolean) {
     .option("--name <name>", "A label for the schedule");
 }
 
+/**
+ * The schedule options of `lizard sandbox create`: a schedule is set when a sandbox is created.
+ * The same options as `sandbox schedule`, except the two whose names `create` already uses for
+ * the sandbox itself: --run-timeout (create's --timeout is the sandbox's lifetime) and
+ * --schedule-name.
+ */
+export function addCreateScheduleOptions(c: Command): Command {
+  return c
+    .option("--every <interval>", "Schedule: wake the sandbox this often and run --command or --prompt (1m minimum, e.g. 5m, 1h, 1d)")
+    .option("--cron <expr>", 'Schedule by cron instead: "m h dom mon dow", e.g. "0 9 * * mon-fri", @daily')
+    .option("--tz <zone>", "Time zone for --cron (IANA name, e.g. Europe/Berlin)")
+    .option("--command <cmd>", "Schedule: run this shell command (in /workspace, as root)")
+    .option("--prompt <text>", "Schedule: run the coding agent with this prompt, a new conversation each run (needs an agent template: -t claude, codex, ...)")
+    .option("--prompt-file <path>", "Schedule: read the prompt from a file")
+    .option("--agent <agent>", "Agent for --prompt (codex, claude, ...)")
+    .option("-m, --model <model>", "Model for --prompt")
+    .option("--effort <level>", "Reasoning effort for --prompt (minimal, low, medium, high, xhigh)")
+    .option("--run-timeout <duration>", "Schedule: stop a run after this long (default 10m)", parseDuration)
+    .option("--schedule-name <name>", "A label for the schedule");
+}
+
+/** The schedule a `sandbox create` asked for, checked before anything is created; null: none. */
+export function createScheduleBody(opts: Record<string, any>): Record<string, unknown> | null {
+  const timing = !!(opts.every || opts.cron);
+  const task = !!(opts.prompt || opts.promptFile || opts.command);
+  const extras = ["tz", "agent", "model", "effort", "runTimeout", "scheduleName"].filter((k) => opts[k] !== undefined);
+  if (!timing && !task) {
+    if (extras.length) fail("These options belong to a schedule: add --every 10m (or --cron) and --command \"...\" (or --prompt)", 2, "USAGE");
+    return null;
+  }
+  if (!timing) fail("Say how often the schedule runs: --every 5m, or --cron \"*/5 * * * *\"", 2, "USAGE");
+  if (!task) fail("Say what the schedule runs: --command \"...\" or --prompt \"...\"", 2, "USAGE");
+  return taskBody({ ...opts, timeout: opts.runTimeout, name: opts.scheduleName });
+}
+
+/** Sets the schedule on a sandbox that was just created. The created schedule, or the error text. */
+export async function scheduleNewSandbox(sandboxId: string, body: Record<string, unknown>): Promise<{ schedule?: Schedule; error?: string }> {
+  // The sandbox's row lands a moment after its create answers: one retry.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return { schedule: await api.post<Schedule>(`/api/sandboxes/${sandboxId}/schedules`, body) };
+    } catch (e: any) {
+      if (attempt === 0 && e?.status === 404) { await new Promise((r) => setTimeout(r, 1500)); continue; }
+      return { error: String(e?.message ?? e) };
+    }
+  }
+}
+
+/** One line for `sandbox create`'s output. */
+export const scheduleLine = (s: Schedule) => `${s.id}: ${when(s)}${s.nextRunAt ? `, first run ${inFuture(s.nextRunAt)}` : ""}`;
+
 function taskBody(opts: Record<string, any>): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   if (opts.every) body.every = opts.every;
@@ -96,7 +147,7 @@ export function registerSandboxScheduleCommands(sb: Command) {
   addTaskOptions(
     sb.command("schedule")
       .argument("<id>", "Sandbox ID")
-      .description("Wake the sandbox on a schedule, run a prompt or command, put it back to sleep"),
+      .description("Set a schedule on a sandbox you just created (its first 15 minutes): wake it, run a prompt or command, put it back to sleep. Usually set at creation: lizard sandbox create --every ... --command ..."),
     true,
   )
     .option("--disabled", "Create it switched off")
@@ -107,6 +158,11 @@ left running. You pay only while it is awake. Files in /workspace carry over bet
 
 A run that is still going when the next one is due makes that one skip. Five failed runs in
 a row switch the schedule off.
+
+A schedule is set when a sandbox is created: \`lizard sandbox create --every 10m --command "..."\`
+does both. This command works on a sandbox created in the last 15 minutes; an older one takes no
+new schedule (SCHEDULE_ONLY_AT_CREATE), though its schedules can still be changed (schedule-set),
+run (schedule-run) and deleted (unschedule).
 
 Examples:
   lizard sandbox schedule sb_abc123 --every 5m --prompt "Continue the research in /workspace/research; append findings to notes.md"
@@ -132,7 +188,7 @@ Examples:
         ? await api.get<{ schedules: Schedule[] }>(`/api/sandboxes/${id}/schedules`)
         : await api.get<{ schedules: Schedule[] }>(`/api/sandbox-schedules`);
       if (isJSONMode()) return printJSON(schedules);
-      if (!schedules.length) return info("No schedules. Create one: lizard sandbox schedule <id> --every 5m --prompt \"...\"");
+      if (!schedules.length) return info("No schedules. One is set when a sandbox is created: lizard sandbox create --every 10m --command \"...\"");
       table(["id", "sandbox", "when", "runs", "next", "last"], schedules.map((s) => [
         s.id, s.sandboxId, when(s), what(s),
         !s.enabled ? chalk.dim("off") : s.running ? chalk.yellow("running") : s.nextRunAt ? inFuture(s.nextRunAt) : "-",
