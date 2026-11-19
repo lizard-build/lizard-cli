@@ -111,6 +111,7 @@ export function addCreateScheduleOptions(c: Command): Command {
 /** The schedule a `sandbox create` asked for, checked before anything is created; null: none. */
 export function createScheduleBody(opts: Record<string, any>): Record<string, unknown> | null {
   const timing = !!(opts.every || opts.cron || opts.dailyAt);
+  if (opts.weekdays && !opts.dailyAt) fail("--weekdays goes with --daily-at HH:MM, e.g. --daily-at 09:00 --weekdays", 2, "USAGE");
   const task = !!(opts.prompt || opts.promptFile || opts.command);
   const extras = ["tz", "weekdays", "agent", "model", "effort", "runTimeout", "scheduleName"].filter((k) => opts[k] !== undefined);
   if (!timing && !task) {

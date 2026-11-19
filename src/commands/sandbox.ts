@@ -101,9 +101,11 @@ function parseForkTimeout(value: string): number {
 }
 
 function parseTimeoutOption(value: string): number {
-  const timeout = Number(value);
-  if (!/^\d+$/.test(value) || !Number.isSafeInteger(timeout) || timeout > 2_147_483_647) {
-    throw new Error("Timeout must be an integer from 0 to 2147483647 milliseconds");
+  // Milliseconds, or a duration as the schedule options take them: 90s, 20m, 2h, 1d.
+  const d = value.trim().toLowerCase().match(/^(\d+)\s*(s|m|h|d)$/);
+  const timeout = d ? Number(d[1]) * { s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[d[2] as "s"] : Number(value);
+  if ((!d && !/^\d+$/.test(value)) || !Number.isSafeInteger(timeout) || timeout > 2_147_483_647) {
+    throw new Error("Timeout must be milliseconds from 0 to 2147483647, or a duration like 90s, 20m, 2h (0 = never expires)");
   }
   return timeout;
 }
@@ -183,7 +185,7 @@ export function registerSandbox(program: Command) {
     .description("Create a sandbox")
     .option("-t, --template <name>", `Template (${TEMPLATE_HINT}; server validates)`, "base")
     .addOption(new Option("-s, --size <size>", `Machine size (${SIZE_HINT}); default medium, small on the Pro trial (1 Small, 2 Mini and 2 Nano at a time, US regions only; Medium, Large and Big unlock after the first payment). Mini works only with the ${MINI_TEMPLATES} templates, Nano only with ${NANO_TEMPLATES}`).choices(SANDBOX_SIZES))
-    .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration (Pro trial: at most 3600000 = 1 hour, and 0 means 1 hour)", parseTimeoutOption, 300_000)
+    .option("--timeout <ms>", "Lifetime in milliseconds, or a duration like 20m or 2h; 0 disables expiration (Pro trial: at most 3600000 = 1 hour, and 0 means 1 hour)", parseTimeoutOption, 300_000)
     .option("--region <code>", `Region to create the sandbox in (default ${DEFAULT_REGION}; with --volume or --snapshot, theirs)`)
     .option("--snapshot <id>", "Create from a private saved snapshot, at the size it was taken at")
     .option("--volume <name-or-id>", "Attach a persistent volume")
@@ -203,6 +205,11 @@ Each run wakes the sandbox, runs the command or prompt, and puts it back to slee
 A prompt needs a sandbox from an agent template (claude, codex, opencode, pi, prime).`)
     .action(async (opts) => {
       const scheduleBody = createScheduleBody(opts);
+      // A prompt schedule with no --agent runs the agent the sandbox's template ships, not the
+      // platform's default (codex), which a claude or pi sandbox does not have.
+      if (scheduleBody?.prompt && !scheduleBody.agent && !opts.snapshot && ["claude", "codex", "opencode", "pi", "prime"].includes(opts.template)) {
+        scheduleBody.agent = opts.template;
+      }
       // Refused before anything is created: the server only finds out once the sandbox runs.
       if (scheduleBody?.prompt && !opts.snapshot && ["base", "interpreter"].includes(opts.template)) {
         throw new Error(`--prompt needs a sandbox with a coding agent, and the '${opts.template}' template has none. Add -t claude (or codex, opencode, pi, prime), or schedule a --command instead.`);
@@ -764,7 +771,7 @@ Examples:
 
   sb.command("restore")
     .argument("<snapshot-id>", "Saved snapshot ID")
-    .option("--timeout <ms>", "Lifetime in milliseconds; 0 disables expiration (Pro trial: at most 3600000 = 1 hour, and 0 means 1 hour)", parseTimeoutOption, 300_000)
+    .option("--timeout <ms>", "Lifetime in milliseconds, or a duration like 20m or 2h; 0 disables expiration (Pro trial: at most 3600000 = 1 hour, and 0 means 1 hour)", parseTimeoutOption, 300_000)
     .option("-p, --project <id>", "Project to start it in (name, slug, or ID); a snapshot restores only in its own project, the default")
     .option("--volume <name-or-id>", "Mount this volume at /workspace (Firecracker snapshot of a sandbox that had no volume; same region)")
     .description("Start a new sandbox from a private snapshot")

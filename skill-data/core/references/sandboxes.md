@@ -12,6 +12,7 @@ The details behind the Sandboxes section of the core guide. Read the part the ta
 - [Size and pricing](#size-and-pricing)
 - [Interactive shell](#interactive-shell)
 - [Coding agents](#coding-agents)
+- [Docker](#docker)
 - [Schedules (wake, run, sleep)](#schedules-wake-run-sleep)
 - [Environments (what a new sandbox starts with)](#environments-what-a-new-sandbox-starts-with)
 - [Desktop (computer use)](#desktop-computer-use)
@@ -27,7 +28,7 @@ The details behind the Sandboxes section of the core guide. Read the part the ta
 | `codex`, `claude`, `opencode`, `pi`, `prime` | One coding agent each (Codex, Claude Code, OpenCode, pi, Prime Agent) on Node 22, with git, python3, ripgrep, curl, jq and `lizard`: see [Coding agents](#coding-agents) |
 | `desktop` | A graphical desktop with Chromium, plus Codex and `lizard`: see [Desktop](#desktop-computer-use) |
 
-A sandbox starts in `us-east-1` unless `--region` names another; with `--volume` or `--snapshot` it starts in their region. An unknown name fails and lists the region's `availableTemplates`. `--with-token` on `sandbox create` signs in the sandbox's own `lizard` with a new key limited to the sandbox's project, deleted with the sandbox (only useful on templates that ship `lizard`).
+Every template in `us-east-1` also has `gh` (GitHub CLI) and Docker: see [Docker](#docker). A sandbox starts in `us-east-1` unless `--region` names another; with `--volume` or `--snapshot` it starts in their region. An unknown name fails and lists the region's `availableTemplates`. `--with-token` on `sandbox create` signs in the sandbox's own `lizard` with a new key limited to the sandbox's project, deleted with the sandbox (only useful on templates that ship `lizard`).
 
 `--no-internet` on `sandbox create` starts a sandbox with no internet at all (no outbound TCP, UDP, DNS or ping) for its whole life, its resumes and forks included, and none of its ports can be made public (`sandbox expose` and the desktop are refused); commands and files still work. It is set at create only and cannot be changed later. Not available with a container volume or snapshot. Use it to run untrusted code that must not reach the network.
 
@@ -134,6 +135,25 @@ error as it is.
 
 Use `sandbox exec` to read a log file written by your process.
 
+## Docker
+
+Sandboxes in `us-east-1` have Docker (engine, `docker compose`, `docker buildx`) and `gh`.
+
+```bash
+lizard sandbox exec <id> -- docker run --rm alpine echo ok
+lizard sandbox exec <id> -- sh -c 'cd /workspace/app && docker compose up -d'
+lizard sandbox expose <id> 8080        # a published container port gets a URL like any other port
+```
+
+- No daemon runs until the first `docker` command, which starts it (about 2 s). It then holds about
+  150 MB of the sandbox's memory, so prefer `small` or larger for real work.
+- A pause keeps files only: the daemon and running containers end; images, volumes and stopped
+  containers stay. After a resume the NEXT `docker` command starts the daemon again and brings back
+  `restart: always` containers. Until then a published port answers nothing: run `docker ps` once.
+- Works as root and as the sandbox's normal users. Images and containers live on the sandbox's own
+  disk and count against its size's disk.
+- `gh` is signed in when the project's environment has GitHub access (see [Environments](#environments-what-a-new-sandbox-starts-with)).
+
 ## Schedules (wake, run, sleep)
 
 The platform can wake a paused sandbox on a timer, run a prompt or a shell command in it, and put
@@ -156,6 +176,10 @@ lizard sandbox schedule-set <sch_id> --every 15m | --off | --on
 lizard sandbox unschedule <sch_id>
 ```
 
+- `create --timeout` is the sandbox's lifetime: milliseconds or a duration (`20m`, `2h`); `0` = never
+  expires. A schedule's own run limit on create is `--run-timeout`.
+- A `--prompt` schedule set at create runs the template's own agent (`-t claude` → claude) unless
+  `--agent` names another; `sandbox schedule <id> --prompt` defaults to codex: pass `--agent`.
 - Each `--prompt` run starts a NEW agent conversation (on the project's agent credentials, as
   `sandbox prompt`). Keep state in files: tell the agent to read and update a notes file.
 - `--command` runs in `/workspace` as root; success = exit code 0. Background processes it leaves
@@ -198,11 +222,11 @@ Instructions and GitHub access are the project's, whatever the environment.
 
 ```bash
 lizard sandbox environments                       # the project's environments, instructions, GitHub access
-lizard sandbox environment-show [name] [--values] # variables (values masked without --values)
+lizard sandbox environment-show [name] [--values] # variable names; --values adds the values
 lizard sandbox environment-set API_URL=https://api.example.com TOKEN=...      # the default environment
 lizard sandbox environment-create staging --copy-from default
 lizard sandbox environment-set -e staging API_URL=https://staging.example.com
-lizard sandbox environment-set -e staging --from-file .env.staging
+lizard sandbox environment-set -e staging --from-file .env.staging   # KEY=VALUE lines; # comments, export and quotes are handled
 lizard sandbox environment-unset -e staging OLD_KEY
 lizard sandbox environment-rename staging preview
 lizard sandbox environment-rm preview
@@ -218,7 +242,7 @@ lizard sandbox create --repo owner/name           # one repository of your own, 
 - Every command takes `-p <project>`; without it, the linked project, else the default project.
 - Up to 200 variables per environment (names: letters, digits and `_`; values up to 32 KB) and 20
   named environments per project (names: letters, digits, spaces and `. _ -`, at most 40 characters).
-- Never print values to the user or into a log: `environment-show` masks them unless `--values`.
+- Never print values to the user or into a log: `environment-show` lists names only unless `--values`.
 - `create --repo owner/name` (add `--repo-workflows` to let it change `.github/workflows`) gives the
   sandbox write access to that one repository, cloned into `/workspace/<name>`, in place of the
   project's GitHub access. It needs your own GitHub sign-in and a key with no scopes.
