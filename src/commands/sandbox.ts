@@ -196,7 +196,7 @@ export function registerSandbox(program: Command) {
     .option("--proxy <url>", "Send all of the sandbox's internet traffic through your proxy, any supplier: http://user:pass@host:port or socks5://user:pass@host:port. See `lizard sandbox proxy --help`")
     .option("--repo <owner/name>", "Start with this GitHub repository cloned into /workspace/<name>; the sandbox can push and open pull requests to it (only it). Needs GitHub connected and Lizard's GitHub App on the repository's owner")
     .option("--repo-workflows", "With --repo: may also change .github/workflows")
-    .option("-e, --environment <name>", "Start with the variables of this sandbox environment of the project (Sandboxes → Environment) instead of its default ones"))
+    .option("-e, --environment <name>", "Start with this sandbox environment of the project (Sandboxes → Environment): `default` for the project's own variables, agent instructions and GitHub access, or a named one. Without -e the sandbox starts with none of them"))
     .addHelpText("after", `
 A schedule is set here, when the sandbox is created:
   lizard sandbox create --timeout 0 --every 10m --command "python3 /workspace/job.py"
@@ -293,7 +293,9 @@ A prompt needs a sandbox from an agent template (claude, codex, opencode, pi, pr
           ...(opts.allowHost?.length ? { allowedHosts: opts.allowHost } : {}),
           ...(opts.proxy ? { proxy: opts.proxy } : {}),
           ...(opts.repo ? { repo: opts.repo, repoWorkflows: !!opts.repoWorkflows } : {}),
-          ...(opts.environment ? { environment: opts.environment } : {}),
+          // No -e: no environment ("none": nothing from the project's Environment tab). -e default
+          // asks for the project's own one.
+          environment: opts.environment || "none",
         };
         try {
           sandbox = await createInDefaultRegion(body, defaultRegion);
@@ -373,7 +375,7 @@ A prompt needs a sandbox from an agent template (claude, codex, opencode, pi, pr
         if (r.readOnly) info(chalk.yellow(`  Read only: GitHub has not given Lizard write access on this account yet. Accept it at ${r.manageUrl}`));
       }
       const usedEnvironment = (sandbox as any).environment as { name: string } | undefined;
-      if (usedEnvironment) info(chalk.dim(`  Environment: ${usedEnvironment.name}`));
+      if (usedEnvironment && opts.environment) info(chalk.dim(`  Environment: ${usedEnvironment.name}`));
       if (scheduled?.schedule) info(chalk.dim(`  Schedule: ${scheduleLine(scheduled.schedule)}`));
       if (scheduled?.error) {
         warn(`The sandbox was created, but its schedule was not: ${scheduled.error}`);
