@@ -3,6 +3,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import {
+  configDir,
+  saveConfig,
   setProjectLink,
   getProjectLink,
   updateProjectLink,
@@ -119,5 +121,24 @@ describe("ProjectLink schema", () => {
     const link = getProjectLink(tmpDir);
     expect(link?.projectId).toBe("proj_1");
     expect(link?.workspaceId).toBeUndefined();
+  });
+});
+
+describe.skipIf(process.platform === "win32")("config file permissions", () => {
+  test("a new config is 0600 in a 0700 folder", () => {
+    saveConfig({});
+    expect(fs.statSync(configDir()).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(path.join(configDir(), "config.json")).mode & 0o777).toBe(0o600);
+  });
+
+  test("an existing world-readable config is fixed on the next write", () => {
+    fs.mkdirSync(configDir(), { recursive: true, mode: 0o755 });
+    fs.chmodSync(configDir(), 0o755);
+    const file = path.join(configDir(), "config.json");
+    fs.writeFileSync(file, "{}", { mode: 0o644 });
+    fs.chmodSync(file, 0o644);
+    saveConfig({});
+    expect(fs.statSync(configDir()).mode & 0o777).toBe(0o700);
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
   });
 });

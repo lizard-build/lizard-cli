@@ -64,11 +64,17 @@ export function loadConfig(): Config {
   }
 }
 
+/**
+ * The config holds the login token: the folder is 0700 and the file 0600. `mode` only applies
+ * when a file or folder is created, so both are chmod-ed on every write (fixes older installs).
+ */
 export function saveConfig(config: Config) {
-  fs.mkdirSync(configDir(), { recursive: true });
-  fs.writeFileSync(configFile(), JSON.stringify(config, null, 2), {
-    mode: 0o600,
-  });
+  const dir = configDir();
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  try { fs.chmodSync(dir, 0o700); } catch {}
+  const file = configFile();
+  fs.writeFileSync(file, JSON.stringify(config, null, 2), { mode: 0o600 });
+  try { fs.chmodSync(file, 0o600); } catch {}
 }
 
 /**
