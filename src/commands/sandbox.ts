@@ -62,6 +62,8 @@ interface SandboxRecord {
   /** Set by the platform when nothing named a project and it used the account's default. */
   projectName?: string;
   projectDefaulted?: boolean;
+  /** Only when created with --with-token: whether the sandbox's own key is in its ~/.lizard/config.json. Absent from older platforms. */
+  sessionKey?: boolean;
   /** Only when created with --repo. */
   repo?: { fullName: string; path: string | null; status: "cloned" | "cloning" | "failed"; error?: string; readOnly?: boolean; manageUrl?: string };
 }
@@ -189,7 +191,7 @@ export function registerSandbox(program: Command) {
     .option("--region <code>", `Region to create the sandbox in (default ${DEFAULT_REGION}; with --volume or --snapshot, theirs)`)
     .option("--snapshot <id>", "Create from a private saved snapshot, at the size it was taken at")
     .option("--volume <name-or-id>", "Attach a persistent volume")
-    .option("--with-token [key]", "Sign in `lizard` inside the sandbox with a new key limited to the sandbox's project and deleted with it (this liz_ key, or the one you use, only authorizes the request)")
+    .option("--with-token [key]", "Sign in `lizard` inside the sandbox with a new key limited to the sandbox's project and deleted with it (works with any sign-in; a liz_ key given here is only needed by older platforms)")
     .option("-p, --project <id>", "Project to create the sandbox in (name, slug, or ID). Defaults to the linked project.")
     .option("--allow-host <host>", "With no internet, still allow this host name (pypi.org, *.pythonhosted.org: ports 80/443) or IPv4 address/range (every port); repeat for more. Implies --no-internet", (v: string, all: string[] = []) => [...all, v])
     .option("--no-internet", "Fully closed sandbox, for its whole life (its resumes and forks too): no internet and no public ports; commands and files still work")
@@ -258,21 +260,23 @@ A prompt needs a sandbox from an agent template (claude, codex, opencode, pi, pr
 
       const spinner = isJSONMode() ? null : ora("Creating sandbox...").start();
       let sandbox: SandboxRecord;
+      let lizardTokenSent = false;
       try {
-        // --with-token seeds ~/.lizard/config.json inside the sandbox, so `lizard` works
-        // there. Bare --with-token reuses the key this command is authenticating with.
-        //
-        // Anything in the sandbox can read that key and sandboxes run untrusted code, so
-        // a full-access key here hands the sandbox your whole account. Scopes are
-        // enforced end to end now, so a workspace-scoped key is bounded to that one
-        // workspace if it escapes — warn rather than silently do the dangerous thing.
+        // --with-token: the platform writes a NEW key of the sandbox's own (scoped to its
+        // project, deleted with it) to ~/.lizard/config.json inside the sandbox, so `lizard`
+        // works there. Your own credential is never written. `withSessionKey` asks for it with
+        // whatever sign-in this command uses, a browser `lizard login` included. `lizardToken`
+        // is how older platforms are asked: they need one of your liz_ keys as proof, so it is
+        // sent only when there is one (given here, or the key you are signed in with).
         let lizardToken: string | undefined;
         if (opts.withToken) {
-          lizardToken = typeof opts.withToken === "string" ? opts.withToken : (getToken() ?? undefined);
-          if (!lizardToken) throw new Error("--with-token: no API key available. Pass one explicitly, or `lizard login` first.");
-          if (!lizardToken.startsWith("liz_")) {
-            throw new Error("--with-token expects a liz_ API key. Create a workspace-scoped one with `lizard keys create`.");
+          const given = typeof opts.withToken === "string" ? opts.withToken : undefined;
+          if (given && !given.startsWith("liz_")) {
+            throw new Error("--with-token takes no value, or a liz_ API key. Use bare --with-token to sign the sandbox in with your current login.");
           }
+          const own = getToken() ?? undefined;
+          lizardToken = given ?? (own?.startsWith("liz_") ? own : undefined);
+          lizardTokenSent = !!lizardToken;
         }
 
         // No --region: us-east-1. A volume or a snapshot exists in one region only, so with
@@ -286,6 +290,7 @@ A prompt needs a sandbox from an agent template (claude, codex, opencode, pi, pr
           region: opts.region || (defaultRegion ? DEFAULT_REGION : undefined),
           volumeId,
           volumeName,
+          ...(opts.withToken ? { withSessionKey: true } : {}),
           lizardToken,
           projectId,
           // Sent only when asked: every other create stays byte-for-byte what it was.
@@ -341,6 +346,16 @@ A prompt needs a sandbox from an agent template (claude, codex, opencode, pi, pr
       if (opts.environment && opts.environment.trim().toLowerCase() !== "default" && !(sandbox as any).environment) {
         await api.delete(`/api/sandboxes/${sandbox.id}`).catch(() => {});
         throw new Error("This region's platform does not support --environment yet; the sandbox it started had the project's default variables and was deleted.");
+      }
+
+      // --with-token: a sandbox that was asked to sign itself in but could not (lzs pauses its
+      // sandbox from inside; without the key it would run, and bill, until deleted) is deleted.
+      // An older platform says nothing: it signed the sandbox in only if it was handed a liz_ key.
+      if (opts.withToken && (sandbox.sessionKey === false || (sandbox.sessionKey === undefined && !lizardTokenSent))) {
+        await api.delete(`/api/sandboxes/${sandbox.id}`).catch(() => {});
+        throw new Error(sandbox.sessionKey === false
+          ? "The sandbox could not be signed in to `lizard` (--with-token), so it was deleted. Try again; if it keeps failing, report it with `lizard support open`."
+          : "This region's platform needs a liz_ API key for --with-token: pass one (`--with-token liz_...`, from `lizard keys create`). The sandbox it started was not signed in and was deleted.");
       }
 
       // The schedule, right after the create. If it is refused the sandbox stays: it works, and
