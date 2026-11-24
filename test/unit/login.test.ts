@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { Command } from "commander";
 import { Readable } from "node:stream";
 import { registerLogin, accountState, accountInstruction, nextSteps, nextStepsNote, readTokenFromStdin } from "../../src/commands/login.js";
-import { authUrlFor, providerFlag, pendingPayload } from "../../src/lib/signin.js";
+import { authUrlFor, providerFlag, pendingPayload, cleanUserCode, userCodeLine } from "../../src/lib/signin.js";
 import type { Subscription } from "../../src/commands/billing.js";
 import { requireAuth } from "../../src/lib/auth.js";
 import { APIError, setBaseURL } from "../../src/lib/api.js";
@@ -154,6 +154,31 @@ describe("sign-in links", () => {
     expect(ev.instruction).toMatch(/^The last sign-in link expired/);
     expect(ev.instruction).toContain("run nextCommand");
     expect(ev.instruction).toContain("1 more minute;");
+  });
+});
+
+describe("login confirmation code", () => {
+  test("a code from the platform is shown and passed to agents", () => {
+    const ev = pendingPayload({ sessionId: "s", sessionSecret: "x", expiresAt: Date.now() + 300_000, userCode: "K7QX-M2PA" }, ["github"], "new");
+    expect(ev.userCode).toBe("K7QX-M2PA");
+    expect(ev.instruction).toContain("K7QX-M2PA");
+    expect(userCodeLine("K7QX-M2PA")).toContain("Confirm this code in your browser: ");
+    expect(userCodeLine("K7QX-M2PA")).toContain("K7QX-M2PA");
+  });
+
+  test("an older platform sends none: nothing changes", () => {
+    const ev = pendingPayload({ sessionId: "s", sessionSecret: "x", expiresAt: Date.now() + 300_000 }, ["github"], "new");
+    expect(ev).not.toHaveProperty("userCode");
+    expect(ev.instruction).not.toContain("code");
+    expect(userCodeLine(undefined)).toBeNull();
+    expect(cleanUserCode(undefined)).toBeUndefined();
+  });
+
+  test("only letters, digits and dashes are taken as a code", () => {
+    expect(cleanUserCode("K7QX-M2PA")).toBe("K7QX-M2PA");
+    expect(cleanUserCode("K7QX\x1b]52;c;aGk=\x07")).toBeUndefined();
+    expect(cleanUserCode(42)).toBeUndefined();
+    expect(cleanUserCode("")).toBeUndefined();
   });
 });
 

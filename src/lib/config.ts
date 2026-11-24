@@ -47,7 +47,8 @@ export interface PendingAuth {
   authUrl: string;
   createdAt: number;
   /** When the platform drops the session. Older CLIs did not save it. */
-  expiresAt?: number;
+  expiresAt?: number;  /** The confirmation code the platform showed for this session (newer platforms only). */
+  userCode?: string;
 }
 
 export interface Config {

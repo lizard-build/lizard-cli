@@ -35,6 +35,9 @@ interface SessionResponse {
   sessionId: string;
   sessionSecret: string;
   expiresIn: number;
+  /** Shown here and on the approval page, so the person approves this terminal's session.
+   *  Older platforms do not send it. */
+  userCode?: string;
 }
 
 export interface CheckResponse {
@@ -92,6 +95,17 @@ export interface Pending {
   sessionId: string;
   sessionSecret: string;
   expiresAt: number;
+  userCode?: string;
+}
+
+/** The platform's confirmation code if it is one (letters, digits, dashes); never other text. */
+export function cleanUserCode(code: unknown): string | undefined {
+  return typeof code === "string" && /^[A-Za-z0-9-]{1,32}$/.test(code) ? code : undefined;
+}
+
+/** The line that asks the person to check the code in the browser, or null without one. */
+export function userCodeLine(code: string | undefined): string | null {
+  return code ? `Confirm this code in your browser: ${chalk.bold(code)}` : null;
 }
 
 export type Resumed =
@@ -175,6 +189,7 @@ export async function resumePending(): Promise<Resumed> {
     sessionId: saved.sessionId,
     sessionSecret: saved.sessionSecret,
     expiresAt: saved.expiresAt ?? saved.createdAt + SESSION_TTL_MS,
+    userCode: cleanUserCode(saved.userCode),
   };
   let result: CheckResponse;
   try {
@@ -203,6 +218,7 @@ export async function startSession(provider?: AuthProvider): Promise<Pending> {
     sessionId: session.sessionId,
     sessionSecret: session.sessionSecret,
     expiresAt: now + session.expiresIn * 1000,
+    userCode: cleanUserCode(session.userCode),
   };
   savePendingAuth({ ...pending, authUrl: authUrlFor(session.sessionId, provider), createdAt: now });
   return pending;
@@ -245,6 +261,9 @@ export function pendingPayload(
   const minutes = Math.max(1, Math.round((pending.expiresAt - now) / 60_000));
   const window = minutes === 1 ? "1 more minute" : `${minutes} more minutes`;
   const then = opts.nextCommand ? "run nextCommand" : "run the same command again";
+  const code = pending.userCode
+    ? ` Tell the user to check that the browser shows the code ${pending.userCode} before approving.`
+    : "";
   const lead =
     why === "waiting"
       ? "The user has not finished signing in yet. "
@@ -253,16 +272,17 @@ export function pendingPayload(
         : "";
   const instruction = single
     ? `${lead}Sign-in is needed. Give the user authUrl to open. Once the browser says "CLI authorized", ${then}. ` +
-      `The link works for ${window}; after that a new one is printed.`
+      `The link works for ${window}; after that a new one is printed.${code}`
     : `${lead}Sign-in is needed. Ask the user how they sign in to Lizard and give them that link from authUrls. ` +
       "Someone who already has an account must use the same method as before: another method opens a second, empty account " +
       "unless both share a verified email. A new user can pick either. " +
-      `Once the browser says "CLI authorized", ${then}. The links work for ${window}; after that new ones are printed.`;
+      `Once the browser says "CLI authorized", ${then}. The links work for ${window}; after that new ones are printed.${code}`;
   return {
     status: "pending" as const,
     authUrl: single ? authUrls[single]! : authUrlFor(pending.sessionId, opts.flag),
     authUrls,
     expiresAt: new Date(pending.expiresAt).toISOString(),
+    ...(pending.userCode ? { userCode: pending.userCode } : {}),
     ...(opts.nextCommand ? { nextCommand: opts.nextCommand } : {}),
     instruction,
   };
@@ -329,6 +349,8 @@ export async function signInInteractive(flag?: AuthProvider): Promise<Me> {
       ["Open one of these links to sign in:", ...methods.map((m) => `${PROVIDER_LABEL[m]}: ${chalk.cyan(authUrlFor(pending.sessionId, m))}`)].join("\n"),
     );
   }
+  const codeLine = userCodeLine(pending.userCode);
+  if (codeLine) p.log.warn(codeLine);
 
   // Ctrl+C at a terminal never reaches onCancel: clack holds stdin raw while it
   // spins and exits on the keypress itself, printing cancelMessage on the way
