@@ -226,8 +226,29 @@ export async function listFiles(repo: string, root: string, sparse: string[] | n
 
 // ── working files ──────────────────────────────────────────────────────
 
+/**
+ * Is this path component (a spelling of) git's or this checkout's metadata folder? File systems
+ * fold names: case (Windows, macOS), trailing dots and spaces and `:stream` suffixes (NTFS),
+ * 8.3 short names (`GIT~1`), zero-width characters (HFS+). A tree from the server must never
+ * write into `.git` (hooks, config run code) or `.lizard-git`.
+ */
+export function isMetadataName(x: string): boolean {
+  const n = x
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u206a-\u206f\ufeff]/g, "")
+    .toLowerCase()
+    .replace(/:.*$/s, "")
+    .replace(/[. ]+$/, "");
+  return n === ".git" || n === STATE_DIR || /^git~\d+$/.test(n) || /^lizard~\d+$/.test(n);
+}
+
+/** A component Windows would rename or treat as a stream: trailing dot/space, or a `:`. */
+function badOnWindows(x: string): boolean {
+  return /[. ]$/.test(x) || x.includes(":");
+}
+
 function safeJoin(root: string, p: string): string {
-  if (p.split("/").some((x) => x === "" || x === "." || x === ".." || x === STATE_DIR) || p.includes("\\") || p.includes("\0")) {
+  const win = process.platform === "win32";
+  if (p.split("/").some((x) => x === "" || x === "." || x === ".." || isMetadataName(x) || (win && badOnWindows(x))) || p.includes("\\") || p.includes("\0")) {
     throw new APIError(400, `refusing a path outside the checkout: ${p}`);
   }
   return join(root, ...p.split("/"));

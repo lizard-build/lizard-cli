@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { saveCheckout, sha256, sync, type Checkout } from "../../src/lib/checkout.js";
+import { isMetadataName, saveCheckout, sha256, sync, type Checkout } from "../../src/lib/checkout.js";
 
 // A fake Lizard Git that serves one changeset: `tree` maps paths to contents (a symlink is
 // { link: target }). Trees are addressed by a made-up hash, blobs by their sha256.
@@ -99,5 +99,23 @@ describe("lizard git sync never writes through a symlink", () => {
     // the link itself is fine to create; nothing was written through it
     expect(lstatSync(join(root, "d")).isSymbolicLink()).toBe(true);
     expect(readFileSync(join(root, "e/x"), "utf8")).toBe("ok");
+  });
+});
+
+describe("lizard git sync never writes into git metadata", () => {
+  it.each([".git", ".GIT", ".Git", ".git.", ".git ", ".git. .", ".git::$INDEX_ALLOCATION", "git~1", "GIT~1", "Git~2", ".g\u200cit",
+    ".lizard-git", ".LIZARD-GIT", "LIZARD~1"])("%s is metadata", (n) => expect(isMetadataName(n)).toBe(true));
+
+  it.each([".gitignore", ".gitkeep", ".github", "git", "src", "git~", "my.git"])("%s is an ordinary name", (n) =>
+    expect(isMetadataName(n)).toBe(false));
+
+  it("a changeset with .git paths writes nothing there", async () => {
+    mkdirSync(join(root, ".git"));
+    const c = checkout({});
+    serve({ ".git/hooks/post-checkout": "evil", "GIT~1/config": "evil", "sub/.Git/config": "evil" });
+    await sync(root, c).catch(() => {});
+    expect(existsSync(join(root, ".git/hooks/post-checkout"))).toBe(false);
+    expect(existsSync(join(root, "GIT~1"))).toBe(false);
+    expect(existsSync(join(root, "sub/.Git"))).toBe(false);
   });
 });
