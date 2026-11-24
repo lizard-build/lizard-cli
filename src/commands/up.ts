@@ -13,6 +13,7 @@ import { ensureLinked } from "./init.js";
 import {
   success,
   info,
+  warn,
   error,
   isJSONMode,
   isTTY,
@@ -20,6 +21,7 @@ import {
   statusColor,
 } from "../lib/format.js";
 import { termSafe } from "../lib/terminal.js";
+import { isEnvFile, isSensitivePath, isTooBroadToUpload, loadLizardIgnore } from "../lib/upload-filter.js";
 
 interface App {
   id: string;
@@ -151,7 +153,17 @@ export async function deployFromLocal(args: {
     appName = nameInput || defaultName;
   }
 
-  const files = getUploadFiles(args.targetPath, args.useGitignore);
+  const { files, skipped, untrackedEnv } = getUploadFiles(args.targetPath, args.useGitignore);
+  if (skipped.length) {
+    warn(`Not uploading files that look like secrets: ${skipped.join(", ")}`);
+    info(chalk.dim("  Set their values with `lizard secrets set` instead."));
+  }
+  if (untrackedEnv.length) {
+    warn(
+      `Uploading ${untrackedEnv.join(", ")}: not in git and not ignored. ` +
+        "Add to .gitignore or .lizardignore to keep out of the upload, and use `lizard secrets set` for its values.",
+    );
+  }
   if (files.length === 0) {
     throw new Error(
       "No files to upload. Run from a directory with files, or pass a path: `lizard up <path>`.",
@@ -252,7 +264,18 @@ function getDefaultAppName(cwd: string = process.cwd()): string {
   return path.basename(cwd);
 }
 
-function getUploadFiles(cwd: string, useGitignore: boolean): string[] {
+interface UploadFiles {
+  files: string[];
+  /** Left out because they look like credentials (folder walk only). */
+  skipped: string[];
+  /** Untracked, not ignored .env files the git listing will upload. */
+  untrackedEnv: string[];
+}
+
+const toPosix = (p: string) => p.split(path.sep).join("/");
+
+export function getUploadFiles(cwd: string, useGitignore: boolean): UploadFiles {
+  const ignored = loadLizardIgnore(cwd);
   if (useGitignore) {
     try {
       // `-z` outputs NUL-separated paths and disables git's default behaviour
@@ -273,12 +296,25 @@ function getUploadFiles(cwd: string, useGitignore: boolean): string[] {
         .toString("utf8")
         .split("\0")
         .filter(Boolean);
-      return [...new Set([...tracked, ...untracked])].filter((f) => f !== ".lizard-git" && !f.startsWith(".lizard-git/"));
+      const files = [...new Set([...tracked, ...untracked])]
+        .filter((f) => f !== ".lizard-git" && !f.startsWith(".lizard-git/"))
+        .filter((f) => !ignored?.(f));
+      const kept = new Set(files);
+      const untrackedEnv = untracked.filter((f) => kept.has(f) && isEnvFile(path.posix.basename(f)));
+      return { files, skipped: [], untrackedEnv };
     } catch {
       // fall through to manual collection
     }
   }
-  return collectFilesManually(cwd, cwd);
+  if (isTooBroadToUpload(cwd)) {
+    throw new Error(
+      `Refusing to upload ${cwd}: it is your home folder or the file system root. ` +
+        "Run `lizard up` from the project's folder, or pass it: `lizard up <path>`.",
+    );
+  }
+  const skipped: string[] = [];
+  const files = collectFilesManually(cwd, cwd, skipped, ignored);
+  return { files, skipped, untrackedEnv: [] };
 }
 
 const EXCLUDE_DIRS = new Set([
@@ -301,15 +337,28 @@ const EXCLUDE_EXT = new Set([".pyc", ".pyo", ".log"]);
 // extension matching never catches these.
 const EXCLUDE_FILES = new Set([".DS_Store"]);
 
-function collectFilesManually(root: string, dir: string): string[] {
+function collectFilesManually(
+  root: string,
+  dir: string,
+  skipped: string[],
+  ignored: ((rel: string, isDir?: boolean) => boolean) | null,
+): string[] {
   const results: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (EXCLUDE_DIRS.has(entry.name)) continue;
     if (EXCLUDE_FILES.has(entry.name)) continue;
     if (EXCLUDE_EXT.has(path.extname(entry.name))) continue;
     const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) results.push(...collectFilesManually(root, full));
-    else results.push(path.relative(root, full));
+    const rel = path.relative(root, full);
+    const relPosix = toPosix(rel);
+    const isDir = entry.isDirectory();
+    if (ignored?.(relPosix, isDir)) continue;
+    if (isSensitivePath(relPosix)) {
+      skipped.push(isDir ? relPosix + "/" : relPosix);
+      continue;
+    }
+    if (isDir) results.push(...collectFilesManually(root, full, skipped, ignored));
+    else results.push(rel);
   }
   return results;
 }
