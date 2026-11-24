@@ -19,6 +19,7 @@ import {
   printJSON,
   statusColor,
 } from "../lib/format.js";
+import { termSafe } from "../lib/terminal.js";
 
 interface App {
   id: string;
@@ -456,8 +457,8 @@ function emitBuildLine(data: string) {
     );
     return;
   }
-  if (line) process.stdout.write(line + "\n");
-  else process.stdout.write(data + "\n");
+  const out = termSafe(line || data, { keepColors: true });
+  process.stdout.write(out + "\n");
 }
 
 function stripLine(obj: any): Record<string, unknown> {

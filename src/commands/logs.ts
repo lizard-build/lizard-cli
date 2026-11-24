@@ -5,6 +5,10 @@ import { streamSSE, api, withScope, withQuery, type ResourceScope } from "../lib
 import { resolveProjectScope, resolveService, getActiveServiceWithKind } from "../lib/resolve.js";
 import { getProjectLink } from "../lib/config.js";
 import { info, error, warn, fail, isTTY, isJSONMode, printJSON, table, statusColor, timeAgo } from "../lib/format.js";
+import { termSafe } from "../lib/terminal.js";
+
+/** A service's log text for the terminal: its colors stay, nothing else that steers the terminal. */
+const logText = (s: unknown) => termSafe(s, { keepColors: true });
 
 // Levels assigned by the platform's log collector (regex over the message
 // text — apps that log errors without an "error"-like keyword come as info).
@@ -247,7 +251,7 @@ async function fetchFlatRestarts(appId: string): Promise<FlatEvent[]> {
 
 function replicaPrefix(e: any): string {
   if (!e.replica) return "";
-  return chalk.magenta(`[${e.replica}]`) + " ";
+  return chalk.magenta(`[${logText(e.replica)}]`) + " ";
 }
 
 function printLogEntry(e: any) {
@@ -257,10 +261,10 @@ function printLogEntry(e: any) {
   }
   const rep = replicaPrefix(e);
   if (e.service && e.message) {
-    const prefix = chalk.cyan(`[${e.service}]`);
-    process.stdout.write(`${prefix} ${rep}${e.message}\n`);
+    const prefix = chalk.cyan(`[${logText(e.service)}]`);
+    process.stdout.write(`${prefix} ${rep}${logText(e.message)}\n`);
   } else if (e.message) {
-    process.stdout.write(`${rep}${e.message}\n`);
+    process.stdout.write(`${rep}${logText(e.message)}\n`);
   }
 }
 
@@ -280,12 +284,12 @@ function printLogLine(data: string) {
 
   const rep = replicaPrefix(parsed);
   if (parsed.service && parsed.message) {
-    const prefix = chalk.cyan(`[${parsed.service}]`);
-    process.stdout.write(`${prefix} ${rep}${parsed.message}\n`);
+    const prefix = chalk.cyan(`[${logText(parsed.service)}]`);
+    process.stdout.write(`${prefix} ${rep}${logText(parsed.message)}\n`);
   } else if (parsed.message) {
-    process.stdout.write(`${rep}${parsed.message}\n`);
+    process.stdout.write(`${rep}${logText(parsed.message)}\n`);
   } else {
-    process.stdout.write(data + "\n");
+    process.stdout.write(logText(data) + "\n");
   }
 }
 
@@ -372,13 +376,13 @@ async function showRestartLogTail(
   console.log(chalk.dim("When:     ") + timeAgo(evt.crashedAt));
   console.log(chalk.dim("Source:   ") + evt.source);
   console.log(chalk.dim("Status:   ") + statusColor(evt.status));
-  if (evt.exitInfo) console.log(chalk.dim("Exit:     ") + evt.exitInfo);
-  if (evt.triggeredBy) console.log(chalk.dim("By:       ") + evt.triggeredBy);
+  if (evt.exitInfo) console.log(chalk.dim("Exit:     ") + logText(evt.exitInfo));
+  if (evt.triggeredBy) console.log(chalk.dim("By:       ") + logText(evt.triggeredBy));
   if (evt.buildId) console.log(chalk.dim("Build:    ") + evt.buildId);
   console.log();
 
   if (evt.logsTail) {
-    process.stdout.write(evt.logsTail);
+    process.stdout.write(logText(evt.logsTail));
     if (!evt.logsTail.endsWith("\n")) process.stdout.write("\n");
   } else {
     info(chalk.dim(`<no log tail captured — source=${evt.source} (manual restarts don't capture logs)>`));
@@ -453,7 +457,7 @@ async function showBuildLogs(
       if (isJSONMode()) {
         process.stdout.write(JSON.stringify({ message: line }) + "\n");
       } else {
-        process.stdout.write(line + "\n");
+        process.stdout.write(logText(line) + "\n");
       }
     }
     return;

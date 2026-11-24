@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import { APIError } from "../lib/api.js";
 import { isJSONMode, printJSON, table, success, info, warn, link } from "../lib/format.js";
+import { termSafe as safeOut, termSafeErr as safeErr } from "../lib/terminal.js";
 import {
   lg, qs, seg, segs, resolveRepo, repoPath, myLogin, gitURL, ago, ACTIVE_RUN, checksState,
 } from "../lib/lizard-git.js";
@@ -155,7 +156,8 @@ export function registerLizardGit(git: Command) {
           continue;
         }
         for (const line of wc.unifiedDiff(old, cur, p).split("\n")) {
-          console.log(line.startsWith("+") && !line.startsWith("+++") ? chalk.green(line) : line.startsWith("-") && !line.startsWith("---") ? chalk.red(line) : line.startsWith("@@") ? chalk.cyan(line) : line);
+          const l = safeOut(line);
+          console.log(l.startsWith("+") && !l.startsWith("+++") ? chalk.green(l) : l.startsWith("-") && !l.startsWith("---") ? chalk.red(l) : l.startsWith("@@") ? chalk.cyan(l) : l);
         }
       }
     });
@@ -292,7 +294,7 @@ export function registerLizardGit(git: Command) {
       out(repos, () => {
         if (!repos.length) return info("No repositories. Create one: lizard git repo create <name>");
         table(["REPO", "VISIBILITY", "UPDATED", "DESCRIPTION"], repos.map((r) => [
-          `${r.owner}/${r.name}`, r.private ? "private" : "public", ago(r.pushedAt ?? r.updatedAt), (r.description ?? "").slice(0, 60),
+          `${r.owner}/${r.name}`, r.private ? "private" : "public", ago(r.pushedAt ?? r.updatedAt), safeOut(r.description ?? "").slice(0, 60),
         ]));
       });
     });
@@ -321,8 +323,8 @@ export function registerLizardGit(git: Command) {
       const m = await lg.get<any>(repoPath(r));
       out(m, () => {
         info(`${chalk.bold(r)}  ${m.repo.private ? "private" : "public"}  ${chalk.dim(`you: ${m.role || "reader"}`)}`);
-        if (m.workspace) info(chalk.dim(`workspace: ${m.workspace.name} (${m.workspace.slug}): its members are collaborators`));
-        if (m.repo.description) info(m.repo.description);
+        if (m.workspace) info(chalk.dim(`workspace: ${safeErr(m.workspace.name)} (${safeErr(m.workspace.slug)}): its members are collaborators`));
+        if (m.repo.description) info(safeErr(m.repo.description));
         if (m.forkOf) info(chalk.dim(`forked from ${m.forkOf}`));
         info(`default branch ${m.repo.defaultBranch} · ${m.branches} branches · ${m.tags} tags · ${m.openIssues} open issues · ${m.openPulls} open pull requests · ${m.repo.stars} stars`);
         info(`${link(`${gitURL()}/${r}`)}\ncheck out: lizard git clone ${r}`);
@@ -407,11 +409,11 @@ export function registerLizardGit(git: Command) {
       if (opts.recursive) {
         const files = await lg.get<string[]>(qs(`${repoPath(r)}/files`, { ref: opts.ref }));
         const f = path ? files.filter((p) => p.startsWith(path.replace(/\/?$/, "/"))) : files;
-        return out(f, () => process.stdout.write(f.join("\n") + (f.length ? "\n" : "")));
+        return out(f, () => process.stdout.write(safeOut(f.join("\n")) + (f.length ? "\n" : "")));
       }
       const t = await lg.get<any>(qs(`${repoPath(r)}/tree`, { ref: opts.ref, path }));
       const entries: any[] = t.entries ?? t;
-      out(t, () => table(["TYPE", "NAME", "SIZE"], entries.map((e) => [e.type, e.type === "tree" ? chalk.bold(e.name + "/") : e.name, e.size != null ? String(e.size) : ""])));
+      out(t, () => table(["TYPE", "NAME", "SIZE"], entries.map((x) => [x.type, x.type === "tree" ? chalk.bold(safeOut(x.name) + "/") : safeOut(x.name), x.size != null ? String(x.size) : ""])));
     });
   repoOpt(git.command("cat").description("Print a file from a Lizard Git repository").argument("<path>"))
     .option("--ref <ref>", "Branch, tag or commit (default branch)")
@@ -426,7 +428,7 @@ export function registerLizardGit(git: Command) {
         return done({ path, ref, bytes: data.length, output: opts.output }, `Wrote ${data.length} bytes to ${opts.output}`);
       }
       if (isJSONMode()) return printJSON({ path, ref, content: data.toString("utf8") });
-      process.stdout.write(data);
+      process.stdout.write(process.stdout.isTTY ? safeOut(data.toString("utf8")) : data);
     });
   repoOpt(git.command("log").description("Commits of a Lizard Git repository"))
     .option("--ref <ref>", "Branch, tag or commit")
@@ -435,15 +437,15 @@ export function registerLizardGit(git: Command) {
     .action(async (opts) => {
       const r = await resolveRepo(opts.repo);
       const c = await lg.get<any>(qs(`${repoPath(r)}/commits`, { ref: opts.ref, path: opts.path, page: opts.page }));
-      out(c, () => table(["COMMIT", "AUTHOR", "WHEN", "SUBJECT"], c.commits.map((x: any) => [chalk.yellow(x.sha.slice(0, 7)), x.authorName, ago(x.date), x.subject.slice(0, 70)])));
+      out(c, () => table(["COMMIT", "AUTHOR", "WHEN", "SUBJECT"], c.commits.map((x: any) => [chalk.yellow(x.sha.slice(0, 7)), x.authorName, ago(x.date), safeOut(x.subject).slice(0, 70)])));
     });
   repoOpt(git.command("show").description("One commit: message and changed files").argument("<sha>"))
     .action(async (sha: string, opts) => {
       const r = await resolveRepo(opts.repo);
       const c = await lg.get<any>(`${repoPath(r)}/commits/${seg(sha)}`);
       out(c, () => {
-        info(`${chalk.yellow(c.commit.sha)}\n${c.commit.authorName} <${c.commit.authorEmail}>  ${ago(c.commit.date)}\n\n  ${c.commit.subject}\n`);
-        for (const f of c.diff?.files ?? []) info(`  ${f.status} ${f.newPath || f.oldPath}  ${chalk.green(`+${f.additions}`)} ${chalk.red(`-${f.deletions}`)}`);
+        info(`${chalk.yellow(c.commit.sha)}\n${safeErr(c.commit.authorName)} <${safeErr(c.commit.authorEmail)}>  ${ago(c.commit.date)}\n\n  ${safeErr(c.commit.subject)}\n`);
+        for (const f of c.diff?.files ?? []) info(`  ${f.status} ${safeErr(f.newPath || f.oldPath)}  ${chalk.green(`+${f.additions}`)} ${chalk.red(`-${f.deletions}`)}`);
       });
     });
   repoOpt(git.command("search").description("Search the code of a Lizard Git repository").argument("<text>"))
@@ -451,7 +453,7 @@ export function registerLizardGit(git: Command) {
     .action(async (text: string, opts) => {
       const r = await resolveRepo(opts.repo);
       const hits = await lg.get<any[]>(qs(`${repoPath(r)}/search`, { q: text, ref: opts.ref }));
-      out(hits, () => hits.length ? hits.forEach((h) => info(`${chalk.cyan(h.path)}:${h.line}: ${(h.text ?? "").trim()}`)) : info("No matches."));
+      out(hits, () => hits.length ? hits.forEach((h) => info(`${chalk.cyan(safeErr(h.path))}:${h.line}: ${safeErr(h.text ?? "").trim()}`)) : info("No matches."));
     });
   // ── Issues and pull requests ─────────────────────────────────────────
   for (const kind of ["issue", "pr"] as const) {
@@ -470,9 +472,9 @@ export function registerLizardGit(git: Command) {
         out(l, () => {
           if (!l.items.length) return info(`No ${opts.state === "all" ? "" : opts.state + " "}${noun}s. (${l.open} open, ${l.closed} closed)`);
           table(["#", "STATE", "TITLE", pulls ? "BRANCH" : "LABELS", "AUTHOR", "UPDATED"], l.items.map((i: any) => [
-            String(i.number), state(i.draft ? "draft" : i.state), i.title.slice(0, 60),
-            pulls ? `${i.headRepo ? i.headRepo.split("/")[0] + ":" : ""}${i.headRef} → ${i.baseRef}` : (i.labels ?? []).map((x: any) => x.name).join(","),
-            i.author, ago(i.updatedAt),
+            String(i.number), state(i.draft ? "draft" : i.state), safeOut(i.title).slice(0, 60),
+            safeOut(pulls ? `${i.headRepo ? i.headRepo.split("/")[0] + ":" : ""}${i.headRef} → ${i.baseRef}` : (i.labels ?? []).map((x: any) => x.name).join(",")),
+            safeOut(i.author), ago(i.updatedAt),
           ]));
         });
       });
@@ -519,19 +521,19 @@ export function registerLizardGit(git: Command) {
         if (d.issue.isPull) reviews = await lg.get<any>(`${repoPath(r)}/pulls/${n}/reviews`).catch(() => null);
         out(reviews ? { ...d, reviews } : d, () => {
           const i = d.issue;
-          info(`${chalk.bold(i.title)} ${chalk.dim(`#${i.number}`)}  ${state(i.draft ? "draft" : i.state)}`);
-          info(chalk.dim(`${i.author} opened ${ago(i.createdAt)}${i.isPull ? ` · ${i.headRepo ? i.headRepo + ":" : ""}${i.headRef} → ${i.baseRef}` : ""}`));
-          if (i.labels?.length) info(`labels: ${i.labels.map((l: any) => l.name).join(", ")}`);
-          if (i.assignees?.length) info(`assignees: ${i.assignees.map((a: any) => a.login).join(", ")}`);
+          info(`${chalk.bold(safeErr(i.title))} ${chalk.dim(`#${i.number}`)}  ${state(i.draft ? "draft" : i.state)}`);
+          info(chalk.dim(`${safeErr(i.author)} opened ${ago(i.createdAt)}${i.isPull ? safeErr(` · ${i.headRepo ? i.headRepo + ":" : ""}${i.headRef} → ${i.baseRef}`) : ""}`));
+          if (i.labels?.length) info(`labels: ${safeErr(i.labels.map((l: any) => l.name).join(", "))}`);
+          if (i.assignees?.length) info(`assignees: ${safeErr(i.assignees.map((a: any) => a.login).join(", "))}`);
           if (d.pull) {
             const p = d.pull;
-            if (p.merge) info(`merge: ${p.merge.conflicts?.length ? chalk.red("conflicts in " + p.merge.conflicts.join(", ")) : chalk.green("no conflicts")}`);
-            if (p.gate?.blockers?.length) info(`${chalk.yellow("blocked:")} ${p.gate.blockers.join("; ")}`);
-            if (reviews?.decision) info(`reviews: ${reviews.decision.approvals.length} approved${reviews.decision.changesRequested.length ? `, changes requested by ${reviews.decision.changesRequested.join(", ")}` : ""}`);
+            if (p.merge) info(`merge: ${p.merge.conflicts?.length ? chalk.red("conflicts in " + safeErr(p.merge.conflicts.join(", "))) : chalk.green("no conflicts")}`);
+            if (p.gate?.blockers?.length) info(`${chalk.yellow("blocked:")} ${safeErr(p.gate.blockers.join("; "))}`);
+            if (reviews?.decision) info(`reviews: ${reviews.decision.approvals.length} approved${reviews.decision.changesRequested.length ? `, changes requested by ${safeErr(reviews.decision.changesRequested.join(", "))}` : ""}`);
           }
-          if (i.body?.trim()) info(`\n${i.body.trim()}\n`);
+          if (i.body?.trim()) info(`\n${safeErr(i.body.trim())}\n`);
           const cs: any[] = (d.comments ?? []).filter((c: any) => c.kind === "comment" || !c.kind);
-          for (const c of opts.comments ? cs : cs.slice(-10)) info(`${chalk.bold(c.author)} ${chalk.dim(ago(c.createdAt))}\n  ${String(c.body).trim().replace(/\n/g, "\n  ")}\n`);
+          for (const c of opts.comments ? cs : cs.slice(-10)) info(`${chalk.bold(safeErr(c.author))} ${chalk.dim(ago(c.createdAt))}\n  ${safeErr(c.body).trim().replace(/\n/g, "\n  ")}\n`);
           info(link(`${gitURL()}/${r}/${i.isPull ? "pull" : "issues"}/${i.number}`));
         });
       });
@@ -600,12 +602,12 @@ export function registerLizardGit(git: Command) {
         out(d, () => {
           for (const f of d.diff?.files ?? []) {
             const name = f.oldPath && f.newPath && f.oldPath !== f.newPath ? `${f.oldPath} → ${f.newPath}` : f.newPath || f.oldPath;
-            process.stdout.write(`${chalk.bold(name)}  ${chalk.green(`+${f.additions}`)} ${chalk.red(`-${f.deletions}`)}${f.binary ? " (binary)" : ""}\n`);
+            process.stdout.write(`${chalk.bold(safeOut(name))}  ${chalk.green(`+${f.additions}`)} ${chalk.red(`-${f.deletions}`)}${f.binary ? " (binary)" : ""}\n`);
             if (opts.stat) continue;
             for (const h of f.hunks ?? []) {
-              process.stdout.write(chalk.cyan(h.header) + "\n");
+              process.stdout.write(chalk.cyan(safeOut(h.header)) + "\n");
               for (const l of h.lines ?? []) {
-                const t = `${l.k}${l.t}`;
+                const t = safeOut(`${l.k}${l.t}`);
                 process.stdout.write((l.k === "+" ? chalk.green(t) : l.k === "-" ? chalk.red(t) : t) + "\n");
               }
             }
@@ -616,7 +618,7 @@ export function registerLizardGit(git: Command) {
       .action(async (n: number, opts) => {
         const r = await resolveRepo(opts.repo);
         const cs = await lg.get<any[]>(`${repoPath(r)}/pulls/${n}/commits`);
-        out(cs, () => table(["COMMIT", "AUTHOR", "SUBJECT"], cs.map((c) => [chalk.yellow(c.sha.slice(0, 7)), c.authorName, c.subject.slice(0, 70)])));
+        out(cs, () => table(["COMMIT", "AUTHOR", "SUBJECT"], cs.map((c) => [chalk.yellow(c.sha.slice(0, 7)), safeOut(c.authorName), safeOut(c.subject).slice(0, 70)])));
       });
     repoOpt(grp.command("review").description("Approve, request changes, or comment on a pull request").argument("<number>", "", int))
       .option("--approve").option("--request-changes").option("--comment", "A review that only comments (default)")
@@ -639,9 +641,9 @@ export function registerLizardGit(git: Command) {
         const r = await resolveRepo(opts.repo);
         const rv = await lg.get<any>(`${repoPath(r)}/pulls/${n}/reviews`);
         out(rv, () => {
-          for (const x of rv.reviews) info(`${chalk.bold(x.author)} ${state(x.state)} ${chalk.dim(ago(x.createdAt))}${x.body ? `\n  ${x.body}` : ""}`);
-          for (const c of rv.comments) info(`${chalk.cyan(`${c.path}:${c.line}`)} ${chalk.bold(c.author)}: ${c.body}`);
-          info(`approvals: ${rv.decision.approvals.join(", ") || "none"}${rv.decision.changesRequested.length ? ` · changes requested: ${rv.decision.changesRequested.join(", ")}` : ""}`);
+          for (const x of rv.reviews) info(`${chalk.bold(safeErr(x.author))} ${state(x.state)} ${chalk.dim(ago(x.createdAt))}${x.body ? `\n  ${safeErr(x.body)}` : ""}`);
+          for (const c of rv.comments) info(`${chalk.cyan(safeErr(`${c.path}:${c.line}`))} ${chalk.bold(safeErr(c.author))}: ${safeErr(c.body)}`);
+          info(`approvals: ${safeErr(rv.decision.approvals.join(", ")) || "none"}${rv.decision.changesRequested.length ? ` · changes requested: ${safeErr(rv.decision.changesRequested.join(", "))}` : ""}`);
         });
       });
     repoOpt(grp.command("checks").description("CI runs and commit statuses of a pull request's head").argument("<number>", "", int))
@@ -1202,9 +1204,9 @@ export function registerLizardGit(git: Command) {
       const r = await resolveRepo(opts.repo);
       const x = await findRelease(r, tag);
       out(x, () => {
-        info(`${chalk.bold(x.name || x.tag)} ${chalk.dim(x.tag)}${x.draft ? " draft" : ""}${x.prerelease ? " pre-release" : ""}  ${x.sha?.slice(0, 7) ?? ""}`);
-        if (x.body) info(`\n${x.body}\n`);
-        for (const a of x.assets ?? []) info(`  ${a.name}  ${a.size} B`);
+        info(`${chalk.bold(safeErr(x.name || x.tag))} ${chalk.dim(safeErr(x.tag))}${x.draft ? " draft" : ""}${x.prerelease ? " pre-release" : ""}  ${x.sha?.slice(0, 7) ?? ""}`);
+        if (x.body) info(`\n${safeErr(x.body)}\n`);
+        for (const a of x.assets ?? []) info(`  ${safeErr(a.name)}  ${a.size} B`);
       });
     });
   repoOpt(release.command("edit").description("Change a release").argument("<tag>"))
